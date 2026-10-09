@@ -9,18 +9,34 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: livingdocs-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   repository-check:
     name: Repository Structure Check
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
 
       - name: Verify README exists
-        run: test -f README.md
+        run: test -s README.md
+
+      - name: Verify workflow file exists
+        run: test -s .github/workflows/ci.yml
 
       - name: Report repository status
-        run: echo "LivingDocs CI ran successfully."
+        run: |
+          echo "LivingDocs CI ran successfully."
+          echo "Repository: $GITHUB_REPOSITORY"
+          echo "Branch or ref: $GITHUB_REF"
+          echo "Commit: $GITHUB_SHA"
