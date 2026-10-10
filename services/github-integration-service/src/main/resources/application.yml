@@ -1,0 +1,40 @@
+server:
+  port: ${SERVER_PORT:8082}
+
+spring:
+  application:
+    name: github-integration-service
+  # Đọc biến bí mật từ file .env (đặt cùng thư mục với pom.xml, KHÔNG commit file này)
+  config:
+    import: optional:file:.env[.properties]
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/github_integration}
+    username: ${DB_USERNAME:livingdocs}
+    password: ${DB_PASSWORD:livingdocs}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+
+github:
+  client-id: ${GITHUB_CLIENT_ID:}
+  client-secret: ${GITHUB_CLIENT_SECRET:}
+  app-slug: ${GITHUB_APP_SLUG:livingdocs-dev-hai}
+  redirect-uri: ${GITHUB_REDIRECT_URI:http://localhost:8082/api/github/callback}
+  oauth-base-url: https://github.com
+  api-base-url: https://api.github.com
+
+security:
+  token-encryption-key: ${TOKEN_ENCRYPTION_KEY:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
