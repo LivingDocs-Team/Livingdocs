@@ -14,6 +14,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 
 import com.cnpm.backend.service.CustomUserDetailsService;
+import com.cnpm.backend.service.GitHubOAuth2UserService;
 
 @Configuration
 public class SecurityConfig {
@@ -44,9 +45,10 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain securityFilterChain(
-            HttpSecurity http,
-            DaoAuthenticationProvider authenticationProvider)
-            throws Exception {
+        HttpSecurity http,
+        DaoAuthenticationProvider authenticationProvider,
+        GitHubOAuth2UserService gitHubOAuth2UserService)
+        throws Exception {
 
         http
             .csrf(csrf -> csrf.disable())
@@ -58,11 +60,18 @@ public class SecurityConfig {
                 .requestMatchers(
                     HttpMethod.POST,
                     "/api/auth/register",
-                    "/api/auth/login"
+                    "/api/auth/login",
+                    "/api/auth/logout"
                 ).permitAll()
                 .requestMatchers("/error").permitAll()
                 .anyRequest().authenticated()
-            );
+            )
+            .oauth2Login(oauth -> oauth
+    .userInfoEndpoint(userInfo -> userInfo
+        .userService(gitHubOAuth2UserService)
+    )
+    .defaultSuccessUrl("/api/auth/oauth2/success", true)
+);
 
         return http.build();
     }
