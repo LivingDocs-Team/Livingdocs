@@ -26,6 +26,9 @@ public class User {
     @Column(nullable = false, unique = true, length = 255)
     private String email;
 
+    @Column(name = "github_id", unique = true, length = 50)
+    private String githubId;
+
     @Column(nullable = false, length = 255)
     private String password;
 
@@ -140,5 +143,13 @@ public class User {
 
     public LocalDateTime getUpdatedAt() {
         return updatedAt;
+    }
+
+    public String getGithubId() {
+        return githubId;
+    }
+
+    public void setGithubId(String githubId) {
+        this.githubId = githubId;
     }
 }
