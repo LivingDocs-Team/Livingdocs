@@ -1,0 +1,16 @@
+# Chạy database cho môi trường dev:  docker compose up -d
+services:
+  postgres:
+    image: postgres:16
+    container_name: livingdocs-github-db
+    environment:
+      POSTGRES_DB: github_integration
+      POSTGRES_USER: livingdocs
+      POSTGRES_PASSWORD: livingdocs
+    ports:
+      - "5433:5432"
+    volumes:
+      - github-db-data:/var/lib/postgresql/data
+
+volumes:
+  github-db-data:
