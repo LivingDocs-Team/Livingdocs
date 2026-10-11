@@ -40,3 +40,46 @@ jobs:
           echo "Repository: $GITHUB_REPOSITORY"
           echo "Branch or ref: $GITHUB_REF"
           echo "Commit: $GITHUB_SHA"
+
+  backend-build-test:
+    name: Backend Build and Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: cnpm
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d cnpm"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '27'
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+
+      - name: Make Maven Wrapper executable
+        run: chmod +x backend/mvnw
+
+      - name: Build and test backend
+        working-directory: backend
+        env:
+          DB_URL: jdbc:postgresql://localhost:5432/cnpm
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
+        run: ./mvnw --batch-mode clean verify
