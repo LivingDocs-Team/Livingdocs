@@ -1,0 +1,117 @@
+﻿services:
+  backend-db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: cnpm
+      POSTGRES_USER: livingdocs
+      POSTGRES_PASSWORD: livingdocs
+    ports:
+      - "5434:5432"
+    volumes:
+      - backend-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U livingdocs -d cnpm"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  github-db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: github_integration
+      POSTGRES_USER: livingdocs
+      POSTGRES_PASSWORD: livingdocs
+    ports:
+      - "5433:5432"
+    volumes:
+      - github-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U livingdocs -d github_integration"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: livingdocs-backend:local
+    ports:
+      - "8080:8080"
+    environment:
+      DB_URL: jdbc:postgresql://backend-db:5432/cnpm
+      DB_USERNAME: livingdocs
+      DB_PASSWORD: livingdocs
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID: ${SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID:-local-placeholder}
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_SECRET: ${SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_SECRET:-local-placeholder}
+    depends_on:
+      backend-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    image: livingdocs-ai:local
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+
+  github-integration:
+    build:
+      context: ./services/github-integration-service
+      dockerfile: Dockerfile
+    image: livingdocs-github-integration:local
+    ports:
+      - "8082:8082"
+    environment:
+      DB_URL: jdbc:postgresql://github-db:5432/github_integration
+      DB_USERNAME: livingdocs
+      DB_PASSWORD: livingdocs
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:?TOKEN_ENCRYPTION_KEY must be set in .env}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-livingdocs-dev-hai}
+      GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-http://localhost:8082/api/github/callback}
+
+    depends_on:
+      github-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8082/actuator/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: livingdocs-frontend:local
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+      - ai-service
+      - github-integration
+
+volumes:
+  backend-db-data:
+  github-db-data:
