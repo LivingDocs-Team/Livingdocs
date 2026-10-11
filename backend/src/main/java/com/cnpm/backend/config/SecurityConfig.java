@@ -58,6 +58,10 @@ public class SecurityConfig {
             )
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(
+                    HttpMethod.GET,
+                    "/actuator/health"
+                ).permitAll()
+                .requestMatchers(
                     HttpMethod.POST,
                     "/api/auth/register",
                     "/api/auth/login",
@@ -66,6 +70,7 @@ public class SecurityConfig {
                 .requestMatchers("/error").permitAll()
                 .anyRequest().authenticated()
             )
+
             .oauth2Login(oauth -> oauth
     .userInfoEndpoint(userInfo -> userInfo
         .userService(gitHubOAuth2UserService)
