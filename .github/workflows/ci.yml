@@ -19,28 +19,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  repository-check:
-    name: Repository Structure Check
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    steps:
-      - name: Checkout source code
-        uses: actions/checkout@v4
-
-      - name: Verify README exists
-        run: test -s README.md
-
-      - name: Verify workflow file exists
-        run: test -s .github/workflows/ci.yml
-
-      - name: Report repository status
-        run: |
-          echo "LivingDocs CI ran successfully."
-          echo "Repository: $GITHUB_REPOSITORY"
-          echo "Branch or ref: $GITHUB_REF"
-          echo "Commit: $GITHUB_SHA"
-
   backend-build-test:
     name: Backend Build and Test
     runs-on: ubuntu-latest
@@ -69,17 +47,54 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '27'
+          java-version: "27"
           cache: maven
           cache-dependency-path: backend/pom.xml
+
+      - name: Verify repository files
+        run: |
+          test -s README.md
+          test -s backend/pom.xml
+          test -s .github/workflows/ci.yml
 
       - name: Make Maven Wrapper executable
         run: chmod +x backend/mvnw
 
       - name: Build and test backend
-        working-directory: backend
         env:
           DB_URL: jdbc:postgresql://localhost:5432/cnpm
           DB_USERNAME: postgres
           DB_PASSWORD: postgres
-        run: ./mvnw --batch-mode clean verify
+        run: ./backend/mvnw --batch-mode --no-transfer-progress -f backend/pom.xml clean verify
+
+      - name: Report CI result
+        if: success()
+        run: echo "LivingDocs backend build and tests passed."
+
+  frontend-build:
+    name: Frontend Build and Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
