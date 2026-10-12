@@ -1,0 +1,85 @@
+{
+  "scope": "repository",
+  "target": "sample-shop",
+  "template_id": "default",
+  "output_language": "vi",
+  "files": [
+    {
+      "path": "shop/services/cart.py",
+      "language": "python",
+      "module": "shop.services",
+      "classes": [
+        {
+          "name": "Cart",
+          "docstring": "Shopping cart of one user.",
+          "methods": [
+            {
+              "name": "add_item",
+              "signature": "def add_item(self, product_id: int, quantity: int = 1) -> None",
+              "parameters": [
+                {"name": "product_id", "type": "int"},
+                {"name": "quantity", "type": "int", "default": "1"}
+              ],
+              "return_type": "None",
+              "source": "def add_item(self, product_id, quantity=1):\n    if quantity <= 0:\n        raise ValueError('quantity must be positive')\n    self.items[product_id] = self.items.get(product_id, 0) + quantity"
+            },
+            {
+              "name": "total",
+              "signature": "def total(self, prices: dict[int, float]) -> float",
+              "parameters": [{"name": "prices", "type": "dict[int, float]"}],
+              "return_type": "float",
+              "source": "def total(self, prices):\n    return sum(prices[p] * q for p, q in self.items.items())"
+            }
+          ]
+        }
+      ],
+      "functions": [
+        {
+          "name": "apply_discount",
+          "signature": "def apply_discount(amount: float, percent: float) -> float",
+          "parameters": [
+            {"name": "amount", "type": "float"},
+            {"name": "percent", "type": "float"}
+          ],
+          "return_type": "float",
+          "docstring": "Return amount after a percentage discount."
+        }
+      ],
+      "endpoints": []
+    },
+    {
+      "path": "shop/api/cart_routes.py",
+      "language": "python",
+      "module": "shop.api",
+      "functions": [
+        {
+          "name": "get_cart",
+          "signature": "def get_cart(user_id: int) -> CartResponse",
+          "parameters": [{"name": "user_id", "type": "int"}],
+          "return_type": "CartResponse"
+        }
+      ],
+      "endpoints": [
+        {
+          "http_method": "GET",
+          "path": "/users/{user_id}/cart",
+          "handler": "get_cart",
+          "parameters": [{"name": "user_id", "type": "int"}],
+          "response": "CartResponse JSON"
+        }
+      ]
+    },
+    {
+      "path": "shop/__init__.py",
+      "language": "python",
+      "status": "empty",
+      "error": "File is empty"
+    },
+    {
+      "path": "frontend/app.rb",
+      "language": "ruby",
+      "status": "unsupported",
+      "error": "Language 'ruby' is not supported"
+    }
+  ]
+}
