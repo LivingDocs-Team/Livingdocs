@@ -18,7 +18,7 @@ app = FastAPI(title="LivingDocs AI Service", version="0.1.0")
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "generator": type(get_generator()).__name__}
+    return {"status": "ok", "generator": get_generator().mode}
 
 
 # ---------- Documentation generation ----------

@@ -40,7 +40,7 @@ def test_generate_file_docs():
 
     md = client.get(f"/jobs/{job_id}/result").text
     for expected in ["UserService", "get_user", "user_id", "hash_password",
-                     "GET /users/{id}", "**Returns:** User"]:
+                     "GET /users/{id}", "**Giá trị trả về:** `User`"]:
         assert expected in md
 
 
