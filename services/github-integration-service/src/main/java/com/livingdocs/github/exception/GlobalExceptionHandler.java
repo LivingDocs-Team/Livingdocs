@@ -1,8 +1,10 @@
 package com.livingdocs.github.exception;
 
 import com.livingdocs.github.dto.ErrorResponse;
+import com.livingdocs.github.sync.RepositorySyncException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -11,6 +13,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import java.time.Duration;
 import java.time.Instant;
 
 @RestControllerAdvice
@@ -21,6 +24,21 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ErrorResponse> handleApi(ApiException e) {
         return build(e.getStatus(), e.getCode(), e.getMessage());
+    }
+
+    /** Lỗi đồng bộ repository (LD-63): mã HTTP lấy theo SyncErrorCode, kèm Retry-After khi bị rate limit. */
+    @ExceptionHandler(RepositorySyncException.class)
+    public ResponseEntity<ErrorResponse> handleSync(RepositorySyncException e) {
+        HttpStatus status = e.getCode().httpStatus();
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(status);
+        if (e.getRetryAt() != null) {
+            long seconds = Math.max(1, Duration.between(Instant.now(), e.getRetryAt()).getSeconds());
+            response.header(HttpHeaders.RETRY_AFTER, String.valueOf(seconds));
+        }
+        if (status.is5xxServerError()) {
+            log.warn("Repository sync failed: {} - {}", e.getCode(), e.getMessage());
+        }
+        return response.body(new ErrorResponse(status.value(), e.getCode().name(), e.getMessage(), Instant.now()));
     }
 
     @ExceptionHandler(GitHubApiException.class)
