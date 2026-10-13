@@ -5,7 +5,7 @@ Tài liệu này để Đăng, Minh, Khôi và Nhân thống nhất **dữ liệ
 | Người | Phần việc | Nằm ở đâu |
 |---|---|---|
 | **Đăng** | Lấy thông tin repo từ GitHub, xử lý lỗi GitHub, kiểm tra dữ liệu trả về | `sync/GitHubRepositoryFetcher` (đã xong, có test) |
-| **Minh** | API bắt đầu đồng bộ và trả kết quả, kiểm tra input, phản hồi API | controller / service gọi `GitHubRepositoryFetcher` |
+| **Minh** | API bắt đầu đồng bộ và trả kết quả, kiểm tra input, phản hồi API | `RepositorySyncController`, `service/RepositorySyncService` (đã có, có test), xem mục 6 |
 | **Khôi** | Frontend hiển thị kết quả và lỗi | dùng JSON ở mục 3 và bảng lỗi ở mục 4 |
 | **Nhân** | Test thành công và thất bại | các kịch bản ở mục 7 |
 
@@ -28,32 +28,16 @@ Mọi dữ liệu đều lấy theo **cùng một commit** (commit mới nhất 
 
 ---
 
-## 2. Cách gọi (cho Minh)
+## 2. Cách gọi
+
+API đồng bộ (mục 6) đã gọi sẵn trong `service/RepositorySyncService`. Muốn lấy dữ liệu ở chỗ khác thì gọi thẳng fetcher:
 
 ```java
-@Service
-public class RepositorySyncService {           // Minh đặt tên tuỳ ý
-    private final GitHubRepositoryFetcher fetcher;
-    private final GitHubConnectionService connectionService;
-    // ...
-
-    public RepositorySnapshot sync(String userId, UUID repositoryId, SyncOptions options) {
-        ConnectedRepository repo = /* tìm repo theo id + kiểm tra repo thuộc user */;
-        GitHubConnection connection = connectionService.getActiveConnection(userId); // tự refresh token
-        try {
-            RepositorySnapshot snapshot = fetcher.fetch(connection.getAccessToken(), repo.getFullName(), options);
-            // gợi ý: cập nhật repo.defaultBranch, repo.lastSyncedAt = snapshot.fetchedAt(), status = CONNECTED
-            return snapshot;
-        } catch (RepositorySyncException e) {
-            if (e.getCode() == SyncErrorCode.TOKEN_INVALID) {
-                connectionService.markInvalid(connection);  // để giao diện nhắc người dùng kết nối lại
-            }
-            // gợi ý: repo.status = ERROR (trừ khi lỗi tạm thời: e.getCode().retryable())
-            throw e;  // GlobalExceptionHandler tự trả JSON lỗi + mã HTTP đúng (mục 4)
-        }
-    }
-}
+RepositorySnapshot snapshot = fetcher.fetch(accessToken, "LivingDocs-Team/Livingdocs",
+        SyncOptions.defaults().withBranch("develop"));
 ```
+
+`RepositorySyncService` lo thêm phần kiểm tra repo thuộc người dùng, trạng thái repo, `lastSyncedAt` và đánh dấu kết nối `INVALID` khi token hỏng.
 
 `SyncOptions` (tạo bằng `SyncOptions.defaults()` rồi `.withBranch(..)`, `.withIncludeContent(..)`, `.withMaxFiles(..)`):
 
@@ -108,7 +92,7 @@ Tham số sai (ví dụ `maxFiles = 0`) sẽ ném `INVALID_REQUEST` (HTTP 400).
 - `files` luôn **sắp xếp theo `path`**. File có `content != null` là file **phân tích được**; trong Java có sẵn `snapshot.analyzableFiles()`.
 - `skipReason`: `NOT_REQUESTED` (không yêu cầu tải nội dung), `TOO_LARGE`, `BINARY`, `UNAVAILABLE` (GitHub không trả được file đó).
 - **Không** có token hay email tác giả trong dữ liệu trả về.
-- Nội dung file có thể nặng (tối đa khoảng 200 file × 200 KB). Gợi ý cho Minh: API cho frontend nên trả **không kèm `content`**, còn nội dung chỉ dùng nội bộ để gửi sang bước phân tích.
+- Nội dung file có thể nặng (tối đa khoảng 200 file × 200 KB). Vì vậy API cho frontend trả **không kèm `content`** (`SyncResultResponse`); nội dung chỉ có ở `/sync/latest/analysis-input` để gửi sang bước phân tích.
 
 ### Cảnh báo (`warnings`): đồng bộ vẫn thành công
 
@@ -127,7 +111,7 @@ Tham số sai (ví dụ `maxFiles = 0`) sẽ ném `INVALID_REQUEST` (HTTP 400).
 
 ## 4. Lỗi: `RepositorySyncException`
 
-`GlobalExceptionHandler` đã tự chuyển lỗi thành JSON. Minh **không cần** tự bắt lỗi trong controller:
+`GlobalExceptionHandler` tự chuyển lỗi thành JSON, controller **không cần** tự bắt lỗi:
 
 ```json
 { "status": 404, "code": "REPOSITORY_NOT_FOUND",
@@ -173,17 +157,36 @@ job → GET /jobs/{id}/result → tài liệu Markdown
 
 ---
 
-## 6. Gợi ý API (Minh quyết định)
+## 6. API đồng bộ
 
-| Method | Endpoint | Gợi ý |
+Code: `controller/RepositorySyncController` và `service/RepositorySyncService`. Mọi API đều cần header `X-User-Id` (cho đến khi có JWT của TV1) và chỉ chủ repo mới gọi được (người khác nhận `403`).
+
+| Method | Endpoint | Trả về |
 |---|---|---|
-| POST | `/api/repositories/{id}/sync` | Body `{ "branch"?: "...", "includeContent"?: true }`. Endpoint này đã có từ LD-58 nhưng mới chỉ cập nhật thông tin repo; Minh thay phần xử lý bằng `fetcher.fetch(...)` |
-| GET | `/api/repositories/{id}/sync/latest` | Kết quả lần đồng bộ gần nhất (bỏ `content` cho nhẹ) |
-| GET | `/api/repositories/{id}/sync/latest/analysis-input` | Trả `AnalysisInput.from(snapshot)`: body gửi thẳng sang service phân tích (mục 5) |
+| POST | `/api/repositories/{id}/sync` | Kết quả đồng bộ, **không kèm `content`** (`docs/samples/sync-api-response.sample.json`) |
+| GET | `/api/repositories/{id}/sync/latest` | Kết quả lần đồng bộ gần nhất, cùng dạng trên. Chưa đồng bộ lần nào thì `404` |
+| GET | `/api/repositories/{id}/sync/latest/analysis-input` | `AnalysisInput.from(snapshot)`: body gửi thẳng sang service phân tích (mục 5) |
 
-Header `X-User-Id` vẫn dùng như các API hiện tại cho đến khi có JWT của TV1.
+Body của `POST /sync` **không bắt buộc**. Bỏ trống hoặc `{}` nghĩa là đồng bộ nhánh mặc định, tối đa 200 file:
 
-**Thời gian:** nội dung file được tải lần lượt, mỗi file 1 lần gọi GitHub. Repo khoảng 100 file nguồn mất chừng 10–30 giây. Nếu thấy chậm, API có thể chạy đồng bộ ở nền: trả `202 Accepted` kèm mã lần đồng bộ, frontend hỏi lại trạng thái. Repo mẫu nhỏ thì gọi thẳng (trả `200`) là được.
+```json
+{ "branch": "develop", "includeContent": true, "maxFiles": 50 }
+```
+
+Body sai định dạng JSON trả `400 BAD_REQUEST`. `maxFiles` ngoài khoảng `1..1000` trả `400 INVALID_REQUEST`. Các lỗi khác xem mục 4.
+
+**Trạng thái repo** (`status` trong `GET /api/repositories/{id}`):
+
+| Lúc | `status` |
+|---|---|
+| Đang gọi GitHub | `SYNCING` |
+| Thành công | `CONNECTED`; cập nhật `lastSyncedAt`, `defaultBranch`, `fullName` (nếu repo đổi tên) |
+| `REPOSITORY_NOT_FOUND`, `ACCESS_DENIED`, `INVALID_REPOSITORY` | `ERROR` |
+| Lỗi khác (rate limit, GitHub lỗi, sai nhánh, token hỏng…) | Giữ trạng thái cũ |
+
+Token hỏng (`TOKEN_INVALID`) thì kết nối GitHub chuyển sang `INVALID`; giao diện nên nhắc người dùng kết nối lại.
+
+**Giới hạn hiện tại:** kết quả gần nhất chỉ giữ trong bộ nhớ, khởi động lại service thì phải đồng bộ lại. Nội dung file được tải lần lượt, mỗi file 1 lần gọi GitHub, nên repo khoảng 100 file nguồn mất chừng 10–30 giây. Repo lớn có thể chuyển sang chạy nền (trả `202 Accepted`, frontend hỏi lại trạng thái) ở sprint sau.
 
 ---
 
@@ -196,5 +199,7 @@ Header `X-User-Id` vẫn dùng như các API hiện tại cho đến khi có JWT
 - ❌ **Lỗi:** tên repo sai (không gọi GitHub), 404, 401, 403, repo bị khoá, rate limit (có thời điểm thử lại), rate limit giữa chừng, repo rỗng (409), nhánh không tồn tại (422), mất mạng, GitHub 5xx, dữ liệu GitHub sai.
 
 `GitHubClientRepositoryApiTest` kiểm tra việc đọc JSON thật của GitHub và nhận diện mã lỗi bằng một HTTP server giả.
+
+`RepositorySyncApiTest` gọi thẳng API (MockMvc, database H2, GitHub giả): đồng bộ thành công và trạng thái `SYNCING` → `CONNECTED`, `lastSyncedAt`, `/sync/latest`, `/sync/latest/analysis-input`, người khác gọi (`403`), repo không tồn tại (`404`), body sai (`400`), nhánh không tồn tại, repo bị xoá trên GitHub (`ERROR`), token hỏng (kết nối `INVALID`), rate limit (`429` + `Retry-After`).
 
 **Chạy thử với GitHub thật** (repo public, không cần token): chạy `GitHubRepositoryFetcherLiveTest` với biến môi trường `GITHUB_LIVE_TEST=true`. Kết quả JSON thật sẽ in ra màn hình.

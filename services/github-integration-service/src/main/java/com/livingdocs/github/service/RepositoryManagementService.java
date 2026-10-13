@@ -21,7 +21,7 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-/** Epic 3 - chọn repo từ GitHub, thêm vào workspace, xem, đồng bộ, ngắt kết nối. */
+/** Epic 3 - chọn repo từ GitHub, thêm vào workspace, xem, ngắt kết nối. Đồng bộ (LD-63): RepositorySyncService. */
 @Service
 public class RepositoryManagementService {
 
@@ -95,34 +95,7 @@ public class RepositoryManagementService {
         repositoryRepository.delete(repo);
     }
 
-    /**
-     * Đồng bộ thủ công: lấy lại thông tin repo từ GitHub (nhánh mặc định...) và cập nhật thời gian đồng bộ.
-     * Sprint sau sẽ mở rộng để kéo cả Pull Request và commit.
-     */
-    @Transactional(noRollbackFor = ApiException.class)
-    public RepositoryResponse sync(String userId, UUID id) {
-        ConnectedRepository repo = find(id);
-        checkOwner(userId, repo);
-        GitHubConnection connection = connectionService.getActiveConnection(userId);
-        try {
-            GitHubRepo latest = gitHubClient.getRepository(connection.getAccessToken(), repo.getFullName());
-            repo.setFullName(latest.fullName());
-            repo.setDefaultBranch(latest.defaultBranch());
-            repo.setPrivateRepo(latest.privateRepo());
-            repo.setHtmlUrl(latest.htmlUrl());
-            repo.setStatus(RepositoryStatus.CONNECTED);
-            repo.setLastSyncedAt(Instant.now());
-        } catch (GitHubApiException e) {
-            if (e.isUnauthorized()) {
-                connectionService.markInvalid(connection);
-                throw ApiException.githubReauthRequired();
-            }
-            repo.setStatus(RepositoryStatus.ERROR);
-            repositoryRepository.save(repo);
-            throw e;
-        }
-        return RepositoryResponse.from(repositoryRepository.save(repo));
-    }
+    // Đồng bộ repo với GitHub (LD-63): xem RepositorySyncService
 
     private List<GitHubRepo> fetchAccessibleRepos(String userId) {
         GitHubConnection connection = connectionService.getActiveConnection(userId);

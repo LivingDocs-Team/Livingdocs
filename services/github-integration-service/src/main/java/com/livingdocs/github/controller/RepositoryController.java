@@ -63,11 +63,7 @@ public class RepositoryController {
         return repositoryService.get(id);
     }
 
-    @PostMapping("/api/repositories/{id}/sync")
-    @Operation(summary = "Đồng bộ lại repo thủ công")
-    public RepositoryResponse sync(@RequestHeader(USER_HEADER) String userId, @PathVariable UUID id) {
-        return repositoryService.sync(userId, id);
-    }
+    // Đồng bộ repo với GitHub (LD-63): xem RepositorySyncController
 
     @DeleteMapping("/api/repositories/{id}")
     @Operation(summary = "Ngắt kết nối (gỡ) repo khỏi workspace")
