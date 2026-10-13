@@ -155,16 +155,21 @@ Trong Java dùng `e.getCode().httpStatus()`, `e.getCode().retryable()` và `e.ge
 ## 5. Chuyển sang bước phân tích code và sinh tài liệu
 
 ```
-RepositorySnapshot.analyzableFiles()
-   │  với mỗi file:  POST /api/v1/analyze   { "code": file.content, "language": file.language }   ← service phân tích (app/)
+RepositorySnapshot
+   │  AnalysisInput.from(snapshot)
+   │  POST /api/v1/analyze-repo  { "scope": "repository", "target": "owner/repo",
+   │                               "files": [{ "path", "language", "content" }] }   ← service phân tích (LD-328, Lâm)
    ▼
-kết quả phân tích từng file (path, language, classes, functions…)
-   │  POST /generate { "scope": "repository", "target": repository.fullName, "files": [...] }      ← ai-service
+{ "scope", "target", "files": [FileAnalysis] }
+   │  gửi nguyên văn sang POST /generate                                          ← ai-service (LD-340, Linh)
    ▼
-tài liệu Markdown
+job → GET /jobs/{id}/result → tài liệu Markdown
 ```
 
-Giá trị `language` (`"java"`, `"python"`) đã viết thường, **khớp đúng** với tham số mà `/api/v1/analyze` cần.
+- **Nội dung file được gửi kèm** trong request. Service phân tích chạy riêng nên không có code của repo trên máy, vì vậy không dùng được `file_paths` (đường dẫn trên máy).
+- ⚠️ Hiện `/api/v1/analyze-repo` mới nhận `file_paths`. **Cần Lâm thêm trường `files`** như trên (đã thử chạy được cả chuỗi với `docs/samples/analysis-input.sample.json`).
+- `AnalysisInput.from(snapshot)` chỉ lấy các file đã có nội dung (`analyzableFiles()`). Giá trị `language` (`"java"`, `"python"`) viết thường, giống service phân tích.
+- Kết quả của service phân tích có đúng dạng `{scope, target, files}` mà `/generate` nhận, nên gửi thẳng được.
 
 ---
 
@@ -174,6 +179,7 @@ Giá trị `language` (`"java"`, `"python"`) đã viết thường, **khớp đ�
 |---|---|---|
 | POST | `/api/repositories/{id}/sync` | Body `{ "branch"?: "...", "includeContent"?: true }`. Endpoint này đã có từ LD-58 nhưng mới chỉ cập nhật thông tin repo; Minh thay phần xử lý bằng `fetcher.fetch(...)` |
 | GET | `/api/repositories/{id}/sync/latest` | Kết quả lần đồng bộ gần nhất (bỏ `content` cho nhẹ) |
+| GET | `/api/repositories/{id}/sync/latest/analysis-input` | Trả `AnalysisInput.from(snapshot)`: body gửi thẳng sang service phân tích (mục 5) |
 
 Header `X-User-Id` vẫn dùng như các API hiện tại cho đến khi có JWT của TV1.
 

@@ -26,7 +26,7 @@ public record SyncOptions(
     public static final int MAX_FILES_LIMIT = 1000;
     public static final long DEFAULT_MAX_FILE_SIZE_BYTES = 200_000;
     public static final int DEFAULT_RECENT_COMMITS = 20;
-    /** Ngôn ngữ mà service phân tích code (POST /api/v1/analyze) đang hỗ trợ. */
+    /** Ngôn ngữ mà service phân tích code (POST /api/v1/analyze-repo) đang hỗ trợ. */
     public static final Set<String> ANALYZER_LANGUAGES = Set.of("java", "python");
 
     public SyncOptions {

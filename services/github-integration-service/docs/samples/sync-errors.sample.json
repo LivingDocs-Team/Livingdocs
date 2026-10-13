@@ -1,0 +1,56 @@
+[
+  {
+    "status": 400,
+    "code": "INVALID_REPOSITORY",
+    "message": "Tên repository không hợp lệ: 'khong-dung-dinh-dang'. Định dạng đúng là owner/repo, ví dụ LivingDocs-Team/Livingdocs.",
+    "timestamp": "2026-10-13T13:00:00Z"
+  },
+  {
+    "status": 401,
+    "code": "TOKEN_INVALID",
+    "message": "Token GitHub không hợp lệ hoặc đã hết hạn. Người dùng cần kết nối lại GitHub.",
+    "timestamp": "2026-10-13T13:00:00Z"
+  },
+  {
+    "status": 403,
+    "code": "ACCESS_DENIED",
+    "message": "GitHub App không có quyền đọc repository LivingDocs-Team/Livingdocs. Hãy cài app cho repo này và cấp quyền Contents (read).",
+    "timestamp": "2026-10-13T13:00:00Z"
+  },
+  {
+    "status": 404,
+    "code": "REPOSITORY_NOT_FOUND",
+    "message": "Không tìm thấy repository LivingDocs-Team/Livingdocs (repo đã bị xoá, đổi tên, hoặc GitHub App chưa được cài cho repo này).",
+    "timestamp": "2026-10-13T13:00:00Z"
+  },
+  {
+    "status": 429,
+    "code": "RATE_LIMITED",
+    "message": "Đã vượt giới hạn số lần gọi GitHub API, thử lại sau ít phút.",
+    "timestamp": "2026-10-13T13:00:00Z"
+  },
+  {
+    "status": 503,
+    "code": "GITHUB_UNAVAILABLE",
+    "message": "Không kết nối được tới GitHub (mất mạng hoặc quá thời gian chờ). Thử lại sau.",
+    "timestamp": "2026-10-13T13:00:00Z"
+  },
+  {
+    "status": 409,
+    "code": "EMPTY_REPOSITORY",
+    "message": "Repository LivingDocs-Team/Livingdocs chưa có commit nào nên không có gì để đồng bộ.",
+    "timestamp": "2026-10-13T13:00:00Z"
+  },
+  {
+    "status": 404,
+    "code": "BRANCH_NOT_FOUND",
+    "message": "Không tìm thấy nhánh 'khong-co' trong repository LivingDocs-Team/Livingdocs.",
+    "timestamp": "2026-10-13T13:00:00Z"
+  },
+  {
+    "status": 400,
+    "code": "INVALID_REQUEST",
+    "message": "maxFiles phải nằm trong khoảng 1..1000",
+    "timestamp": "2026-10-13T13:00:00Z"
+  }
+]
