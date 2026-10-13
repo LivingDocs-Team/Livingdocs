@@ -7,11 +7,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -50,6 +52,20 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({MissingRequestHeaderException.class, MissingServletRequestParameterException.class})
     public ResponseEntity<ErrorResponse> handleMissing(Exception e) {
         return build(HttpStatus.BAD_REQUEST, "BAD_REQUEST", e.getMessage());
+    }
+
+    /** Body không phải JSON hợp lệ, hoặc sai kiểu dữ liệu (ví dụ "maxFiles": "abc"). */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleUnreadable(HttpMessageNotReadableException e) {
+        return build(HttpStatus.BAD_REQUEST, "BAD_REQUEST",
+                "Body không hợp lệ: sai định dạng JSON hoặc sai kiểu dữ liệu.");
+    }
+
+    /** Tham số trên URL sai kiểu, ví dụ id repo không phải UUID. */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
+        return build(HttpStatus.BAD_REQUEST, "BAD_REQUEST",
+                "Tham số '" + e.getName() + "' không hợp lệ: " + e.getValue());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

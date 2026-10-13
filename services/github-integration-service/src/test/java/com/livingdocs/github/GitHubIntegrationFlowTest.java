@@ -3,8 +3,11 @@ package com.livingdocs.github;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.livingdocs.github.client.GitHubClient;
+import com.livingdocs.github.client.GitHubCommit;
 import com.livingdocs.github.client.GitHubRepo;
+import com.livingdocs.github.client.GitHubRepoDetails;
 import com.livingdocs.github.client.GitHubTokenResponse;
+import com.livingdocs.github.client.GitHubTree;
 import com.livingdocs.github.client.GitHubUser;
 import com.livingdocs.github.exception.GitHubApiException;
 import com.livingdocs.github.repository.GitHubConnectionRepository;
@@ -95,12 +98,24 @@ class GitHubIntegrationFlowTest {
                 .andReturn().getResponse().getContentAsString();
         String repoId = json.readTree(listBody).get(0).get("id").asText();
 
-        // Đồng bộ lại: nhánh mặc định đổi trên GitHub
-        when(gitHubClient.getRepository("ghu_token_1", "LivingDocs-Team/livingdocs")).thenReturn(
-                new GitHubRepo(101L, "LivingDocs-Team/livingdocs", false, "develop", REPO_A.htmlUrl()));
+        // Đồng bộ (LD-63): nhánh mặc định đã đổi trên GitHub. Chi tiết các trường hợp: RepositorySyncApiTest
+        String head = "a".repeat(40);
+        String tree = "b".repeat(40);
+        when(gitHubClient.getRepositoryDetails("ghu_token_1", "LivingDocs-Team", "livingdocs")).thenReturn(
+                new GitHubRepoDetails(101L, "livingdocs", "LivingDocs-Team/livingdocs",
+                        new GitHubRepoDetails.Owner("LivingDocs-Team"), null, false, false, false,
+                        "develop", REPO_A.htmlUrl(), "Java", 10L, null));
+        when(gitHubClient.getCommit("ghu_token_1", "LivingDocs-Team", "livingdocs", "develop")).thenReturn(
+                new GitHubCommit(head, null, new GitHubCommit.Detail("init", null, null, new GitHubCommit.TreeRef(tree)), null));
+        when(gitHubClient.getTree("ghu_token_1", "LivingDocs-Team", "livingdocs", tree))
+                .thenReturn(new GitHubTree(tree, false, List.of()));
         mvc.perform(post("/api/repositories/" + repoId + "/sync").header("X-User-Id", user))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.defaultBranch").value("develop"));
+                .andExpect(jsonPath("$.repository.defaultBranch").value("develop"))
+                .andExpect(jsonPath("$.headCommit.sha").value(head));
+        mvc.perform(get("/api/repositories/" + repoId))
+                .andExpect(jsonPath("$.defaultBranch").value("develop"))
+                .andExpect(jsonPath("$.status").value("CONNECTED"));
 
         // Người khác không được gỡ repo của mình
         mvc.perform(delete("/api/repositories/" + repoId).header("X-User-Id", "nguoi-khac"))
