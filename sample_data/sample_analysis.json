@@ -16,7 +16,7 @@
           "methods": [
             {
               "name": "add",
-              "signature": "add(a, b)",
+              "signature": "async def add(self, a: int, b: int) -> int",
               "parameters": [
                 {
                   "name": "a",
@@ -32,13 +32,22 @@
                 }
               ],
               "return_type": "int",
-              "docstring": "Cộng hai số nguyên.",
-              "source": "def add(self, a: int, b: int) -> int:\n    return a + b"
+              "docstring": "Cộng hai số nguyên bất đồng bộ.",
+              "source": "async def add(self, a: int, b: int) -> int:\n    return a + b"
             }
           ]
         }
       ],
-      "functions": [],
+      "functions": [
+        {
+          "name": "get_version",
+          "signature": "def get_version() -> str",
+          "parameters": [],
+          "return_type": "str",
+          "docstring": "Trả về phiên bản dịch vụ.",
+          "source": "def get_version() -> str:\n    return \"1.0.0\""
+        }
+      ],
       "endpoints": []
     },
     {
@@ -47,6 +56,16 @@
       "module": "app.bad_file",
       "status": "invalid",
       "error": "SyntaxError line 3: unexpected indent",
+      "classes": [],
+      "functions": [],
+      "endpoints": []
+    },
+    {
+      "path": "app/empty_file.py",
+      "language": "python",
+      "module": "app.empty_file",
+      "status": "empty",
+      "error": "File rỗng, không có nội dung để phân tích.",
       "classes": [],
       "functions": [],
       "endpoints": []
