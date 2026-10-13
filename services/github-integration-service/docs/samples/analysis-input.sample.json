@@ -1,0 +1,21 @@
+{
+  "scope": "repository",
+  "target": "LivingDocs-Team/Livingdocs",
+  "files": [
+    {
+      "path": "app/analyzer.py",
+      "language": "python",
+      "content": "import ast\nimport javalang\n\nclass ASTAnalyzer:\n    @staticmethod\n    def parse_python_ast(code: str):\n        return ast.parse(code)\n\n    @staticmethod\n    def parse_java_ast(code: str):\n        return javalang.parse.parse(code)\n"
+    },
+    {
+      "path": "app/dependency.py",
+      "language": "python",
+      "content": "import ast\nimport javalang\n\nclass DependencyAnalyzer:\n    @staticmethod\n    def get_python_imports(tree):\n        imports = []\n        for node in ast.walk(tree):\n            if isinstance(node, ast.Import):\n                for alias in node.names:\n                    imports.append(alias.name)\n            elif isinstance(node, ast.ImportFrom):\n                imports.append(node.module)\n        return imports\n\n    @staticmethod\n    def get_java_imports(tree):\n        return [imp.path for imp in tree.imports]\n"
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/dto/LoginRequest.java",
+      "language": "java",
+      "content": "\npackage com.cnpm.backend.dto;\n\nimport jakarta.validation.constraints.Email;\nimport jakarta.validation.constraints.NotBlank;\n\npublic class LoginRequest {\n\n    @NotBlank(message = \"Email is required\")\n    @Email(message = \"Email must be valid\")\n    private String email;\n\n    @NotBlank(message = \"Password is required\")\n    private String password;\n\n    public LoginRequest() {\n    }\n\n    public String getEmail() {\n        return email;\n    }\n\n    public void setEmail(String email) {\n        this.email = email;\n    }\n\n    public String getPassword() {\n        return password;\n    }\n\n    public void setPassword(String password) {\n        this.password = password;\n    }\n}\n"
+    }
+  ]
+}

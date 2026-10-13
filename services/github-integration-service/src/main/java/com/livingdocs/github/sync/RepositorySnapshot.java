@@ -39,7 +39,7 @@ public record RepositorySnapshot(
         warnings = warnings == null ? List.of() : List.copyOf(warnings);
     }
 
-    /** Các file đã có nội dung, sẵn sàng gửi sang service phân tích code (POST /api/v1/analyze). */
+    /** Các file đã có nội dung, sẵn sàng gửi sang service phân tích code (xem {@link AnalysisInput}). */
     public List<SourceFile> analyzableFiles() {
         return files.stream().filter(SourceFile::hasContent).toList();
     }

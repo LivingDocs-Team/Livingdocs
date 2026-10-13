@@ -1,0 +1,465 @@
+{
+  "repository": {
+    "githubRepoId": 870000101,
+    "fullName": "LivingDocs-Team/Livingdocs",
+    "owner": "LivingDocs-Team",
+    "name": "Livingdocs",
+    "description": "BLCK",
+    "privateRepo": false,
+    "archived": false,
+    "defaultBranch": "main",
+    "htmlUrl": "https://github.com/LivingDocs-Team/Livingdocs",
+    "primaryLanguage": "Java",
+    "sizeKb": 512,
+    "pushedAt": "2026-10-12T16:19:13Z"
+  },
+  "branch": "main",
+  "headCommit": {
+    "sha": "51006a4ff6b6e366f42338811fec6acf97624643",
+    "message": "Merge pull request #17 from LivingDocs-Team/LD-369-implement-deployment-pipeline\n\n[LD-369] Add Docker Compose deployment setup",
+    "authorName": "nhanndt750402-max",
+    "authorLogin": "nhanndt750402-max",
+    "committedAt": "2026-10-11T12:25:14Z",
+    "htmlUrl": "https://github.com/LivingDocs-Team/Livingdocs/commit/51006a4ff6b6e366f42338811fec6acf97624643"
+  },
+  "languages": {
+    "Java": 89166,
+    "Python": 25214,
+    "JavaScript": 9615,
+    "CSS": 6350,
+    "Dockerfile": 1175,
+    "HTML": 360
+  },
+  "files": [
+    {
+      "path": "ai-service/app/__init__.py",
+      "language": "python",
+      "size": 0,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "ai-service/app/generator.py",
+      "language": "python",
+      "size": 5730,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "ai-service/app/jobs.py",
+      "language": "python",
+      "size": 2574,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "ai-service/app/models.py",
+      "language": "python",
+      "size": 2947,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "ai-service/app/templates.py",
+      "language": "python",
+      "size": 2930,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "ai-service/main.py",
+      "language": "python",
+      "size": 2965,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "ai-service/tests/test_api.py",
+      "language": "python",
+      "size": 2698,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "app/analyzer.py",
+      "language": "python",
+      "size": 229,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "app/app/main.py",
+      "language": "python",
+      "size": 1073,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "app/app/reader.py",
+      "language": "python",
+      "size": 312,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "app/dependency.py",
+      "language": "python",
+      "size": 515,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "app/extractor.py",
+      "language": "python",
+      "size": 909,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "app/main.py",
+      "language": "python",
+      "size": 1622,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/BackendApplication.java",
+      "language": "java",
+      "size": 311,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/config/SecurityConfig.java",
+      "language": "java",
+      "size": 2919,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/controller/OAuth2SuccessController.java",
+      "language": "java",
+      "size": 1490,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/controller/UserLoginController.java",
+      "language": "java",
+      "size": 3896,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/controller/UserRegistrationController.java",
+      "language": "java",
+      "size": 1785,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/dto/LoginRequest.java",
+      "language": "java",
+      "size": 675,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/dto/RegisterRequest.java",
+      "language": "java",
+      "size": 1698,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/entity/User.java",
+      "language": "java",
+      "size": 3528,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/repository/UserRepository.java",
+      "language": "java",
+      "size": 428,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/service/CustomUserDetailsService.java",
+      "language": "java",
+      "size": 1190,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/service/GitHubOAuth2UserService.java",
+      "language": "java",
+      "size": 4365,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/service/UserRegistrationService.java",
+      "language": "java",
+      "size": 1612,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/test/java/com/cnpm/backend/BackendApplicationTests.java",
+      "language": "java",
+      "size": 209,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/GithubIntegrationServiceApplication.java",
+      "language": "java",
+      "size": 470,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/client/GitHubClient.java",
+      "language": "java",
+      "size": 7691,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/client/GitHubRepo.java",
+      "language": "java",
+      "size": 465,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/client/GitHubTokenResponse.java",
+      "language": "java",
+      "size": 794,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/client/GitHubUser.java",
+      "language": "java",
+      "size": 198,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/config/GitHubProperties.java",
+      "language": "java",
+      "size": 858,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/config/OpenApiConfig.java",
+      "language": "java",
+      "size": 856,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/controller/GitHubConnectionController.java",
+      "language": "java",
+      "size": 2910,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/controller/RepositoryController.java",
+      "language": "java",
+      "size": 3463,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/dto/AddRepositoriesRequest.java",
+      "language": "java",
+      "size": 246,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/dto/AuthorizeUrlResponse.java",
+      "language": "java",
+      "size": 415,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/dto/AvailableRepositoryResponse.java",
+      "language": "java",
+      "size": 295,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/dto/CallbackResponse.java",
+      "language": "java",
+      "size": 107,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/dto/ConnectionResponse.java",
+      "language": "java",
+      "size": 463,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/dto/ErrorResponse.java",
+      "language": "java",
+      "size": 155,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/dto/RepositoryResponse.java",
+      "language": "java",
+      "size": 774,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/entity/ConnectedRepository.java",
+      "language": "java",
+      "size": 3096,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/entity/ConnectionStatus.java",
+      "language": "java",
+      "size": 334,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/entity/GitHubConnection.java",
+      "language": "java",
+      "size": 3160,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/entity/RepositoryStatus.java",
+      "language": "java",
+      "size": 128,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/exception/ApiException.java",
+      "language": "java",
+      "size": 1488,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/exception/GitHubApiException.java",
+      "language": "java",
+      "size": 578,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/exception/GlobalExceptionHandler.java",
+      "language": "java",
+      "size": 2195,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/repository/ConnectedRepositoryRepository.java",
+      "language": "java",
+      "size": 556,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/repository/GitHubConnectionRepository.java",
+      "language": "java",
+      "size": 366,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/security/EncryptedStringConverter.java",
+      "language": "java",
+      "size": 868,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/security/OAuthStateStore.java",
+      "language": "java",
+      "size": 2047,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/security/TokenEncryptor.java",
+      "language": "java",
+      "size": 3504,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/service/GitHubConnectionService.java",
+      "language": "java",
+      "size": 8310,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/service/RepositoryManagementService.java",
+      "language": "java",
+      "size": 6809,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/test/java/com/livingdocs/github/GitHubIntegrationFlowTest.java",
+      "language": "java",
+      "size": 8519,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/test/java/com/livingdocs/github/security/OAuthStateStoreTest.java",
+      "language": "java",
+      "size": 1481,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/test/java/com/livingdocs/github/security/TokenEncryptorTest.java",
+      "language": "java",
+      "size": 1461,
+      "analyzable": true,
+      "skipReason": null
+    },
+    {
+      "path": "tests/test_analysis.py",
+      "language": "python",
+      "size": 710,
+      "analyzable": true,
+      "skipReason": null
+    }
+  ],
+  "stats": {
+    "totalFilesInRepo": 106,
+    "filesSelected": 60,
+    "filesWithContent": 60,
+    "filesIgnored": 46,
+    "treeTruncated": false,
+    "fileLimitReached": false
+  },
+  "warnings": [],
+  "syncedAt": "2026-10-13T13:00:00Z"
+}
