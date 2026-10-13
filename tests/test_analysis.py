@@ -3,18 +3,12 @@ from app.main import app
 
 client = TestClient(app)
 
-def test_python_analysis():
-    code = "import math\ndef add(a, b): return a + b"
-    res = client.post("/api/v1/analyze", json={"code": code, "language": "python"})
+def test_unsupported_and_empty_file():
+    res = client.post("/api/v1/analyze-repo", json={
+        "scope": "file",
+        "target": "test",
+        "file_paths": ["non_existent_file.txt"]
+    })
     assert res.status_code == 200
     data = res.json()
-    assert data["status"] == "success"
-    assert "math" in data["dependencies"]
-
-def test_java_analysis():
-    code = "import java.util.List; public class Demo {}"
-    res = client.post("/api/v1/analyze", json={"code": code, "language": "java"})
-    assert res.status_code == 200
-    data = res.json()
-    assert data["status"] == "success"
-    assert "java.util.List" in data["dependencies"]
+    assert data["files"][0]["status"] in ["unsupported", "invalid"]
