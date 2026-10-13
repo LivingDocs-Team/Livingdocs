@@ -1,0 +1,55 @@
+{
+  "scope": "file",
+  "target": "demo_project",
+  "files": [
+    {
+      "path": "app/services/calculator.py",
+      "language": "python",
+      "module": "app.services.calculator",
+      "status": "ok",
+      "error": null,
+      "classes": [
+        {
+          "name": "CalculatorService",
+          "bases": [],
+          "docstring": "Service thực hiện các phép tính toán học cơ bản.",
+          "methods": [
+            {
+              "name": "add",
+              "signature": "add(a, b)",
+              "parameters": [
+                {
+                  "name": "a",
+                  "type": "int",
+                  "default": null,
+                  "description": "Số thứ nhất"
+                },
+                {
+                  "name": "b",
+                  "type": "int",
+                  "default": null,
+                  "description": "Số thứ hai"
+                }
+              ],
+              "return_type": "int",
+              "docstring": "Cộng hai số nguyên.",
+              "source": "def add(self, a: int, b: int) -> int:\n    return a + b"
+            }
+          ]
+        }
+      ],
+      "functions": [],
+      "endpoints": []
+    },
+    {
+      "path": "app/bad_file.py",
+      "language": "python",
+      "module": "app.bad_file",
+      "status": "invalid",
+      "error": "SyntaxError line 3: unexpected indent",
+      "classes": [],
+      "functions": [],
+      "endpoints": []
+    }
+  ]
+}
