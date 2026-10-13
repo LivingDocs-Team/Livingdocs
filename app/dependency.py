@@ -10,9 +10,10 @@ class DependencyAnalyzer:
                 for alias in node.names:
                     imports.append(alias.name)
             elif isinstance(node, ast.ImportFrom):
-                imports.append(node.module)
-        return imports
+                if node.module:
+                    imports.append(node.module)
+        return list(set(imports))
 
     @staticmethod
     def get_java_imports(tree):
-        return [imp.path for imp in tree.imports]
+        return list(set([imp.path for imp in tree.imports]))
