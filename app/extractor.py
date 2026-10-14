@@ -2,12 +2,10 @@ import ast
 import javalang
 from app.models import ClassInfo, Function, Parameter, Endpoint
 
-# Hỗ trợ cả hàm def thường và async def để không bị bỏ sót
 FUNC_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
 MAX_SOURCE_CHARS = 1500
 
 def _ann(node):
-    """Trích xuất kiểu dữ liệu phức tạp (dict[int, float], Optional[str]...)"""
     return ast.unparse(node) if node is not None else None
 
 def parse_py_func(node, lines, is_method=False) -> Function:
@@ -16,22 +14,18 @@ def parse_py_func(node, lines, is_method=False) -> Function:
     defaults = [None] * (len(positional) - len(a.defaults)) + [ast.unparse(d) for d in a.defaults]
 
     params = []
-    # Xử lý tham số vị trí
     for arg, default in zip(positional, defaults):
         if is_method and arg.arg in ("self", "cls"):
             continue
         params.append(Parameter(name=arg.arg, type=_ann(arg.annotation), default=default))
     
-    # Xử lý *args
     if a.vararg:
         params.append(Parameter(name="*" + a.vararg.arg, type=_ann(a.vararg.annotation)))
         
-    # Xử lý keyword-only args
     for arg, d in zip(a.kwonlyargs, a.kw_defaults):
         params.append(Parameter(name=arg.arg, type=_ann(arg.annotation),
                                 default=ast.unparse(d) if d is not None else None))
                                 
-    # Xử lý **kwargs
     if a.kwarg:
         params.append(Parameter(name="**" + a.kwarg.arg, type=_ann(a.kwarg.annotation)))
 
@@ -39,9 +33,13 @@ def parse_py_func(node, lines, is_method=False) -> Function:
     returns = _ann(node.returns)
     signature = f"{prefix} {node.name}({ast.unparse(a)})" + (f" -> {returns}" if returns else "")
 
+    # Lấy thông tin dòng bắt đầu và kết thúc
+    lineno = getattr(node, "lineno", None)
+    end_lineno = getattr(node, "end_lineno", None)
+
     source = None
-    if lines:
-        source = "\n".join(lines[node.lineno - 1: node.end_lineno])[:MAX_SOURCE_CHARS]
+    if lines and lineno is not None and end_lineno is not None:
+        source = "\n".join(lines[lineno - 1 : end_lineno])[:MAX_SOURCE_CHARS]
 
     return Function(
         name=node.name, 
@@ -49,7 +47,9 @@ def parse_py_func(node, lines, is_method=False) -> Function:
         parameters=params,
         return_type=returns, 
         docstring=ast.get_docstring(node), 
-        source=source
+        source=source,
+        lineno=lineno,
+        end_lineno=end_lineno
     )
 
 class EntityExtractor:
@@ -62,11 +62,9 @@ class EntityExtractor:
         lines = full_code.splitlines() if full_code else []
 
         for node in ast.iter_child_nodes(tree):
-            # Dùng FUNC_TYPES để bắt cả hàm async lẫn sync
             if isinstance(node, FUNC_TYPES):
                 functions.append(parse_py_func(node, lines))
             
-            # Lớp (Class)
             elif isinstance(node, ast.ClassDef):
                 methods = []
                 for item in node.body:
