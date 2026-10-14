@@ -185,10 +185,10 @@ def test_job_fails_when_no_file_can_be_documented():
 
 def test_one_crashing_file_does_not_stop_the_job():
     class Boom(DocGenerator):
-        def document_file(self, f, tpl, lang):
+        def document_file(self, f, tpl, lang, retrieved=None):
             if f.path == "crash.py":
                 raise KeyError("boom")
-            return super().document_file(f, tpl, lang)
+            return super().document_file(f, tpl, lang, retrieved)
 
     job = _run({"scope": "module", "target": "m", "files": [
         {"path": "crash.py"}, FILE.model_dump()]}, Boom(None))

@@ -5,7 +5,8 @@ Usage (from the ai-service folder):
     python scripts/run_sample.py path/to/analysis.json  # e.g. real output from LD-328
 
 Uses Claude when ANTHROPIC_API_KEY is set, otherwise the offline generator.
-Writes the Markdown to output.md and prints the job status and warnings.
+Writes the Markdown to output.md and the evidence/confidence report to report.json,
+and prints the job status, confidence and warnings.
 """
 import json
 import sys
@@ -23,8 +24,10 @@ run_job(job.id, req)
 job = jobs.get(job.id)
 
 print(f"Status : {job.status.value} - {job.message}")
+print(f"Confidence: {job.confidence} ({job.confidence_level.value if job.confidence_level else '-'})")
 for r in job.file_results:
-    print(f"  {r.status.value:<9} {r.path}")
+    conf = f"{r.confidence:.2f}" if r.confidence is not None else "  - "
+    print(f"  {r.status.value:<9} {conf}  {r.path}")
 for w in job.warnings:
     print(f"  ! {w}")
 if job.error:
@@ -32,3 +35,7 @@ if job.error:
 if job.result:
     Path("output.md").write_text(job.result, encoding="utf-8")
     print("Markdown written to output.md")
+report = jobs.get_report(job.id)
+if report:
+    Path("report.json").write_text(report.model_dump_json(indent=2), encoding="utf-8")
+    print("Evidence/confidence report written to report.json")

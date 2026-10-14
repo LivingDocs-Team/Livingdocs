@@ -17,20 +17,38 @@
               "name": "add_item",
               "signature": "def add_item(self, product_id: int, quantity: int = 1) -> None",
               "parameters": [
-                {"name": "product_id", "type": "int"},
-                {"name": "quantity", "type": "int", "default": "1"}
+                {
+                  "name": "product_id",
+                  "type": "int"
+                },
+                {
+                  "name": "quantity",
+                  "type": "int",
+                  "default": "1"
+                }
               ],
               "return_type": "None",
-              "source": "def add_item(self, product_id, quantity=1):\n    if quantity <= 0:\n        raise ValueError('quantity must be positive')\n    self.items[product_id] = self.items.get(product_id, 0) + quantity"
+              "source": "def add_item(self, product_id, quantity=1):\n    if quantity <= 0:\n        raise ValueError('quantity must be positive')\n    self.items[product_id] = self.items.get(product_id, 0) + quantity",
+              "line_start": 7,
+              "line_end": 12
             },
             {
               "name": "total",
               "signature": "def total(self, prices: dict[int, float]) -> float",
-              "parameters": [{"name": "prices", "type": "dict[int, float]"}],
+              "parameters": [
+                {
+                  "name": "prices",
+                  "type": "dict[int, float]"
+                }
+              ],
               "return_type": "float",
-              "source": "def total(self, prices):\n    return sum(prices[p] * q for p, q in self.items.items())"
+              "source": "def total(self, prices):\n    return sum(prices[p] * q for p, q in self.items.items())",
+              "line_start": 14,
+              "line_end": 16
             }
-          ]
+          ],
+          "line_start": 4,
+          "line_end": 22
         }
       ],
       "functions": [
@@ -38,11 +56,19 @@
           "name": "apply_discount",
           "signature": "def apply_discount(amount: float, percent: float) -> float",
           "parameters": [
-            {"name": "amount", "type": "float"},
-            {"name": "percent", "type": "float"}
+            {
+              "name": "amount",
+              "type": "float"
+            },
+            {
+              "name": "percent",
+              "type": "float"
+            }
           ],
           "return_type": "float",
-          "docstring": "Return amount after a percentage discount."
+          "docstring": "Return amount after a percentage discount.",
+          "line_start": 25,
+          "line_end": 27
         }
       ],
       "endpoints": []
@@ -55,8 +81,15 @@
         {
           "name": "get_cart",
           "signature": "def get_cart(user_id: int) -> CartResponse",
-          "parameters": [{"name": "user_id", "type": "int"}],
-          "return_type": "CartResponse"
+          "parameters": [
+            {
+              "name": "user_id",
+              "type": "int"
+            }
+          ],
+          "return_type": "CartResponse",
+          "line_start": 9,
+          "line_end": 12
         }
       ],
       "endpoints": [
@@ -64,8 +97,14 @@
           "http_method": "GET",
           "path": "/users/{user_id}/cart",
           "handler": "get_cart",
-          "parameters": [{"name": "user_id", "type": "int"}],
-          "response": "CartResponse JSON"
+          "parameters": [
+            {
+              "name": "user_id",
+              "type": "int"
+            }
+          ],
+          "response": "CartResponse JSON",
+          "line_start": 8
         }
       ]
     },
@@ -80,6 +119,13 @@
       "language": "ruby",
       "status": "unsupported",
       "error": "Language 'ruby' is not supported"
+    }
+  ],
+  "context": [
+    {
+      "path": "docs/cart.md",
+      "title": "Giỏ hàng",
+      "content": "# Giỏ hàng\n\n## Thêm sản phẩm\n\nNgười dùng thêm sản phẩm vào giỏ với số lượng lớn hơn 0. Cart lưu số lượng theo product_id.\n\n## Tổng tiền\n\nTổng tiền giỏ hàng được tính từ bảng giá hiện hành; có thể áp dụng giảm giá theo phần trăm.\n\n## Triển khai\n\nDịch vụ chạy bằng Docker Compose.\n"
     }
   ]
 }

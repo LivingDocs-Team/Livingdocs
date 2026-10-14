@@ -1,7 +1,10 @@
 """Prompt design for documentation generation (LD-340)."""
 import json
 
+from typing import Optional
+
 from .doc_schema import EXAMPLE_JSON
+from .evidence import EvidenceCatalog, location
 from .models import FileAnalysis, Template
 
 MAX_SOURCE_CHARS = 1500       # per function/method snippet
@@ -22,7 +25,14 @@ Rules:
    If the purpose cannot be determined, say so briefly instead of guessing.
 5. Keep each description short and factual: 1-2 sentences for summaries,
    one sentence for parameters and return values.
-6. Write all descriptions in the language requested by the user."""
+6. Write all descriptions in the language requested by the user.
+7. Evidence: for every item put in "evidence" the ids of the catalog entries that support
+   what you wrote — always the item's own E id, plus any C (related code) or D
+   (existing documentation) entry you actually used. Cite only ids from the catalog.
+8. Retrieved code and documentation are context only: use them to explain purpose and
+   relationships, but never document an entity that is not in the analysis.
+9. "confidence" (0.0-1.0) = how sure you are the description is correct given the
+   evidence. Use low values when you had to infer the purpose."""
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -51,13 +61,38 @@ def compact_analysis(f: FileAnalysis) -> str:
     return text
 
 
-def build_file_prompt(f: FileAnalysis, tpl: Template, lang: str) -> str:
-    return (
+def evidence_section(cat: EvidenceCatalog) -> str:
+    """Catalog listing: the file's own entities (E) + retrieved code (C) and docs (D)."""
+    lines = ["Own code (cite the item's own id):"]
+    lines += [f"- {ev.id}: {ev.name} ({location(ev)})" for ev in cat.own.values()]
+    code = [ev for ev in cat.retrieved if ev.kind.value == "code"]
+    docs = [ev for ev in cat.retrieved if ev.kind.value == "doc"]
+    if code:
+        lines.append("\nRelated code from other files:")
+        for ev in code:
+            lines.append(f"- {ev.id}: {ev.name} ({location(ev)})\n  {_indent(ev.excerpt)}")
+    if docs:
+        lines.append("\nExisting documentation:")
+        for ev in docs:
+            lines.append(f"- {ev.id}: {ev.name} ({location(ev)})\n  {_indent(ev.excerpt)}")
+    return "\n".join(lines)
+
+
+def _indent(text: Optional[str]) -> str:
+    return (text or "").replace("\n", "\n  ")
+
+
+def build_file_prompt(f: FileAnalysis, tpl: Template, lang: str,
+                      catalog: Optional[EvidenceCatalog] = None) -> str:
+    prompt = (
         f"Language for all descriptions: {LANGUAGE_NAMES.get(lang, lang)}\n\n"
         f"Documentation style (from template '{tpl.name}'):\n{tpl.instructions}\n\n"
         f"Return JSON with exactly this shape (lists may be empty):\n{EXAMPLE_JSON}\n\n"
         f"Code analysis of file '{f.path}':\n{compact_analysis(f)}"
     )
+    if catalog is not None:
+        prompt += f"\n\nEvidence catalog:\n{evidence_section(catalog)}"
+    return prompt
 
 
 def build_repair_prompt(error: str) -> str:

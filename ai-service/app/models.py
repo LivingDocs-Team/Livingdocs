@@ -1,7 +1,7 @@
 """Data models: input from the code analyzer (LD-328), templates, and generation jobs."""
 from datetime import datetime, timezone
 from enum import Enum
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -28,6 +28,8 @@ class Function(BaseModel):
     return_type: Optional[str] = None
     docstring: Optional[str] = None
     source: Optional[str] = None  # optional code snippet, helps the AI explain logic
+    line_start: Optional[int] = Field(default=None, ge=1)  # location in the file (evidence)
+    line_end: Optional[int] = Field(default=None, ge=1)
 
 
 class ClassInfo(BaseModel):
@@ -35,6 +37,8 @@ class ClassInfo(BaseModel):
     bases: List[str] = Field(default_factory=list)
     docstring: Optional[str] = None
     methods: List[Function] = Field(default_factory=list)
+    line_start: Optional[int] = Field(default=None, ge=1)
+    line_end: Optional[int] = Field(default=None, ge=1)
 
 
 class Endpoint(BaseModel):
@@ -44,6 +48,8 @@ class Endpoint(BaseModel):
     parameters: List[Parameter] = Field(default_factory=list)
     request_body: Optional[str] = None
     response: Optional[str] = None
+    line_start: Optional[int] = Field(default=None, ge=1)
+    line_end: Optional[int] = Field(default=None, ge=1)
 
     @field_validator("http_method")
     @classmethod
@@ -76,6 +82,13 @@ class FileAnalysis(BaseModel):
         return len(self.classes) + methods + len(self.functions) + len(self.endpoints)
 
 
+class ContextDocument(BaseModel):
+    """Existing documentation used as context (README, design notes, wiki pages)."""
+    path: str = Field(min_length=1)
+    title: Optional[str] = None
+    content: str = Field(max_length=200_000)
+
+
 class Scope(str, Enum):
     file = "file"
     module = "module"
@@ -88,6 +101,7 @@ class GenerateRequest(BaseModel):
     files: List[FileAnalysis] = Field(min_length=1)
     template_id: str = "default"
     output_language: str = "vi"                # "vi" or "en"
+    context: List[ContextDocument] = Field(default_factory=list)  # existing docs to ground on
 
     @field_validator("output_language")
     @classmethod
@@ -142,6 +156,57 @@ class FileResult(BaseModel):
     path: str
     status: FileResultStatus
     message: Optional[str] = None
+    confidence: Optional[float] = None        # 0.0 -> 1.0, see app/confidence.py
+
+
+# ---------- Evidence and confidence report ----------
+
+class EvidenceKind(str, Enum):
+    source = "source"   # the entity's own code in the analyzed file
+    code = "code"       # related code retrieved from another file
+    doc = "doc"         # a passage of existing documentation (request.context)
+
+
+class Evidence(BaseModel):
+    id: str                                   # E1, C1, D1 ... as cited by the AI
+    kind: EvidenceKind
+    path: str
+    name: Optional[str] = None                # entity name or document title
+    line_start: Optional[int] = None
+    line_end: Optional[int] = None
+    excerpt: Optional[str] = None             # short snippet shown to reviewers
+
+
+class ConfidenceLevel(str, Enum):
+    high = "high"
+    medium = "medium"
+    low = "low"
+
+
+class EntityReport(BaseModel):
+    kind: str                                 # class | method | function | endpoint
+    name: str
+    confidence: float
+    level: ConfidenceLevel
+    evidence: List[Evidence] = Field(default_factory=list)
+    factors: Dict[str, float] = Field(default_factory=dict)
+
+
+class FileReport(BaseModel):
+    path: str
+    status: FileResultStatus
+    confidence: Optional[float] = None
+    level: Optional[ConfidenceLevel] = None
+    entities: List[EntityReport] = Field(default_factory=list)
+    context_used: List[Evidence] = Field(default_factory=list)  # retrieved C/D items cited
+
+
+class JobReport(BaseModel):
+    job_id: str
+    confidence: Optional[float] = None
+    level: Optional[ConfidenceLevel] = None
+    method: str = ""                          # how the score is computed (human readable)
+    files: List[FileReport] = Field(default_factory=list)
 
 
 class Job(BaseModel):
@@ -156,6 +221,8 @@ class Job(BaseModel):
     files_done: int = 0
     file_results: List[FileResult] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+    confidence: Optional[float] = None
+    confidence_level: Optional[ConfidenceLevel] = None
     result: Optional[str] = None      # generated Markdown
     error: Optional[str] = None
     created_at: datetime = Field(default_factory=now)
