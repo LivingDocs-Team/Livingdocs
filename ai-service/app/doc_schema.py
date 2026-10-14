@@ -7,9 +7,33 @@ output format identical for every file and prevents invented classes/functions.
 """
 import json
 import re
-from typing import List
+from typing import List, Optional
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
+
+
+class _Cited(BaseModel):
+    """Fields every described item carries: cited evidence ids + the AI's self-assessment."""
+    evidence: List[str] = Field(default_factory=list)   # e.g. ["E3", "D1"]
+    confidence: Optional[float] = None                  # 0.0 -> 1.0, AI's own estimate
+
+    @field_validator("evidence", mode="before")
+    @classmethod
+    def _ids(cls, v):
+        if v is None:
+            return []
+        if isinstance(v, str):
+            v = [v]
+        return [str(x) for x in v if str(x).strip()] if isinstance(v, list) else []
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _clamp(cls, v):
+        # a bad self-score must not make the whole answer invalid: ignore it
+        try:
+            return None if v is None else max(0.0, min(1.0, float(v)))
+        except (TypeError, ValueError):
+            return None
 
 
 class ParamDoc(BaseModel):
@@ -17,20 +41,20 @@ class ParamDoc(BaseModel):
     description: str = ""
 
 
-class FunctionDoc(BaseModel):
+class FunctionDoc(_Cited):
     name: str
     summary: str = ""
     parameters: List[ParamDoc] = Field(default_factory=list)
     returns: str = ""
 
 
-class ClassDoc(BaseModel):
+class ClassDoc(_Cited):
     name: str
     summary: str = ""
     methods: List[FunctionDoc] = Field(default_factory=list)
 
 
-class EndpointDoc(BaseModel):
+class EndpointDoc(_Cited):
     method: str
     path: str
     summary: str = ""
@@ -38,6 +62,7 @@ class EndpointDoc(BaseModel):
 
 class FileDoc(BaseModel):
     overview: str = ""
+    overview_evidence: List[str] = Field(default_factory=list)
     classes: List[ClassDoc] = Field(default_factory=list)
     functions: List[FunctionDoc] = Field(default_factory=list)
     endpoints: List[EndpointDoc] = Field(default_factory=list)
@@ -76,14 +101,19 @@ def parse_file_doc(text: str) -> FileDoc:
 EXAMPLE_JSON = json.dumps(
     {
         "overview": "1-3 sentences about the purpose of the file.",
+        "overview_evidence": ["E1", "D1"],
         "classes": [{
             "name": "ClassName",
             "summary": "What the class represents / is responsible for.",
+            "evidence": ["E1"],
+            "confidence": 0.9,
             "methods": [{
                 "name": "method_name",
                 "summary": "What the method does.",
                 "parameters": [{"name": "param", "description": "Meaning of the parameter."}],
                 "returns": "Meaning of the return value.",
+                "evidence": ["E2", "C1"],
+                "confidence": 0.8,
             }],
         }],
         "functions": [{
@@ -91,8 +121,11 @@ EXAMPLE_JSON = json.dumps(
             "summary": "...",
             "parameters": [{"name": "param", "description": "..."}],
             "returns": "...",
+            "evidence": ["E3"],
+            "confidence": 0.7,
         }],
-        "endpoints": [{"method": "GET", "path": "/items/{id}", "summary": "..."}],
+        "endpoints": [{"method": "GET", "path": "/items/{id}", "summary": "...",
+                       "evidence": ["E4", "D2"], "confidence": 0.6}],
     },
     indent=2,
 )

@@ -8,7 +8,9 @@ Failure handling:
   - AI returns invalid JSON / wrong shape          -> retry with a repair prompt
   - still failing after all attempts               -> fallback: render from analysis
                                                       data only (docstrings), status=fallback
-Without ANTHROPIC_API_KEY the generator runs in offline mode (no AI).
+Each file also gets an evidence catalog (its own code + retrieved related code and
+documentation, see retrieval.py / evidence.py) and a confidence score per entity
+(confidence.py). Without ANTHROPIC_API_KEY the generator runs in offline mode (no AI).
 """
 import logging
 import os
@@ -17,9 +19,12 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Protocol
 
 from .doc_schema import FileDoc, InvalidAIOutput, parse_file_doc
-from .models import FileAnalysis, FileResultStatus, Template
+from .confidence import average, level_of, score_entity
+from .evidence import EvidenceCatalog, build_catalog, entities
+from .models import FileAnalysis, FileReport, FileResultStatus, Template
 from .prompts import SYSTEM_PROMPT, build_file_prompt, build_repair_prompt
-from .renderer import missing_entities, render_file, unknown_entities
+from .renderer import doc_items, missing_entities, render_file, unknown_entities
+from .retrieval import Retrieved
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +57,11 @@ class FileDocResult:
     markdown: str
     status: FileResultStatus
     warnings: List[str] = field(default_factory=list)
+    report: Optional[FileReport] = None
+
+    @property
+    def confidence(self) -> Optional[float]:
+        return self.report.confidence if self.report else None
 
 
 class DocGenerator:
@@ -65,23 +75,25 @@ class DocGenerator:
     def mode(self) -> str:
         return "ai" if self.client else "offline"
 
-    def document_file(self, f: FileAnalysis, tpl: Template, lang: str) -> FileDocResult:
+    def document_file(self, f: FileAnalysis, tpl: Template, lang: str,
+                      retrieved: Optional[Retrieved] = None) -> FileDocResult:
+        catalog = build_catalog(f, retrieved)
         if self.client is None:
-            return FileDocResult(render_file(f, FileDoc(), tpl, lang), FileResultStatus.offline)
+            return self._finish(f, FileDoc(), False, FileResultStatus.offline, catalog, tpl, lang, [])
 
         if f.entity_count() == 0:
             # nothing for the AI to describe; avoid a pointless call
-            return FileDocResult(render_file(f, FileDoc(), tpl, lang), FileResultStatus.generated)
+            return self._finish(f, FileDoc(), True, FileResultStatus.generated, catalog, tpl, lang, [])
 
         warnings: List[str] = []
-        doc = self._ask_with_retries(f, tpl, lang, warnings)
+        doc = self._ask_with_retries(f, tpl, lang, catalog, warnings)
         if doc is None:
             warnings.append(
                 f"{f.path}: AI did not return a valid result after {self.max_attempts} "
                 "attempt(s); documentation was built from analysis data only."
             )
-            return FileDocResult(render_file(f, FileDoc(), tpl, lang),
-                                 FileResultStatus.fallback, warnings)
+            return self._finish(f, FileDoc(), False, FileResultStatus.fallback, catalog, tpl, lang,
+                                warnings)
 
         missing = missing_entities(f, doc)
         if missing:
@@ -89,11 +101,34 @@ class DocGenerator:
         extra = unknown_entities(f, doc)
         if extra:
             warnings.append(f"{f.path}: ignored entities not in the analysis: {', '.join(extra)}.")
-        return FileDocResult(render_file(f, doc, tpl, lang), FileResultStatus.generated, warnings)
+        return self._finish(f, doc, True, FileResultStatus.generated, catalog, tpl, lang, warnings)
+
+    def _finish(self, f: FileAnalysis, doc: FileDoc, ai_mode: bool, status: FileResultStatus,
+                catalog: EvidenceCatalog, tpl: Template, lang: str,
+                warnings: List[str]) -> FileDocResult:
+        """Score every entity, attach evidence, render Markdown."""
+        items = doc_items(doc)
+        reports = [score_entity(ent, items.get(ent.key), catalog, ai_mode) for ent in entities(f)]
+        by_key = {r.name: r for r in reports}
+
+        cited_ids: List[str] = list(doc.overview_evidence)
+        for item in items.values():
+            cited_ids += item.evidence
+        found, unknown = catalog.resolve(cited_ids)
+        if unknown:
+            warnings.append(f"{f.path}: ignored citations not in the evidence catalog: "
+                            f"{', '.join(sorted(set(unknown)))}.")
+        context_used = [e for e in found if e.kind.value != "source"]
+
+        file_conf = average([r.confidence for r in reports])
+        report = FileReport(path=f.path, status=status, confidence=file_conf,
+                            level=level_of(file_conf), entities=reports, context_used=context_used)
+        md = render_file(f, doc, tpl, lang, by_key, file_conf, context_used)
+        return FileDocResult(md, status, warnings, report)
 
     def _ask_with_retries(self, f: FileAnalysis, tpl: Template, lang: str,
-                          warnings: List[str]) -> Optional[FileDoc]:
-        messages = [{"role": "user", "content": build_file_prompt(f, tpl, lang)}]
+                          catalog: EvidenceCatalog, warnings: List[str]) -> Optional[FileDoc]:
+        messages = [{"role": "user", "content": build_file_prompt(f, tpl, lang, catalog)}]
         for attempt in range(1, self.max_attempts + 1):
             try:
                 text = self.client.complete(SYSTEM_PROMPT, messages)
