@@ -1,4 +1,4 @@
-# LivingDocs AI Service (LD-90)
+# LivingDocs AI Service (LD-90, LD-340)
 
 AI-assisted documentation generation. Takes source code that has already been analyzed
 (classes, methods, endpoints, parameters, return values) and produces Markdown docs
@@ -32,6 +32,7 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | GET | `/jobs` | List jobs |
 | GET | `/jobs/{id}` | Status, progress, message, error, result |
 | GET | `/jobs/{id}/result` | Generated Markdown |
+| GET | `/jobs/{id}/report` | Evidence and confidence per file and entity |
 | GET/POST | `/templates` | List / create templates |
 | GET/PUT/DELETE | `/templates/{id}` | Read / update / delete (built-ins are read-only) |
 
@@ -64,6 +65,43 @@ Poll `GET /jobs/{id}` until `status` is `completed` (or `failed`), then read `/j
 ```bash
 pytest -q
 ```
+
+## Documentation generation (LD-340)
+
+```
+analysis (LD-328) -> prompt -> Claude -> JSON (FileDoc) -> validate -> Markdown renderer
+```
+
+- `app/prompts.py`: system prompt and per-file prompt (JSON-only output, no invented entities,
+  output language, template style; long source snippets are truncated).
+- `app/doc_schema.py`: the JSON shape the AI must return and its parser/validator.
+- `app/renderer.py`: deterministic Markdown. Names, types and section order come from the
+  analysis and template, so every file has the same structure; the AI only adds descriptions.
+- `app/generator.py`: retries on API errors (exponential backoff) and on invalid JSON (repair
+  prompt). After `LLM_MAX_ATTEMPTS` (default 3) it falls back to analysis-only docs.
+- Files with analyzer `status` other than `ok` are skipped and reported; one failing file never
+  stops the job. Every job exposes `warnings` and per-file `file_results`.
+- `app/retrieval.py`: for each file, retrieves related code from other analyzed files and the most
+  relevant passages of existing docs passed in `context` (TF-IDF over identifier-aware tokens,
+  no external service). They go into the prompt as citable context.
+- `app/evidence.py`: evidence catalog per file — `E` = the entity's own code (file + lines),
+  `C` = retrieved related code, `D` = retrieved documentation. The AI must cite ids for every
+  description; unknown ids are dropped and reported.
+- `app/confidence.py`: 0-1 confidence per entity, file and job, mostly from checkable signals
+  (input quality, evidence grounding, whether it was described) plus the AI's self-assessment.
+  Shown in the Markdown and returned by `GET /jobs/{id}/report`.
+
+Input format agreed with LD-328: see [CONTRACT.md](CONTRACT.md).
+
+Try it without the server:
+
+```bash
+python scripts/run_sample.py                          # sample_data/sample_analysis.json -> output.md
+python scripts/run_sample.py path/to/real_analysis.json
+```
+
+Environment variables: `ANTHROPIC_API_KEY`, `LLM_MODEL` (default `claude-sonnet-5-5`),
+`LLM_MAX_TOKENS` (4096), `LLM_TIMEOUT` seconds (60), `LLM_MAX_ATTEMPTS` (3).
 
 ## Notes / next steps
 
