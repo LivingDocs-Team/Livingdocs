@@ -33,19 +33,23 @@ public class RepositoryController {
     }
 
     @GetMapping("/api/github/repos/available")
-    @Operation(summary = "Liệt kê repo trên GitHub mà người dùng có thể thêm")
-    public List<AvailableRepositoryResponse> available(@RequestHeader(USER_HEADER) String userId) {
+    @Operation(summary = "Liệt kê repository có thể truy cập trên GitHub")
+    public List<AvailableRepositoryResponse> available(
+            @RequestHeader(USER_HEADER) String userId) {
         return repositoryService.listAvailable(userId);
     }
 
     @PostMapping("/api/workspaces/{workspaceId}/repositories")
-    @Operation(summary = "Thêm một hoặc nhiều repo vào workspace")
-    public ResponseEntity<List<RepositoryResponse>> add(@RequestHeader(USER_HEADER) String userId,
-                                                        @PathVariable String workspaceId,
-                                                        @Valid @RequestBody AddRepositoriesRequest request) {
+    @Operation(summary = "Thêm repository vào workspace")
+    public ResponseEntity<List<RepositoryResponse>> add(
+            @RequestHeader(USER_HEADER) String userId,
+            @PathVariable String workspaceId,
+            @Valid @RequestBody AddRepositoriesRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(repositoryService.addRepositories(userId, workspaceId, request.githubRepoIds()));
+                .body(repositoryService.addRepositories(
+                        userId, workspaceId, request.githubRepoIds()));
     }
+
 
     @GetMapping("/api/workspaces/{workspaceId}/repositories")
     @Operation(summary = "Danh sách repo của workspace (trạng thái, nhánh mặc định, lần đồng bộ cuối)")
@@ -59,11 +63,7 @@ public class RepositoryController {
         return repositoryService.get(id);
     }
 
-    @PostMapping("/api/repositories/{id}/sync")
-    @Operation(summary = "Đồng bộ lại repo thủ công")
-    public RepositoryResponse sync(@RequestHeader(USER_HEADER) String userId, @PathVariable UUID id) {
-        return repositoryService.sync(userId, id);
-    }
+    // Đồng bộ repo với GitHub (LD-63): xem RepositorySyncController
 
     @DeleteMapping("/api/repositories/{id}")
     @Operation(summary = "Ngắt kết nối (gỡ) repo khỏi workspace")
