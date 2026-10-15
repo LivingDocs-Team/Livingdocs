@@ -1,4 +1,4 @@
-"""LivingDocs AI service - AI-assisted documentation generation (LD-90).
+"""LivingDocs AI service - AI-assisted documentation generation (LD-90, LD-340).
 
 Run:  uvicorn main:app --reload --port 8001
 Docs: http://localhost:8001/docs
@@ -10,7 +10,7 @@ from fastapi.responses import PlainTextResponse
 
 from app.generator import get_generator
 from app.jobs import jobs, run_job
-from app.models import GenerateRequest, Job, JobStatus, Template, TemplateIn
+from app.models import GenerateRequest, Job, JobReport, JobStatus, Template, TemplateIn
 from app.templates import templates
 
 app = FastAPI(title="LivingDocs AI Service", version="0.1.0")
@@ -18,7 +18,7 @@ app = FastAPI(title="LivingDocs AI Service", version="0.1.0")
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "generator": type(get_generator()).__name__}
+    return {"status": "ok", "generator": get_generator().mode}
 
 
 # ---------- Documentation generation ----------
@@ -55,6 +55,20 @@ def get_result(job_id: str):
     if job.status != JobStatus.completed:
         raise HTTPException(409, f"Job is {job.status.value}")
     return PlainTextResponse(job.result, media_type="text/markdown")
+
+
+@app.get("/jobs/{job_id}/report", response_model=JobReport)
+def get_report(job_id: str):
+    """Evidence and confidence for every documented entity (for review / the frontend)."""
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found")
+    if job.status != JobStatus.completed:
+        raise HTTPException(409, f"Job is {job.status.value}")
+    report = jobs.get_report(job_id)
+    if report is None:
+        raise HTTPException(404, "Report not found")
+    return report
 
 
 # ---------- Template management ----------
