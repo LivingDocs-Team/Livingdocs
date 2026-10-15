@@ -12,21 +12,83 @@ from .models import (ClassInfo, Endpoint, EntityReport, Evidence, FileAnalysis, 
 
 LABELS = {
     "vi": {
-        "Overview": "Tổng quan", "Classes": "Các lớp", "Functions": "Các hàm",
+        "Overview": "Tổng quan",
+        "Classes": "Các lớp",
+        "Functions": "Các hàm",
         "API Endpoints": "API Endpoints",
-        "class": "Lớp", "inherits": "kế thừa", "params": "Tham số", "returns": "Giá trị trả về",
-        "no_params": "Không có tham số.", "unknown": "Không xác định", "no_desc": "Chưa có mô tả.",
-        "name": "Tên", "type": "Kiểu", "default": "Mặc định", "desc": "Mô tả",
-        "handler": "Hàm xử lý", "request": "Request body", "response": "Response",
-        "language": "Ngôn ngữ", "module": "Module",
+        "class": "Lớp",
+        "inherits": "kế thừa",
+        "params": "Tham số",
+        "returns": "Giá trị trả về",
+        "no_params": "Không có tham số.",
+        "unknown": "Không xác định",
+        "no_desc": "Chưa có mô tả.",
+                "class_fallback": "Chưa có mô tả xác nhận cho lớp `{name}`.",
+        "function_fallback": (
+            "Mô tả suy luận: tên hàm `{name}` gợi ý chức năng {action}; "
+            "cần kiểm tra mã nguồn để xác nhận hành vi cụ thể."
+        ),
+        "endpoint_fallback": (
+            "Endpoint này được ánh xạ tới handler `{handler}`. "
+            "Mục đích nghiệp vụ chưa được xác nhận từ dữ liệu phân tích."
+        ),
+        "actions": {
+            "get": "truy xuất dữ liệu",
+            "fetch": "truy xuất dữ liệu",
+            "find": "tìm kiếm dữ liệu",
+            "list": "liệt kê dữ liệu",
+            "load": "tải dữ liệu",
+            "create": "tạo dữ liệu",
+            "add": "thêm dữ liệu",
+            "insert": "thêm dữ liệu",
+            "update": "cập nhật dữ liệu",
+            "set": "thiết lập giá trị",
+            "delete": "xóa dữ liệu",
+            "remove": "xóa dữ liệu",
+            "validate": "kiểm tra tính hợp lệ",
+            "check": "kiểm tra điều kiện",
+            "parse": "phân tích dữ liệu",
+            "format": "định dạng dữ liệu",
+            "calculate": "tính toán",
+            "compute": "tính toán",
+            "send": "gửi dữ liệu",
+            "notify": "gửi thông báo",
+            "exchange": "trao đổi thông tin xác thực",
+            "refresh": "làm mới thông tin xác thực",
+            "revoke": "thu hồi quyền hoặc thông tin xác thực",
+            "authenticate": "xác thực danh tính",
+            "health": "kiểm tra trạng thái dịch vụ",
+            "default": "chưa xác định",
+        },
+        "name": "Tên",
+        "type": "Kiểu",
+        "default": "Mặc định",
+        "desc": "Mô tả",
+        "handler": "Hàm xử lý",
+        "request": "Request body",
+        "response": "Response",
+        "language": "Ngôn ngữ",
+        "module": "Module",
         "stats": "{c} lớp, {f} hàm, {e} endpoint",
         "nothing": "Không tìm thấy lớp, hàm hoặc endpoint nào trong file này.",
-        "files_title": "Danh sách file", "skipped_title": "File không sinh được tài liệu",
+        "files_title": "Danh sách file",
+        "skipped_title": "File không sinh được tài liệu",
         "repo_intro": "Tài liệu cho {n} file.",
-        "status": {"generated": "AI", "offline": "offline", "fallback": "dự phòng (AI lỗi)"},
-        "confidence": "Độ tin cậy", "evidence": "Bằng chứng", "sources": "Nguồn tham chiếu",
-        "levels": {"high": "cao", "medium": "trung bình", "low": "thấp"},
-        "lines": "dòng", "overall": "Độ tin cậy chung",
+        "status": {
+            "generated": "AI",
+            "offline": "offline",
+            "fallback": "dự phòng (AI lỗi)",
+        },
+        "confidence": "Độ tin cậy",
+        "evidence": "Bằng chứng",
+        "sources": "Nguồn tham chiếu",
+        "levels": {
+            "high": "cao",
+            "medium": "trung bình",
+            "low": "thấp",
+        },
+        "lines": "dòng",
+        "overall": "Độ tin cậy chung",
     },
     "en": {
         "Overview": "Overview", "Classes": "Classes", "Functions": "Functions",
@@ -44,6 +106,43 @@ LABELS = {
         "confidence": "Confidence", "evidence": "Evidence", "sources": "References",
         "levels": {"high": "high", "medium": "medium", "low": "low"},
         "lines": "lines", "overall": "Overall confidence",
+                "class_fallback": "No confirmed description is available for class `{name}`.",
+        "function_fallback": (
+            "Inferred description: the name `{name}` suggests {action}; "
+            "inspect the source code to confirm the exact behavior."
+        ),
+        "endpoint_fallback": (
+            "This endpoint is mapped to handler `{handler}`. "
+            "Its business purpose has not been confirmed by the available analysis."
+        ),
+        "actions": {
+            "get": "retrieving data",
+            "fetch": "retrieving data",
+            "find": "searching for data",
+            "list": "listing data",
+            "load": "loading data",
+            "create": "creating data",
+            "add": "adding data",
+            "insert": "inserting data",
+            "update": "updating data",
+            "set": "setting a value",
+            "delete": "deleting data",
+            "remove": "removing data",
+            "validate": "validating input",
+            "check": "checking a condition",
+            "parse": "parsing data",
+            "format": "formatting data",
+            "calculate": "calculating a value",
+            "compute": "computing a value",
+            "send": "sending data",
+            "notify": "sending a notification",
+            "exchange": "exchanging authentication information",
+            "refresh": "refreshing authentication information",
+            "revoke": "revoking access or authentication information",
+            "authenticate": "authenticating identity",
+            "health": "checking service health",
+            "default": "an unspecified operation",
+        },
     },
 }
 
@@ -62,6 +161,52 @@ def _by_name(items) -> Dict[str, object]:
 def _cell(text: Optional[str]) -> str:
     return (text or "-").replace("|", "\\|").replace("\n", " ")
 
+
+def _fallback_function_summary(fn: Function, L: dict) -> str:
+    """Infer a cautious summary from a function name only."""
+    import re
+
+    # Convert camelCase/PascalCase to snake_case, then split into words.
+    name = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", fn.name)
+    words = [part.lower() for part in name.split("_") if part]
+
+    # Match the first recognized verb, not necessarily the first word.
+    action_aliases = {
+        "get": "get",
+        "fetch": "fetch",
+        "find": "find",
+        "list": "list",
+        "load": "load",
+        "create": "create",
+        "add": "add",
+        "insert": "insert",
+        "update": "update",
+        "set": "set",
+        "delete": "delete",
+        "remove": "remove",
+        "validate": "validate",
+        "check": "check",
+        "parse": "parse",
+        "format": "format",
+        "calculate": "calculate",
+        "compute": "compute",
+        "send": "send",
+        "notify": "notify",
+        "exchange": "exchange",
+        "refresh": "refresh",
+        "revoke": "revoke",
+        "authenticate": "authenticate",
+        "auth": "authenticate",
+        "health": "health",
+    }
+
+    action_key = next(
+        (action_aliases[word] for word in words if word in action_aliases),
+        "default",
+    )
+    action = L["actions"].get(action_key, L["actions"]["default"])
+
+    return L["function_fallback"].format(name=fn.name, action=action)
 
 def doc_items(doc: FileDoc) -> Dict[str, object]:
     """Described items keyed like evidence.entities(): Class, Class.method, func, 'GET /p'."""
@@ -110,7 +255,11 @@ def _params_table(params: List[Parameter], descs: Dict[str, str], L: dict) -> st
 def _function_md(fn: Function, doc: Optional[FunctionDoc], level: str, L: dict,
                  rep: Optional[EntityReport] = None) -> str:
     sig = fn.signature or f"{fn.name}({', '.join(p.name for p in fn.parameters)})"
-    summary = (doc.summary if doc else "") or (fn.docstring or "").strip() or L["no_desc"]
+    summary = (
+    (doc.summary if doc else "")
+    or (fn.docstring or "").strip()
+    or _fallback_function_summary(fn, L)
+)
     pdescs = {p.name: p.description for p in doc.parameters} if doc else {}
     returns = (doc.returns if doc else "") or ""
     rtype = f"`{fn.return_type}`" if fn.return_type else L["unknown"]
@@ -125,7 +274,11 @@ def _function_md(fn: Function, doc: Optional[FunctionDoc], level: str, L: dict,
 def _class_md(c: ClassInfo, doc: Optional[ClassDoc], L: dict,
               reps: Dict[str, EntityReport]) -> str:
     bases = f" ({L['inherits']} {', '.join(c.bases)})" if c.bases else ""
-    summary = (doc.summary if doc else "") or (c.docstring or "").strip() or L["no_desc"]
+    summary = (
+    (doc.summary if doc else "")
+    or (c.docstring or "").strip()
+    or L["class_fallback"].format(name=c.name)
+)
     mdocs = _by_name(doc.methods) if doc else {}
     out = [f"### {L['class']} `{c.name}`{bases}", "", summary, "", _annotation(reps.get(c.name), L)]
     for m in c.methods:
@@ -134,7 +287,14 @@ def _class_md(c: ClassInfo, doc: Optional[ClassDoc], L: dict,
 
 
 def _endpoint_md(e: Endpoint, summary: str, L: dict, rep: Optional[EntityReport] = None) -> str:
-    out = [f"### `{e.http_method} {e.path}`", "", summary or L["no_desc"], ""]
+    if summary:
+        endpoint_summary = summary
+    elif e.handler:
+        endpoint_summary = L["endpoint_fallback"].format(handler=e.handler)
+    else:
+        endpoint_summary = L["no_desc"]
+
+    out = [f"### `{e.http_method} {e.path}`", "", endpoint_summary, ""]
     if e.handler:
         out += [f"{L['handler']}: `{e.handler}`", ""]
     out += [f"**{L['params']}**", "", _params_table(e.parameters, {}, L)]
@@ -159,7 +319,10 @@ def render_file(f: FileAnalysis, doc: FileDoc, tpl: Template, lang: str,
         key = KNOWN_SECTIONS.get(section.strip().lower())
         body = ""
         if key == "Overview":
-            stats = L["stats"].format(c=len(f.classes), f=len(f.functions), e=len(f.endpoints))
+            stats = L["stats"].format(
+                c=len(f.classes),
+                f=len(f.functions) + sum(len(c.methods) for c in f.classes),
+                e=len(f.endpoints),)
             meta = f"{L['language']}: {f.language or '-'} · {L['module']}: {f.module or '-'} · {stats}"
             if file_confidence is not None:
                 meta += f" · {L['confidence']}: {_score_text(file_confidence, L)}"
