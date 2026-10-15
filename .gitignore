@@ -1,4 +1,4 @@
-﻿# Environment variables and secrets
+# Environment variables and secrets
 .env
 .env.*
 !.env.example
@@ -22,3 +22,6 @@ __pycache__/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local Python analysis environment
+.venv-analysis/
