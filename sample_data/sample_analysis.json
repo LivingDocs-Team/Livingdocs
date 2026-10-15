@@ -1,0 +1,74 @@
+{
+  "scope": "file",
+  "target": "demo_project",
+  "files": [
+    {
+      "path": "app/services/calculator.py",
+      "language": "python",
+      "module": "app.services.calculator",
+      "status": "ok",
+      "error": null,
+      "classes": [
+        {
+          "name": "CalculatorService",
+          "bases": [],
+          "docstring": "Service thực hiện các phép tính toán học cơ bản.",
+          "methods": [
+            {
+              "name": "add",
+              "signature": "async def add(self, a: int, b: int) -> int",
+              "parameters": [
+                {
+                  "name": "a",
+                  "type": "int",
+                  "default": null,
+                  "description": "Số thứ nhất"
+                },
+                {
+                  "name": "b",
+                  "type": "int",
+                  "default": null,
+                  "description": "Số thứ hai"
+                }
+              ],
+              "return_type": "int",
+              "docstring": "Cộng hai số nguyên bất đồng bộ.",
+              "source": "async def add(self, a: int, b: int) -> int:\n    return a + b"
+            }
+          ]
+        }
+      ],
+      "functions": [
+        {
+          "name": "get_version",
+          "signature": "def get_version() -> str",
+          "parameters": [],
+          "return_type": "str",
+          "docstring": "Trả về phiên bản dịch vụ.",
+          "source": "def get_version() -> str:\n    return \"1.0.0\""
+        }
+      ],
+      "endpoints": []
+    },
+    {
+      "path": "app/bad_file.py",
+      "language": "python",
+      "module": "app.bad_file",
+      "status": "invalid",
+      "error": "SyntaxError line 3: unexpected indent",
+      "classes": [],
+      "functions": [],
+      "endpoints": []
+    },
+    {
+      "path": "app/empty_file.py",
+      "language": "python",
+      "module": "app.empty_file",
+      "status": "empty",
+      "error": "File rỗng, không có nội dung để phân tích.",
+      "classes": [],
+      "functions": [],
+      "endpoints": []
+    }
+  ]
+}

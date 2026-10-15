@@ -1,50 +1,63 @@
+from typing import List
 from fastapi import FastAPI
 from pydantic import BaseModel
+from app.models import FileAnalysis
+from app.reader import FileReader
 from app.analyzer import ASTAnalyzer
 from app.extractor import EntityExtractor
-from app.dependency import DependencyAnalyzer
 
-# Khởi tạo ứng dụng FastAPI cho AI Service
-app = FastAPI(
-    title="LivingDocs - Source Code Analysis Service",
-    description="Dịch vụ AI phân tích mã nguồn cho dự án LivingDocs",
-    version="1.0.0"
-)
+app = FastAPI(title="LivingDocs - Source Code Analysis Service (LD-328)")
 
-class CodeRequest(BaseModel):
-    code: str
-    language: str
+class AnalysisRequest(BaseModel):
+    scope: str = "file"  # file | module | repository
+    target: str
+    file_paths: List[str]
 
-@app.get("/")
-def home():
-    return {"message": "Source Code Analysis Service is running!"}
+class AnalysisResponse(BaseModel):
+    scope: str
+    target: str
+    files: List[FileAnalysis]
 
-@app.post("/api/v1/analyze")
-def analyze_code(req: CodeRequest):
-    lang = req.language.lower()
-    
-    # Xử lý nếu mã nguồn là Python
-    if lang == "python":
-        tree = ASTAnalyzer.parse_python_ast(req.code)
-        entities = EntityExtractor.extract_python_entities(tree)
-        dependencies = DependencyAnalyzer.get_python_imports(tree)
-        return {
-            "status": "success", 
-            "language": "python", 
-            "entities": entities, 
-            "dependencies": dependencies
-        }
-    
-    # Xử lý nếu mã nguồn là Java
-    elif lang == "java":
-        tree = ASTAnalyzer.parse_java_ast(req.code)
-        entities = EntityExtractor.extract_java_entities(tree)
-        dependencies = DependencyAnalyzer.get_java_imports(tree)
-        return {
-            "status": "success", 
-            "language": "java", 
-            "entities": entities, 
-            "dependencies": dependencies
-        }
+@app.post("/api/v1/analyze-repo", response_model=AnalysisResponse)
+def analyze_repository(req: AnalysisRequest):
+    analyzed_files = []
 
-    return {"status": "error", "message": f"Ngôn ngữ '{req.language}' chưa được hỗ trợ."}
+    for path in req.file_paths:
+        file_info, content = FileReader.read_code_file(path)
+
+        # Nếu file bị lỗi đọc / rỗng / không hỗ trợ -> giữ nguyên status & error
+        if file_info.status != "ok":
+            analyzed_files.append(file_info)
+            continue
+
+        # Phân tích Python
+        if file_info.language == "python":
+            tree, err = ASTAnalyzer.parse_python_ast(content)
+            if err:
+                file_info.status = "invalid"
+                file_info.error = err
+            else:
+                classes, funcs, endpoints = EntityExtractor.extract_python_entities(tree, content)
+                file_info.classes = classes
+                file_info.functions = funcs
+                file_info.endpoints = endpoints
+
+        # Phân tích Java
+        elif file_info.language == "java":
+            tree, err = ASTAnalyzer.parse_java_ast(content)
+            if err:
+                file_info.status = "invalid"
+                file_info.error = err
+            else:
+                classes, funcs, endpoints = EntityExtractor.extract_java_entities(tree, content)
+                file_info.classes = classes
+                file_info.functions = funcs
+                file_info.endpoints = endpoints
+
+        analyzed_files.append(file_info)
+
+    return AnalysisResponse(
+        scope=req.scope,
+        target=req.target,
+        files=analyzed_files
+    )
