@@ -1,0 +1,567 @@
+{
+  "repository": {
+    "githubRepoId": 870000101,
+    "fullName": "LivingDocs-Team/Livingdocs",
+    "owner": "LivingDocs-Team",
+    "name": "Livingdocs",
+    "description": "BLCK",
+    "privateRepo": false,
+    "archived": false,
+    "defaultBranch": "main",
+    "htmlUrl": "https://github.com/LivingDocs-Team/Livingdocs",
+    "primaryLanguage": "Java",
+    "sizeKb": 512,
+    "pushedAt": "2026-10-12T16:19:13Z"
+  },
+  "branch": "main",
+  "headCommit": {
+    "sha": "51006a4ff6b6e366f42338811fec6acf97624643",
+    "message": "Merge pull request #17 from LivingDocs-Team/LD-369-implement-deployment-pipeline\n\n[LD-369] Add Docker Compose deployment setup",
+    "authorName": "nhanndt750402-max",
+    "authorLogin": "nhanndt750402-max",
+    "committedAt": "2026-10-11T12:25:14Z",
+    "htmlUrl": "https://github.com/LivingDocs-Team/Livingdocs/commit/51006a4ff6b6e366f42338811fec6acf97624643"
+  },
+  "languages": {
+    "Java": 89166,
+    "Python": 25214,
+    "JavaScript": 9615,
+    "CSS": 6350,
+    "Dockerfile": 1175,
+    "HTML": 360
+  },
+  "files": [
+    {
+      "path": "ai-service/app/__init__.py",
+      "sha": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "size": 0,
+      "language": "python",
+      "content": "",
+      "skipReason": null
+    },
+    {
+      "path": "ai-service/app/generator.py",
+      "sha": "4e2426b8b10ad674a0b7d5437918199f80766a81",
+      "size": 5730,
+      "language": "python",
+      "content": "\"\"\"Turns analyzed source code into documentation.\n\nTwo backends:\n- AnthropicGenerator: uses the Claude API (set ANTHROPIC_API_KEY).\n- OfflineGenerator: rule-bas …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "ai-service/app/jobs.py",
+      "sha": "fe13299c36f9006b83645ec5d585c6884a373d8f",
+      "size": 2574,
+      "language": "python",
+      "content": "\"\"\"Generation jobs: run in the background, expose status, progress and result.\"\"\"\nimport threading\nimport uuid\nfrom typing import Dict, List, Optional\n\nfrom .ge …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "ai-service/app/models.py",
+      "sha": "122ae9e880cb5cbbce1d6223f70a757d6d19f062",
+      "size": 2947,
+      "language": "python",
+      "content": "\"\"\"Data models: input from the code analyzer, templates, and generation jobs.\"\"\"\nfrom datetime import datetime, timezone\nfrom enum import Enum\nfrom typing impor …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "ai-service/app/templates.py",
+      "sha": "b57df6a2239542898941b2caf9374da6dab2516b",
+      "size": 2930,
+      "language": "python",
+      "content": "\"\"\"Managed documentation templates (in-memory store with built-in defaults).\"\"\"\nimport threading\nimport uuid\nfrom typing import Dict, List, Optional\n\nfrom .mode …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "ai-service/main.py",
+      "sha": "85153626ccb255b853bfcb4121f3dbb869acf246",
+      "size": 2965,
+      "language": "python",
+      "content": "\"\"\"LivingDocs AI service - AI-assisted documentation generation (LD-90).\n\nRun:  uvicorn main:app --reload --port 8001\nDocs: http://localhost:8001/docs\n\"\"\"\nfrom  …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "ai-service/tests/test_api.py",
+      "sha": "bb20ff45e390df69ec2ee11cd07356fb23b9b150",
+      "size": 2698,
+      "language": "python",
+      "content": "import os\n\nos.environ.pop(\"ANTHROPIC_API_KEY\", None)  # tests use the offline generator\n\nfrom fastapi.testclient import TestClient  # noqa: E402\n\nfrom main impo …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "app/analyzer.py",
+      "sha": "205f82bb9614523f3d97b488cbd6949b0ae6b086",
+      "size": 229,
+      "language": "python",
+      "content": "import ast\nimport javalang\n\nclass ASTAnalyzer:\n    @staticmethod\n    def parse_python_ast(code: str):\n        return ast.parse(code)\n\n    @staticmethod\n    def  …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "app/app/main.py",
+      "sha": "61d44943f192e71d1ff1587b72bde196c80ce4d2",
+      "size": 1073,
+      "language": "python",
+      "content": "from fastapi import FastAPI\nfrom pydantic import BaseModel\nfrom app.analyzer import ASTAnalyzer\nfrom app.extractor import EntityExtractor\nfrom app.dependency im …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "app/app/reader.py",
+      "sha": "1e6f36066daade9c31a9f8b90b23bf0462527496",
+      "size": 312,
+      "language": "python",
+      "content": "import os\n\nclass FileReader:\n    @staticmethod\n    def read_code_file(file_path: str) -> str:\n        if not os.path.exists(file_path):\n            raise FileNo …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "app/dependency.py",
+      "sha": "4a000fb72729f910a19b10d466419bae93521661",
+      "size": 515,
+      "language": "python",
+      "content": "import ast\nimport javalang\n\nclass DependencyAnalyzer:\n    @staticmethod\n    def get_python_imports(tree):\n        imports = []\n        for node in ast.walk(tree …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "app/extractor.py",
+      "sha": "bbaab91341516d3328c1fd8ac03b2db6792dcecb",
+      "size": 909,
+      "language": "python",
+      "content": "import ast\nimport javalang\n\nclass EntityExtractor:\n    @staticmethod\n    def extract_python_entities(tree):\n        classes, functions = [], []\n        for node …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "app/main.py",
+      "sha": "148ab878136a6587739cc54fce3c3f6d2a36a894",
+      "size": 1622,
+      "language": "python",
+      "content": "from fastapi import FastAPI\nfrom pydantic import BaseModel\nfrom app.analyzer import ASTAnalyzer\nfrom app.extractor import EntityExtractor\nfrom app.dependency im …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/BackendApplication.java",
+      "sha": "510ed06812d2c8a4f7d6c3c10feaeb58bbe749fd",
+      "size": 311,
+      "language": "java",
+      "content": "package com.cnpm.backend;\n\nimport org.springframework.boot.SpringApplication;\nimport org.springframework.boot.autoconfigure.SpringBootApplication;\n\n@SpringBootA …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/config/SecurityConfig.java",
+      "sha": "313194348b096f63ead54282e09ded95ddd3f4b2",
+      "size": 2919,
+      "language": "java",
+      "content": "\npackage com.cnpm.backend.config;\n\nimport org.springframework.context.annotation.Bean;\nimport org.springframework.context.annotation.Configuration;\nimport org.s …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/controller/OAuth2SuccessController.java",
+      "sha": "f564e63ea693866e47a6bc804066d54afb43cbec",
+      "size": 1490,
+      "language": "java",
+      "content": "\npackage com.cnpm.backend.controller;\n\nimport java.util.Map;\n\nimport org.springframework.security.core.annotation.AuthenticationPrincipal;\nimport org.springfram …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/controller/UserLoginController.java",
+      "sha": "b009612c6499db2a945a0c97e2e7d25d89b45dc5",
+      "size": 3896,
+      "language": "java",
+      "content": "\npackage com.cnpm.backend.controller;\n\nimport java.util.Map;\n\nimport jakarta.servlet.http.HttpServletRequest;\nimport jakarta.servlet.http.HttpSession;\nimport ja …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/controller/UserRegistrationController.java",
+      "sha": "59fc42ef6f4d32765a75473b30fa5ec972c1c29e",
+      "size": 1785,
+      "language": "java",
+      "content": "\npackage com.cnpm.backend.controller;\n\nimport java.util.Map;\n\nimport org.springframework.http.HttpStatus;\nimport org.springframework.http.ResponseEntity;\nimport …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/dto/LoginRequest.java",
+      "sha": "3e0b4b5e1cd64d714527ec358a6a434d605625b2",
+      "size": 675,
+      "language": "java",
+      "content": "\npackage com.cnpm.backend.dto;\n\nimport jakarta.validation.constraints.Email;\nimport jakarta.validation.constraints.NotBlank;\n\npublic class LoginRequest {\n\n    @ …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/dto/RegisterRequest.java",
+      "sha": "5a06dcc8da1028d4f8c1289e920cc877733c6b6d",
+      "size": 1698,
+      "language": "java",
+      "content": "\npackage com.cnpm.backend.dto;\n\nimport jakarta.validation.constraints.Email;\nimport jakarta.validation.constraints.NotBlank;\nimport jakarta.validation.constrain …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/entity/User.java",
+      "sha": "57ffb422e4e8f5ed355d01ffd30d125d6435b977",
+      "size": 3528,
+      "language": "java",
+      "content": "\npackage com.cnpm.backend.entity;\n\nimport java.time.LocalDateTime;\n\nimport jakarta.persistence.Column;\nimport jakarta.persistence.Entity;\nimport jakarta.persist …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/repository/UserRepository.java",
+      "sha": "bdfca7093265c6d569b64bf455f1dfde7271e36c",
+      "size": 428,
+      "language": "java",
+      "content": "\npackage com.cnpm.backend.repository;\n\nimport java.util.Optional;\n\nimport org.springframework.data.jpa.repository.JpaRepository;\n\nimport com.cnpm.backend.entity …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/service/CustomUserDetailsService.java",
+      "sha": "ee38fa7808c33c2f2f8982c59c28553bf57e8412",
+      "size": 1190,
+      "language": "java",
+      "content": "\npackage com.cnpm.backend.service;\n\nimport org.springframework.security.core.userdetails.UserDetails;\nimport org.springframework.security.core.userdetails.UserD …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/service/GitHubOAuth2UserService.java",
+      "sha": "39a67f5caed7c5ab60ffce8798aa860e1a8a7b16",
+      "size": 4365,
+      "language": "java",
+      "content": "\npackage com.cnpm.backend.service;\n\nimport java.util.Map;\nimport java.util.UUID;\n\nimport org.springframework.security.authentication.AuthenticationServiceExcept …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/main/java/com/cnpm/backend/service/UserRegistrationService.java",
+      "sha": "6f468985a8f82d81249d7760e9d1d2185a3d16fd",
+      "size": 1612,
+      "language": "java",
+      "content": "\npackage com.cnpm.backend.service;\n\nimport org.springframework.security.crypto.password.PasswordEncoder;\nimport org.springframework.stereotype.Service;\nimport o …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "backend/src/test/java/com/cnpm/backend/BackendApplicationTests.java",
+      "sha": "0737d655891409280316883545795eb6efd6d942",
+      "size": 209,
+      "language": "java",
+      "content": "package com.cnpm.backend;\n\nimport org.junit.jupiter.api.Test;\nimport org.springframework.boot.test.context.SpringBootTest;\n\n@SpringBootTest\nclass BackendApplica …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/GithubIntegrationServiceApplication.java",
+      "sha": "51c3c48f2eb09466c0bfd14c7c50ce45779dfb24",
+      "size": 470,
+      "language": "java",
+      "content": "package com.livingdocs.github;\n\nimport org.springframework.boot.SpringApplication;\nimport org.springframework.boot.autoconfigure.SpringBootApplication;\nimport o …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/client/GitHubClient.java",
+      "sha": "78a27d09df03e92ac9e93822c1bb338ccb70b575",
+      "size": 7691,
+      "language": "java",
+      "content": "package com.livingdocs.github.client;\n\nimport com.fasterxml.jackson.annotation.JsonIgnoreProperties;\nimport com.fasterxml.jackson.annotation.JsonProperty;\nimpor …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/client/GitHubRepo.java",
+      "sha": "5a6eb81f8d32e0498e6a465b32803a2382ae5c0c",
+      "size": 465,
+      "language": "java",
+      "content": "package com.livingdocs.github.client;\n\nimport com.fasterxml.jackson.annotation.JsonIgnoreProperties;\nimport com.fasterxml.jackson.annotation.JsonProperty;\n\n@Jso …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/client/GitHubTokenResponse.java",
+      "sha": "2919774274484c80765a7b9a0ec07a15a3ae8a4d",
+      "size": 794,
+      "language": "java",
+      "content": "package com.livingdocs.github.client;\n\nimport com.fasterxml.jackson.annotation.JsonIgnoreProperties;\nimport com.fasterxml.jackson.annotation.JsonProperty;\n\n/**  …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/client/GitHubUser.java",
+      "sha": "0fc1eaf7309be1f044e354a49798d81e549becd2",
+      "size": 198,
+      "language": "java",
+      "content": "package com.livingdocs.github.client;\n\nimport com.fasterxml.jackson.annotation.JsonIgnoreProperties;\n\n@JsonIgnoreProperties(ignoreUnknown = true)\npublic record  …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/config/GitHubProperties.java",
+      "sha": "5af3edf64d8fa69a3c68f95a64b34de3e9598a9f",
+      "size": 858,
+      "language": "java",
+      "content": "package com.livingdocs.github.config;\n\nimport org.springframework.boot.context.properties.ConfigurationProperties;\n\n/**\n * Thông tin GitHub App, đọc từ applicat …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/config/OpenApiConfig.java",
+      "sha": "9fc5c91fb9c9548ce7c80147459ea37f8a118a68",
+      "size": 856,
+      "language": "java",
+      "content": "package com.livingdocs.github.config;\n\nimport io.swagger.v3.oas.models.OpenAPI;\nimport io.swagger.v3.oas.models.info.Info;\nimport org.springframework.context.an …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/controller/GitHubConnectionController.java",
+      "sha": "7c2aafd92ef6ad2b1b3a382981dac6df604cf75e",
+      "size": 2910,
+      "language": "java",
+      "content": "package com.livingdocs.github.controller;\n\nimport com.livingdocs.github.dto.AuthorizeUrlResponse;\nimport com.livingdocs.github.dto.CallbackResponse;\nimport com. …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/controller/RepositoryController.java",
+      "sha": "84ecb64f69cc276f794651d8d30a8b64b54f7813",
+      "size": 3463,
+      "language": "java",
+      "content": "package com.livingdocs.github.controller;\n\nimport com.livingdocs.github.dto.AddRepositoriesRequest;\nimport com.livingdocs.github.dto.AvailableRepositoryResponse …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/dto/AddRepositoriesRequest.java",
+      "sha": "5ca6cedb1ab501173d77d37b767210729917c4ae",
+      "size": 246,
+      "language": "java",
+      "content": "package com.livingdocs.github.dto;\n\nimport jakarta.validation.constraints.NotEmpty;\n\nimport java.util.List;\n\npublic record AddRepositoriesRequest(\n        @NotE …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/dto/AuthorizeUrlResponse.java",
+      "sha": "9b73992926a71f67a901c163ab1f8652683cfced",
+      "size": 415,
+      "language": "java",
+      "content": "package com.livingdocs.github.dto;\n\n/**\n * @param authorizeUrl link để người dùng đăng nhập GitHub và cho phép LivingDocs truy cập\n * @param installUrl   link đ …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/dto/AvailableRepositoryResponse.java",
+      "sha": "0ee53d5f1395b3077a78f25186378a10fcb8e132",
+      "size": 295,
+      "language": "java",
+      "content": "package com.livingdocs.github.dto;\n\n/** Repo trên GitHub mà người dùng có thể thêm vào LivingDocs. */\npublic record AvailableRepositoryResponse(\n        Long gi …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/dto/CallbackResponse.java",
+      "sha": "a8bd92d273dbc265f76b947c057f9f5393434ba7",
+      "size": 107,
+      "language": "java",
+      "content": "package com.livingdocs.github.dto;\n\npublic record CallbackResponse(String message, String githubLogin) {\n}\n",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/dto/ConnectionResponse.java",
+      "sha": "49a55cf8fc244d08e950a28fb6c63b425bc80f7c",
+      "size": 463,
+      "language": "java",
+      "content": "package com.livingdocs.github.dto;\n\nimport java.time.Instant;\n\n/** Trạng thái kết nối GitHub. Không bao giờ trả token ra ngoài. */\npublic record ConnectionRespo …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/dto/ErrorResponse.java",
+      "sha": "e69938a9b85ab8eb2e7aee5bf10ef4a1f2baf2d0",
+      "size": 155,
+      "language": "java",
+      "content": "package com.livingdocs.github.dto;\n\nimport java.time.Instant;\n\npublic record ErrorResponse(int status, String code, String message, Instant timestamp) {\n}\n",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/dto/RepositoryResponse.java",
+      "sha": "f9a91450915fb74440c73595bd45727780fe561d",
+      "size": 774,
+      "language": "java",
+      "content": "package com.livingdocs.github.dto;\n\nimport com.livingdocs.github.entity.ConnectedRepository;\n\nimport java.time.Instant;\nimport java.util.UUID;\n\npublic record Re …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/entity/ConnectedRepository.java",
+      "sha": "8556508aa39081d9c94a290756aa7c6a85daf405",
+      "size": 3096,
+      "language": "java",
+      "content": "package com.livingdocs.github.entity;\n\nimport jakarta.persistence.Column;\nimport jakarta.persistence.Entity;\nimport jakarta.persistence.EnumType;\nimport jakarta …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/entity/ConnectionStatus.java",
+      "sha": "f2ea10809174da7709a5206467275eacb8fbf041",
+      "size": 334,
+      "language": "java",
+      "content": "package com.livingdocs.github.entity;\n\npublic enum ConnectionStatus {\n    /** Đang kết nối bình thường. */\n    ACTIVE,\n    /** Token không còn dùng được (hết hạ …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/entity/GitHubConnection.java",
+      "sha": "b1edbc525d1accc0082e2fb00523503282fb8a6d",
+      "size": 3160,
+      "language": "java",
+      "content": "package com.livingdocs.github.entity;\n\nimport com.livingdocs.github.security.EncryptedStringConverter;\nimport jakarta.persistence.Column;\nimport jakarta.persist …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/entity/RepositoryStatus.java",
+      "sha": "f72daf65a0b81fd12f59affed0e6528e6a0ffb33",
+      "size": 128,
+      "language": "java",
+      "content": "package com.livingdocs.github.entity;\n\npublic enum RepositoryStatus {\n    CONNECTED,\n    SYNCING,\n    ERROR,\n    DISCONNECTED\n}\n",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/exception/ApiException.java",
+      "sha": "abc5797ba642f84b7862c015f7cb5ed149add066",
+      "size": 1488,
+      "language": "java",
+      "content": "package com.livingdocs.github.exception;\n\nimport org.springframework.http.HttpStatus;\n\n/** Lỗi nghiệp vụ, được GlobalExceptionHandler chuyển thành JSON trả cho  …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/exception/GitHubApiException.java",
+      "sha": "b2e05b9260d4a2d24587e6615233975626629d02",
+      "size": 578,
+      "language": "java",
+      "content": "package com.livingdocs.github.exception;\n\n/** Lỗi khi gọi GitHub API. unauthorized = true nghĩa là token đã hỏng (401). */\npublic class GitHubApiException exten …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/exception/GlobalExceptionHandler.java",
+      "sha": "f525fa6aa61eceaa0a6a205542a8c18234947c2d",
+      "size": 2195,
+      "language": "java",
+      "content": "package com.livingdocs.github.exception;\n\nimport com.livingdocs.github.dto.ErrorResponse;\nimport org.slf4j.Logger;\nimport org.slf4j.LoggerFactory;\nimport org.sp …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/repository/ConnectedRepositoryRepository.java",
+      "sha": "a4ece816b901b0cf2bca7454bcb7e8378b94f81f",
+      "size": 556,
+      "language": "java",
+      "content": "package com.livingdocs.github.repository;\n\nimport com.livingdocs.github.entity.ConnectedRepository;\nimport org.springframework.data.jpa.repository.JpaRepository …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/repository/GitHubConnectionRepository.java",
+      "sha": "890e3bfb40194bb6b6ac8a17fa988f633267c463",
+      "size": 366,
+      "language": "java",
+      "content": "package com.livingdocs.github.repository;\n\nimport com.livingdocs.github.entity.GitHubConnection;\nimport org.springframework.data.jpa.repository.JpaRepository;\n\n …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/security/EncryptedStringConverter.java",
+      "sha": "de575169adfd5968aa55bcc663d1ce6a871d86ee",
+      "size": 868,
+      "language": "java",
+      "content": "package com.livingdocs.github.security;\n\nimport jakarta.persistence.AttributeConverter;\nimport jakarta.persistence.Converter;\nimport org.springframework.stereot …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/security/OAuthStateStore.java",
+      "sha": "67c92f1a16fc376cb5cb4a00c98f580aae095d2d",
+      "size": 2047,
+      "language": "java",
+      "content": "package com.livingdocs.github.security;\n\nimport org.springframework.stereotype.Component;\n\nimport java.security.SecureRandom;\nimport java.time.Clock;\nimport jav …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/security/TokenEncryptor.java",
+      "sha": "75bc16305496b0d91e94297912ce74e4715939d9",
+      "size": 3504,
+      "language": "java",
+      "content": "package com.livingdocs.github.security;\n\nimport org.springframework.beans.factory.annotation.Value;\nimport org.springframework.stereotype.Component;\n\nimport jav …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/service/GitHubConnectionService.java",
+      "sha": "659f12c5aab84971720b2d5ca9fecf0e6d3ab24e",
+      "size": 8310,
+      "language": "java",
+      "content": "package com.livingdocs.github.service;\n\nimport com.livingdocs.github.client.GitHubClient;\nimport com.livingdocs.github.client.GitHubTokenResponse;\nimport com.li …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/main/java/com/livingdocs/github/service/RepositoryManagementService.java",
+      "sha": "4ecda1da5e93460bbea9cf11e8248aa52573f40a",
+      "size": 6809,
+      "language": "java",
+      "content": "package com.livingdocs.github.service;\n\nimport com.livingdocs.github.client.GitHubClient;\nimport com.livingdocs.github.client.GitHubRepo;\nimport com.livingdocs. …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/test/java/com/livingdocs/github/GitHubIntegrationFlowTest.java",
+      "sha": "2d24024795a5dee0bd1dde8e80094f1fdc293081",
+      "size": 8519,
+      "language": "java",
+      "content": "package com.livingdocs.github;\n\nimport com.fasterxml.jackson.databind.JsonNode;\nimport com.fasterxml.jackson.databind.ObjectMapper;\nimport com.livingdocs.github …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/test/java/com/livingdocs/github/security/OAuthStateStoreTest.java",
+      "sha": "2ec13893e2ea257f4eef59f534496d66bcddd942",
+      "size": 1481,
+      "language": "java",
+      "content": "package com.livingdocs.github.security;\n\nimport org.junit.jupiter.api.Test;\n\nimport java.time.Clock;\nimport java.time.Duration;\nimport java.time.Instant;\nimport …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "services/github-integration-service/src/test/java/com/livingdocs/github/security/TokenEncryptorTest.java",
+      "sha": "675f8a7f4f6c7e1b16a0a6be04cef1e03fc28d70",
+      "size": 1461,
+      "language": "java",
+      "content": "package com.livingdocs.github.security;\n\nimport org.junit.jupiter.api.Test;\n\nimport static org.assertj.core.api.Assertions.assertThat;\nimport static org.assertj …(rút gọn)",
+      "skipReason": null
+    },
+    {
+      "path": "tests/test_analysis.py",
+      "sha": "c87223c41c2f0303986d3dada28823dd8810566b",
+      "size": 710,
+      "language": "python",
+      "content": "from fastapi.testclient import TestClient\nfrom app.main import app\n\nclient = TestClient(app)\n\ndef test_python_analysis():\n    code = \"import math\\ndef add(a, b) …(rút gọn)",
+      "skipReason": null
+    }
+  ],
+  "recentCommits": [
+    {
+      "sha": "51006a4ff6b6e366f42338811fec6acf97624643",
+      "message": "Merge pull request #17 from LivingDocs-Team/LD-369-implement-deployment-pipeline\n\n[LD-369] Add Docker Compose deployment setup",
+      "authorName": "nhanndt750402-max",
+      "authorLogin": "nhanndt750402-max",
+      "committedAt": "2026-10-11T12:25:14Z",
+      "htmlUrl": "https://github.com/LivingDocs-Team/Livingdocs/commit/51006a4ff6b6e366f42338811fec6acf97624643"
+    },
+    {
+      "sha": "c59f301516ec83b3146f6c99c0af4b6c0b587cea",
+      "message": "feat(deployment): add Docker Compose deployment setup",
+      "authorName": "nhanndt750402-max",
+      "authorLogin": "nhanndt750402-max",
+      "committedAt": "2026-10-11T12:21:08Z",
+      "htmlUrl": "https://github.com/LivingDocs-Team/Livingdocs/commit/c59f301516ec83b3146f6c99c0af4b6c0b587cea"
+    },
+    {
+      "sha": "cf289b700170bff25cad4c6a39864399a68fa31b",
+      "message": "Merge pull request #16 from LivingDocs-Team/LD-364-add-ai-service-ci\n\nci: add AI service tests",
+      "authorName": "nhanndt750402-max",
+      "authorLogin": "nhanndt750402-max",
+      "committedAt": "2026-10-11T10:18:11Z",
+      "htmlUrl": "https://github.com/LivingDocs-Team/Livingdocs/commit/cf289b700170bff25cad4c6a39864399a68fa31b"
+    },
+    {
+      "sha": "577df627239a7a690b66ec8eb7dba0b37b49bab4",
+      "message": "ci: add AI service tests",
+      "authorName": "nhanndt750402-max",
+      "authorLogin": "nhanndt750402-max",
+      "committedAt": "2026-10-11T10:15:48Z",
+      "htmlUrl": "https://github.com/LivingDocs-Team/Livingdocs/commit/577df627239a7a690b66ec8eb7dba0b37b49bab4"
+    },
+    {
+      "sha": "f5b270a803555d11537ab9b589d0d21f44829876",
+      "message": "Merge pull request #4 from LivingDocs-Team/LD-90-Implement-Documentation-Generation\n\nLd 90 implement documentation generation",
+      "authorName": "nhanndt750402-max",
+      "authorLogin": "nhanndt750402-max",
+      "committedAt": "2026-10-11T09:53:19Z",
+      "htmlUrl": "https://github.com/LivingDocs-Team/Livingdocs/commit/f5b270a803555d11537ab9b589d0d21f44829876"
+    }
+  ],
+  "stats": {
+    "totalFilesInRepo": 106,
+    "filesSelected": 60,
+    "filesWithContent": 60,
+    "filesIgnored": 46,
+    "treeTruncated": false,
+    "fileLimitReached": false
+  },
+  "warnings": [],
+  "fetchedAt": "2026-10-13T13:00:00Z"
+}
