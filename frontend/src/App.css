@@ -270,3 +270,128 @@ button:disabled {
     margin-bottom: 24px;
   }
 }
+/* =========================
+   12. GitHub Connection UI
+========================= */
+
+.github-connection-card {
+  max-width: 520px;
+}
+
+.connection-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 20px 0;
+  padding: 12px;
+  border: 1px solid;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.connection-status.connected {
+  color: #166534;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.connection-status.disconnected {
+  color: #92400e;
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.github-connect-section,
+.github-account {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+}
+
+.github-connect-section > p,
+.github-account > p {
+  margin: 0;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.github-connect-button,
+.github-disconnect-button {
+  width: 100%;
+  font-weight: 600;
+}
+
+.github-connect-button {
+  color: #ffffff;
+  background: #24292f;
+}
+
+.github-connect-button:hover {
+  background: #3b434b;
+}
+
+.github-disconnect-button {
+  color: #b91c1c;
+  background: #ffffff;
+  border: 1px solid #fecaca;
+}
+
+.github-disconnect-button:hover {
+  background: #fef2f2;
+}
+
+.github-account-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.github-account-info strong {
+  color: #172033;
+}
+
+.github-account-info span {
+  color: #64748b;
+  font-size: 14px;
+}
+
+.github-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  color: #ffffff;
+  background: #24292f;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.github-demo-note,
+.github-security-note {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.github-security-note {
+  margin: 24px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid #e2e8f0;
+  text-align: center;
+}

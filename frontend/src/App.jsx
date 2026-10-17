@@ -1,22 +1,33 @@
-
 import { useState } from 'react';
 import './App.css';
+
 import Register from './Register';
 import Profile from './Profile';
 import NotificationPreferences from './NotificationPreferences';
+import GitHubConnection from './github/GitHubConnection';
 
 function App() {
   const [page, setPage] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
+  function handleSubmit(event) {
+    event.preventDefault();
+    alert('Login UI demo only. Backend is not connected.');
+  }
+
+  // Trang đăng ký
   if (page === 'register') {
     return (
       <>
         <Register />
+
         <p className="switch-page">
           Already have an account?{' '}
-          <button onClick={() => setPage('login')}>
+          <button
+            type="button"
+            onClick={() => setPage('login')}
+          >
             Sign in
           </button>
         </p>
@@ -24,12 +35,17 @@ function App() {
     );
   }
 
+  // Trang hồ sơ
   if (page === 'profile') {
     return (
       <>
         <Profile />
+
         <p className="switch-page">
-          <button onClick={() => setPage('login')}>
+          <button
+            type="button"
+            onClick={() => setPage('login')}
+          >
             Back to login
           </button>
         </p>
@@ -37,12 +53,17 @@ function App() {
     );
   }
 
+  // Trang cài đặt thông báo
   if (page === 'notifications') {
     return (
       <>
         <NotificationPreferences />
+
         <p className="switch-page">
-          <button onClick={() => setPage('login')}>
+          <button
+            type="button"
+            onClick={() => setPage('login')}
+          >
             Back to login
           </button>
         </p>
@@ -50,45 +71,76 @@ function App() {
     );
   }
 
-  function handleSubmit(event) {
-    event.preventDefault();
-    alert('Login UI demo only. Backend is not connected.');
+  // Trang kết nối GitHub
+  if (page === 'github') {
+    return (
+      <>
+        <GitHubConnection />
+
+        <p className="switch-page">
+          <button
+            type="button"
+            onClick={() => setPage('login')}
+          >
+            Back to login
+          </button>
+        </p>
+      </>
+    );
   }
 
+  // Trang đăng nhập mặc định
   return (
     <main className="page">
       <section className="login-card">
         <h1>LivingDocs</h1>
-        <p className="subtitle">Sign in to your account</p>
+
+        <p className="subtitle">
+          Sign in to your account
+        </p>
 
         <form onSubmit={handleSubmit}>
-          <label htmlFor="email">Email</label>
+          <label htmlFor="email">
+            Email
+          </label>
+
           <input
             id="email"
             type="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
+            autoComplete="email"
             required
           />
 
-          <label htmlFor="password">Password</label>
+          <label htmlFor="password">
+            Password
+          </label>
+
           <input
             id="password"
             type="password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
+            autoComplete="current-password"
             required
           />
 
-          <button type="submit">Sign in</button>
+          <button type="submit">
+            Sign in
+          </button>
         </form>
 
-        <div className="separator">or</div>
+        <div className="separator">
+          or
+        </div>
 
         <button
           className="github-button"
           type="button"
-          onClick={() => alert('GitHub OAuth is not connected yet.')}
+          onClick={() =>
+            alert('GitHub OAuth is not connected yet.')
+          }
         >
           Continue with GitHub
         </button>
@@ -121,6 +173,16 @@ function App() {
             onClick={() => setPage('notifications')}
           >
             Notification preferences
+          </button>
+        </p>
+
+        <p className="footer">
+          <button
+            className="text-button"
+            type="button"
+            onClick={() => setPage('github')}
+          >
+            GitHub connection
           </button>
         </p>
       </section>
