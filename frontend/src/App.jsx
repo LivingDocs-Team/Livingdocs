@@ -1,3 +1,4 @@
+
 import { useState } from 'react';
 import './App.css';
 
@@ -5,6 +6,8 @@ import Register from './Register';
 import Profile from './Profile';
 import NotificationPreferences from './NotificationPreferences';
 import GitHubConnection from './github/GitHubConnection';
+import RepositoryManagement from './RepositoryManagement';
+import DocumentationManagement from './DocumentationManagement';
 
 function App() {
   const [page, setPage] = useState('login');
@@ -76,6 +79,42 @@ function App() {
     return (
       <>
         <GitHubConnection />
+
+        <p className="switch-page">
+          <button
+            type="button"
+            onClick={() => setPage('login')}
+          >
+            Back to login
+          </button>
+        </p>
+      </>
+    );
+  }
+
+  // Trang quản lý repositories
+  if (page === 'repositories') {
+    return (
+      <>
+        <RepositoryManagement />
+
+        <p className="switch-page">
+          <button
+            type="button"
+            onClick={() => setPage('login')}
+          >
+            Back to login
+          </button>
+        </p>
+      </>
+    );
+  }
+
+  // Trang quản lý tài liệu
+  if (page === 'documentation') {
+    return (
+      <>
+        <DocumentationManagement />
 
         <p className="switch-page">
           <button
@@ -183,6 +222,26 @@ function App() {
             onClick={() => setPage('github')}
           >
             GitHub connection
+          </button>
+        </p>
+
+        <p className="footer">
+          <button
+            className="text-button"
+            type="button"
+            onClick={() => setPage('repositories')}
+          >
+            Repository Management
+          </button>
+        </p>
+
+        <p className="footer">
+          <button
+            className="text-button"
+            type="button"
+            onClick={() => setPage('documentation')}
+          >
+            Documentation Management
           </button>
         </p>
       </section>
