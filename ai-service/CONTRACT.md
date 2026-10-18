@@ -45,7 +45,8 @@ và có thể được AI trích dẫn làm bằng chứng (mã `D1`, `D2`…).
 `handler`, `parameters`, `request_body`, `response`, `line_start`, `line_end`.
 
 `line_start` / `line_end`: số dòng (bắt đầu từ 1) của thực thể trong file. Không bắt buộc, nhưng
-thiếu thì bằng chứng chỉ trỏ được tới tên file thay vì `file.py:12-20`.
+thiếu thì bằng chứng chỉ trỏ được tới tên file thay vì `file.py:12-20`. ai-service cũng nhận tên
+`lineno` / `end_lineno` mà bộ phân tích hiện đang gửi (LD-390).
 
 ## Lưu ý cho LD-328
 
