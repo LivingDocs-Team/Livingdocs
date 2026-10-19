@@ -1,0 +1,275 @@
+{
+  "scope": "repository",
+  "target": "acme/shop",
+  "files": [
+    {
+      "path": "shop/cart_service.py",
+      "language": "python",
+      "module": null,
+      "status": "ok",
+      "error": null,
+      "classes": [
+        {
+          "name": "Cart",
+          "bases": [],
+          "docstring": "A shopping cart: product id -> quantity.",
+          "methods": []
+        },
+        {
+          "name": "CartService",
+          "bases": [],
+          "docstring": "Business rules for shopping carts. Prices are in VND and include VAT.",
+          "methods": [
+            {
+              "name": "__init__",
+              "signature": "def __init__(self, prices: Dict[int, float]) -> None",
+              "parameters": [
+                {
+                  "name": "prices",
+                  "type": "Dict[int, float]",
+                  "default": null,
+                  "description": null
+                }
+              ],
+              "return_type": "None",
+              "docstring": null,
+              "source": "    def __init__(self, prices: Dict[int, float]) -> None:\n        self.prices = prices\n        self.carts: Dict[int, Cart] = {}",
+              "lineno": 15,
+              "end_lineno": 17
+            },
+            {
+              "name": "add_item",
+              "signature": "def add_item(self, cart_id: int, product_id: int, quantity: int=1) -> Cart",
+              "parameters": [
+                {
+                  "name": "cart_id",
+                  "type": "int",
+                  "default": null,
+                  "description": null
+                },
+                {
+                  "name": "product_id",
+                  "type": "int",
+                  "default": null,
+                  "description": null
+                },
+                {
+                  "name": "quantity",
+                  "type": "int",
+                  "default": "1",
+                  "description": null
+                }
+              ],
+              "return_type": "Cart",
+              "docstring": "Add a product to the cart, creating the cart if needed.",
+              "source": "    def add_item(self, cart_id: int, product_id: int, quantity: int = 1) -> Cart:\n        \"\"\"Add a product to the cart, creating the cart if needed.\"\"\"\n        if quantity <= 0:\n            raise ValueError(\"quantity must be positive\")\n        cart = self.carts.setdefault(cart_id, Cart())\n        cart.items[product_id] = cart.items.get(product_id, 0) + quantity\n        return cart",
+              "lineno": 19,
+              "end_lineno": 25
+            },
+            {
+              "name": "total",
+              "signature": "def total(self, cart_id: int) -> float",
+              "parameters": [
+                {
+                  "name": "cart_id",
+                  "type": "int",
+                  "default": null,
+                  "description": null
+                }
+              ],
+              "return_type": "float",
+              "docstring": "Total price of the cart including VAT.",
+              "source": "    def total(self, cart_id: int) -> float:\n        \"\"\"Total price of the cart including VAT.\"\"\"\n        cart = self.carts.get(cart_id, Cart())\n        return sum(self.prices[p] * q for p, q in cart.items.items())",
+              "lineno": 27,
+              "end_lineno": 30
+            }
+          ]
+        }
+      ],
+      "functions": [],
+      "endpoints": []
+    },
+    {
+      "path": "shop/routes.py",
+      "language": "python",
+      "module": null,
+      "status": "ok",
+      "error": null,
+      "classes": [],
+      "functions": [
+        {
+          "name": "get_cart_total",
+          "signature": "def get_cart_total(cart_id: int) -> float",
+          "parameters": [
+            {
+              "name": "cart_id",
+              "type": "int",
+              "default": null,
+              "description": null
+            }
+          ],
+          "return_type": "float",
+          "docstring": "Return the cart total in VND.",
+          "source": "def get_cart_total(cart_id: int) -> float:\n    \"\"\"Return the cart total in VND.\"\"\"\n    return service.total(cart_id)",
+          "lineno": 10,
+          "end_lineno": 12
+        },
+        {
+          "name": "add_cart_item",
+          "signature": "def add_cart_item(cart_id: int, product_id: int, quantity: int=1) -> dict",
+          "parameters": [
+            {
+              "name": "cart_id",
+              "type": "int",
+              "default": null,
+              "description": null
+            },
+            {
+              "name": "product_id",
+              "type": "int",
+              "default": null,
+              "description": null
+            },
+            {
+              "name": "quantity",
+              "type": "int",
+              "default": "1",
+              "description": null
+            }
+          ],
+          "return_type": "dict",
+          "docstring": null,
+          "source": "def add_cart_item(cart_id: int, product_id: int, quantity: int = 1) -> dict:\n    cart = service.add_item(cart_id, product_id, quantity)\n    return {\"items\": cart.items}",
+          "lineno": 16,
+          "end_lineno": 18
+        }
+      ],
+      "endpoints": [
+        {
+          "http_method": "GET",
+          "path": "/carts/{cart_id}/total",
+          "handler": "get_cart_total",
+          "parameters": [
+            {
+              "name": "cart_id",
+              "type": "int",
+              "default": null,
+              "description": null
+            }
+          ],
+          "request_body": null,
+          "response": null
+        },
+        {
+          "http_method": "POST",
+          "path": "/carts/{cart_id}/items",
+          "handler": "add_cart_item",
+          "parameters": [
+            {
+              "name": "cart_id",
+              "type": "int",
+              "default": null,
+              "description": null
+            },
+            {
+              "name": "product_id",
+              "type": "int",
+              "default": null,
+              "description": null
+            },
+            {
+              "name": "quantity",
+              "type": "int",
+              "default": "1",
+              "description": null
+            }
+          ],
+          "request_body": null,
+          "response": null
+        }
+      ]
+    },
+    {
+      "path": "shop/OrderController.java",
+      "language": "java",
+      "module": null,
+      "status": "ok",
+      "error": null,
+      "classes": [
+        {
+          "name": "OrderController",
+          "bases": [],
+          "docstring": null,
+          "methods": [
+            {
+              "name": "countOrders",
+              "signature": "int countOrders(String customerId)",
+              "parameters": [
+                {
+                  "name": "customerId",
+                  "type": "String",
+                  "default": null,
+                  "description": null
+                }
+              ],
+              "return_type": "int",
+              "docstring": null,
+              "source": "    public int countOrders(@PathVariable String customerId) {\n        return 0;\n    }",
+              "lineno": 11,
+              "end_lineno": 13
+            },
+            {
+              "name": "createOrder",
+              "signature": "String createOrder(String body)",
+              "parameters": [
+                {
+                  "name": "body",
+                  "type": "String",
+                  "default": null,
+                  "description": null
+                }
+              ],
+              "return_type": "String",
+              "docstring": null,
+              "source": "    public String createOrder(@RequestBody String body) {\n        return \"created\";\n    }",
+              "lineno": 16,
+              "end_lineno": 18
+            }
+          ]
+        }
+      ],
+      "functions": [],
+      "endpoints": []
+    },
+    {
+      "path": "shop/broken.py",
+      "language": "python",
+      "module": null,
+      "status": "invalid",
+      "error": "SyntaxError line 1: invalid syntax",
+      "classes": [],
+      "functions": [],
+      "endpoints": []
+    },
+    {
+      "path": "shop/empty.py",
+      "language": "python",
+      "module": null,
+      "status": "empty",
+      "error": "File rỗng, không có nội dung để phân tích.",
+      "classes": [],
+      "functions": [],
+      "endpoints": []
+    },
+    {
+      "path": "shop/widget.js",
+      "language": "unknown",
+      "module": null,
+      "status": "unsupported",
+      "error": "Ngôn ngữ với đuôi tệp '.js' chưa được hỗ trợ.",
+      "classes": [],
+      "functions": [],
+      "endpoints": []
+    }
+  ]
+}
