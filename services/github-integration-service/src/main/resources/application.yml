@@ -29,6 +29,14 @@ github:
 security:
   token-encryption-key: ${TOKEN_ENCRYPTION_KEY:}
 
+app:
+  cors:
+    # Địa chỉ frontend được gọi API từ trình duyệt, cách nhau bởi dấu phẩy
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
+  # Trang frontend nhận kết quả sau khi kết nối GitHub, ví dụ http://localhost:3000
+  # Để trống thì /api/github/callback trả JSON
+  frontend-url: ${FRONTEND_URL:}
+
 management:
   endpoints:
     web:
