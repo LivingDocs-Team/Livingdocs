@@ -122,3 +122,22 @@ jobs:
       - name: Run AI service tests
         working-directory: ai-service
         run: python -m pytest -q
+  docker-build:
+    name: Docker Compose Build and Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TOKEN_ENCRYPTION_KEY: ci-placeholder-not-a-secret
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Validate Docker Compose configuration
+        run: docker compose config
+
+      - name: Build Docker Compose services
+        run: docker compose build
