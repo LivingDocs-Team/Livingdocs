@@ -12,7 +12,7 @@ Công nghệ: Java 21, Spring Boot 3.5, PostgreSQL, Flyway, Swagger (springdoc).
 | Method | Endpoint | Mô tả |
 |---|---|---|
 | GET | `/api/github/authorize-url` | Tạo link kết nối GitHub (`authorizeUrl`) và link cài app (`installUrl`) |
-| GET | `/api/github/callback` | GitHub gọi về sau khi người dùng cho phép (Redirect URI) |
+| GET | `/api/github/callback` | GitHub gọi về sau khi người dùng cho phép (Redirect URI). Có `FRONTEND_URL` thì chuyển người dùng về frontend |
 | GET | `/api/github/connection` | Xem trạng thái kết nối |
 | DELETE | `/api/github/connection` | Ngắt kết nối, thu hồi token |
 | GET | `/api/github/repos/available` | Liệt kê repo mà GitHub App được phép truy cập |
@@ -21,12 +21,14 @@ Công nghệ: Java 21, Spring Boot 3.5, PostgreSQL, Flyway, Swagger (springdoc).
 | GET | `/api/repositories/{id}` | Chi tiết repo |
 | POST | `/api/repositories/{id}/sync` | Đồng bộ repo với GitHub (LD-63): thông tin repo, commit, danh sách file, nội dung file java/python |
 | GET | `/api/repositories/{id}/sync/latest` | Kết quả lần đồng bộ gần nhất |
-| GET | `/api/repositories/{id}/sync/latest/analysis-input` | Dữ liệu gửi sang service phân tích code (LD-328) |
+| GET | `/api/repositories/{id}/sync/latest/analysis-input` | Dữ liệu gửi sang service phân tích code (`POST /api/v1/analyze-repo`, LD-395) |
 | DELETE | `/api/repositories/{id}` | Gỡ repo khỏi workspace |
 
 > Tạm thời người dùng được xác định bằng header **`X-User-Id`**. Khi service đăng nhập của TV1 xong, header này sẽ được thay bằng JWT.
 
 Swagger UI: http://localhost:8082/swagger-ui.html
+
+**Frontend gọi API:** xem [docs/frontend-api-guide.md](docs/frontend-api-guide.md) (cấu hình proxy, CORS, luồng kết nối GitHub, bảng lỗi).
 
 ## Chạy trên máy
 
@@ -53,11 +55,13 @@ Test dùng database H2 trong bộ nhớ và một GitHub giả (mock), nên khô
 mvn test
 ```
 
+CI (job **GitHub Integration Service Test** trong `.github/workflows/ci.yml`) chạy toàn bộ test này ở mỗi lần push và pull request, rồi chạy thêm `GitHubRepositoryFetcherLiveTest` với GitHub thật. Báo cáo kiểm thử (LD-391): [docs/github-test-report.md](docs/github-test-report.md).
+
 ## Thử luồng kết nối thật
 
 1. Cài GitHub App vào tài khoản của bạn và chọn vài repo: https://github.com/apps/livingdocs-dev-hai/installations/new
 2. Gọi `GET /api/github/authorize-url` (có header `X-User-Id: demo-user`), rồi mở `authorizeUrl` trong trình duyệt và bấm **Authorize**.
-3. GitHub tự gọi về `/api/github/callback`. Nếu thấy `"Kết nối GitHub thành công"` là xong.
+3. GitHub tự gọi về `/api/github/callback`. Nếu thấy `"Kết nối GitHub thành công"` là xong. (Nếu đã đặt `FRONTEND_URL` trong `.env` thì trình duyệt chuyển về trang đó kèm `?github=connected&login=...`.)
 4. Gọi `GET /api/github/repos/available`, rồi `POST /api/workspaces/ws-1/repositories`.
 
 ## Đồng bộ repository (LD-63)
