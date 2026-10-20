@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field
 
 HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 
@@ -15,7 +15,7 @@ def now() -> datetime:
 # ---------- Input: source code analyzed by LD-328 (see CONTRACT.md) ----------
 
 class Parameter(BaseModel):
-    name: str = Field(min_length=1)
+    name: str
     type: Optional[str] = None
     default: Optional[str] = None
     description: Optional[str] = None
@@ -23,7 +23,7 @@ class Parameter(BaseModel):
 
 # ai-service/app/models.py
 class Function(BaseModel):
-    name: str = Field(min_length=1)
+    name: str
     signature: Optional[str] = None
     parameters: List[Parameter] = Field(default_factory=list)
     return_type: Optional[str] = None
@@ -43,7 +43,7 @@ class Function(BaseModel):
 
 
 class ClassInfo(BaseModel):
-    name: str = Field(min_length=1)
+    name: str
     bases: List[str] = Field(default_factory=list)
     docstring: Optional[str] = None
     methods: List[Function] = Field(default_factory=list)
@@ -62,7 +62,7 @@ class ClassInfo(BaseModel):
 
 class Endpoint(BaseModel):
     http_method: str
-    path: str = Field(min_length=1)
+    path: str
     handler: Optional[str] = None
     parameters: List[Parameter] = Field(default_factory=list)
     request_body: Optional[str] = None
@@ -88,18 +88,14 @@ class AnalysisStatus(str, Enum):
 
 
 class FileAnalysis(BaseModel):
-    path: str = Field(min_length=1)
+    path: str
     language: Optional[str] = None
     module: Optional[str] = None
-    status: AnalysisStatus = AnalysisStatus.ok
-    error: Optional[str] = None       # analyzer message when status != ok
+    status: str = "ok"
+    error: Optional[str] = None
     classes: List[ClassInfo] = Field(default_factory=list)
     functions: List[Function] = Field(default_factory=list)
     endpoints: List[Endpoint] = Field(default_factory=list)
-
-    def entity_count(self) -> int:
-        methods = sum(len(c.methods) for c in self.classes)
-        return len(self.classes) + methods + len(self.functions) + len(self.endpoints)
 
 
 class ContextDocument(BaseModel):
