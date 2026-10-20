@@ -9,7 +9,7 @@ Người làm: Đăng (TV2). Phạm vi: `services/github-integration-service` (k
 | Test tự động (GitHub giả, database H2) | **68 test**, chạy bằng "Run All Tests" hoặc `mvn test` |
 | Test với GitHub thật, tự động | `GitHubRepositoryFetcherLiveTest`, chạy trong CI ở mỗi lần push và pull request |
 | Test tay trên Swagger với GitHub thật (13/10) | Đạt: đồng bộ 106 file, 60/60 file java/python có nội dung, lỗi sai nhánh trả 404 đúng mã |
-| Chuỗi GitHub → service phân tích → ai-service (19/10) | Đạt, sau khi sửa lỗi của service phân tích trên `main` (mục 6) |
+| Chuỗi GitHub → service phân tích → ai-service | 19/10 phát hiện service phân tích lỗi 500; 20/10 chạy lại trên `main` mới nhất: đạt (mục 6) |
 | CI | Thêm job **GitHub Integration Service Test** vào `.github/workflows/ci.yml` |
 
 ## 2. Cách chạy
@@ -40,7 +40,7 @@ Job CI gồm 3 bước:
 | `TokenEncryptorTest` | 5 | Mã hoá token AES-GCM, khoá sai độ dài hoặc thiếu khoá |
 | `OAuthStateStoreTest` | 3 | State chỉ dùng 1 lần, state lạ, state hết hạn |
 | `FileSelectionRulesTest` | 5 | Nhận diện ngôn ngữ, bỏ qua thư viện và file build, chặn đường dẫn bất thường |
-| `AnalysisInputTest` | 2 | Dữ liệu gửi service phân tích: chỉ file có nội dung, đúng tên trường (`repo_name`, `files`) |
+| `AnalysisInputTest` | 2 | Dữ liệu gửi service phân tích: chỉ file có nội dung, đúng tên trường (`scope`, `target`, `files`) |
 | `GitHubRepositoryFetcherLiveTest` | 1 | GitHub thật (tắt mặc định, CI bật) |
 
 ## 4. Các lỗi GitHub đã kiểm thử
@@ -82,23 +82,21 @@ Cảnh báo (đồng bộ vẫn thành công) cũng có test: repo archived, rep
 | `POST .../sync` với `{"branch": "khong-co"}` | `404 BRANCH_NOT_FOUND` |
 | `GET /api/repositories/{id}` | `CONNECTED`, `lastSyncedAt` = 2026-10-13T16:39:13Z |
 
-## 6. Kiểm thử liên service: GitHub → service phân tích → ai-service (19/10/2026)
+## 6. Kiểm thử liên service: GitHub → service phân tích → ai-service
 
 Đầu vào: `docs/samples/analysis-input.sample.json` (3 file thật của repo nhóm, đúng dạng `GET .../analysis-input`).
 
-**Phát hiện trên `main` (commit `7850180`):**
+**19/10, `main` commit `7850180`:** `POST /api/v1/analyze-repo` của service phân tích trả **500**: `AttributeError: type object 'ASTAnalyzer' has no attribute 'parse_code'` (thiếu cả `FileReader.detect_language`). Vì vậy job CI **AI Service Integration Test** lỗi ở `test_analyzer_to_ai_service_pipeline`, kể cả với pull request không sửa gì service phân tích. Đã báo nhóm kèm bản sửa.
 
-- `POST /api/v1/analyze-repo` của service phân tích trả **500**: `AttributeError: type object 'ASTAnalyzer' has no attribute 'parse_code'` (thiếu cả `FileReader.detect_language`). Vì vậy job CI **AI Service Integration Test** đang lỗi ở `test_analyzer_to_ai_service_pipeline`, kể cả với pull request không sửa gì service phân tích.
-- Service phân tích đọc tên repo ở trường `repo_name`, còn body của mình trước đây chỉ có `target`, nên kết quả bị đặt tên `default_repo`. Đã sửa phía mình: gửi cả `repo_name` và `target`.
-
-**Trạng thái:** bản sửa cho service phân tích (thêm 2 hàm còn thiếu, nhận cả `repo_name` lẫn `target`, cập nhật 1 test cũ) đã gửi Lâm, chờ merge. Đã chạy thử với bản sửa:
+**20/10, `main` commit `7bbfd8e`:** lỗi đã được sửa ở LD-396 (PR #29): thêm 2 hàm còn thiếu, service phân tích nhận tên repo ở trường `target` (bắt buộc). Chạy lại:
 
 | Kiểm tra | Kết quả |
 |---|---|
-| Test của service phân tích (`tests/`) | 13 passed, 1 skipped (test giao diện cần Playwright) |
+| Test của service phân tích (`tests/`) | 15 passed (`test_frontend.py` cần trình duyệt Playwright và frontend ở cổng 3000, không chạy ở đây) |
 | Test của ai-service | 65 passed, 3 skipped |
-| Test liên service (`pytest -m live`) | 2 passed |
+| Test liên service (`pytest -m live`, giống job CI) | 2 passed |
 | Gửi `analysis-input.sample.json` → service phân tích → `/generate` | Service phân tích trả `target` = `LivingDocs-Team/Livingdocs`, 3 file `ok`; ai-service trả job `completed`, tài liệu Markdown bắt đầu bằng `# LivingDocs-Team/Livingdocs` |
+| Body thiếu `target` | `422` (bắt buộc có `target`); `AnalysisInput` của mình luôn có `target` |
 
 ## 7. CI hiện tại
 
@@ -108,9 +106,9 @@ Cảnh báo (đồng bộ vẫn thành công) cũng có test: repo archived, rep
 | Frontend Build and Test | Lint, build | |
 | **GitHub Integration Service Test** | 68 test + test GitHub thật + báo cáo test | **Mới (LD-391)** |
 | AI Service Build and Test | Test của ai-service | |
-| AI Service Integration Test | Service phân tích + ai-service chạy thật | Đang lỗi trên `main` cho đến khi merge bản sửa ở mục 6 |
+| AI Service Integration Test | Service phân tích + ai-service chạy thật | Lỗi ngày 19/10, chạy lại đạt sau LD-396 (mục 6) |
 
-Đề xuất: sau khi bản sửa service phân tích được merge, thêm test của service phân tích (`tests/`) vào CI để lỗi như mục 6 bị chặn ngay ở pull request.
+Đề xuất: thêm test của service phân tích (`tests/`, trừ `test_frontend.py` cần trình duyệt) vào CI để lỗi như mục 6 bị chặn ngay ở pull request.
 
 ## 8. Chưa kiểm thử được
 

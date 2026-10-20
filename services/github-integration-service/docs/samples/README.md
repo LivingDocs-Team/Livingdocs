@@ -10,7 +10,7 @@ Dữ liệu được tạo bằng **chính code đồng bộ** (`GitHubRepositor
 | `sync-snapshot.sample.json` | Minh, Nhân | Kết quả đồng bộ đầy đủ (`RepositorySnapshot`): 60 file java/python. **Nội dung file được rút gọn 160 ký tự** cho dễ đọc |
 | `sync-api-response.sample.json` | **Khôi** (frontend), Nhân | Response của `POST /api/repositories/{id}/sync` và `GET .../sync/latest`: không có nội dung file, có cờ `analyzable` |
 | `sync-errors.sample.json` | **Khôi**, Nhân | Response lỗi thật cho 9 mã lỗi: 400 / 401 / 403 / 404 / 409 / 429 / 503 |
-| `analysis-input.sample.json` | **Lâm** (LD-395), Nhân | Body gửi sang service phân tích code (`AnalysisInput.from(snapshot)`), rút gọn còn 3 file thật (2 python, 1 java) **kèm nội dung đầy đủ**: `repo_name`, `files[{path, language, content}]` |
+| `analysis-input.sample.json` | **Lâm** (LD-395), Nhân | Body gửi sang service phân tích code (`AnalysisInput.from(snapshot)`), rút gọn còn 3 file thật (2 python, 1 java) **kèm nội dung đầy đủ**: `scope`, `target`, `files[{path, language, content}]` |
 
 ## Chạy test
 
@@ -31,7 +31,7 @@ mvn test
 |---|---|
 | `GitHubRepositoryFetcherTest` (25) | Đồng bộ thành công, các cảnh báo, các lỗi 401 / 403 / 404 / 409 / 422 / 429 / 5xx / mất mạng (GitHub giả) |
 | `FileSelectionRulesTest` (5) | Nhận diện ngôn ngữ, bỏ qua `node_modules` / `target`…, chặn đường dẫn bất thường |
-| `AnalysisInputTest` (2) | Dữ liệu gửi sang service phân tích: chỉ lấy file có nội dung, đúng tên field (`repo_name`, `files`) |
+| `AnalysisInputTest` (2) | Dữ liệu gửi sang service phân tích: chỉ lấy file có nội dung, đúng tên field (`scope`, `target`, `files`) |
 | `GitHubClientRepositoryApiTest` (7) | Đọc đúng JSON của GitHub và mã lỗi (HTTP server giả) |
 | `RepositorySyncApiTest` (8) | API đồng bộ: thành công, `/sync/latest`, `/analysis-input`, `403`, `404`, `400`, nhánh không tồn tại, repo bị xoá, token hỏng, rate limit `429` |
 | `GitHubIntegrationFlowTest`, `TokenEncryptorTest`, `OAuthStateStoreTest` (12) | Luồng kết nối GitHub và quản lý repo (Sprint 1) |
