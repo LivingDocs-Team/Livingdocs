@@ -21,7 +21,6 @@ class AnalysisInputTest {
                 new SourceFile("src/Big.java", "2".repeat(40), 900_000, "java", null, SkipReason.TOO_LARGE),
                 new SourceFile("src/App.java", "3".repeat(40), 12, "java", "class App {}", null))));
 
-        assertThat(input.repoName()).isEqualTo("acme/shop");
         assertThat(input.scope()).isEqualTo("repository");
         assertThat(input.target()).isEqualTo("acme/shop");
         assertThat(input.files()).containsExactly(
@@ -29,7 +28,7 @@ class AnalysisInputTest {
                 new AnalysisInput.FileInput("src/App.java", "java", "class App {}"));
     }
 
-    /** Tên field phải khớp với body mà POST /api/v1/analyze-repo nhận (contract LD-395: repo_name, scope, files). */
+    /** Tên field phải khớp với body mà POST /api/v1/analyze-repo (LD-328) nhận. */
     @Test
     void jsonMatchesWhatAnalysisServiceExpects() throws Exception {
         ObjectMapper mapper = new ObjectMapper();
@@ -38,7 +37,7 @@ class AnalysisInputTest {
 
         JsonNode actual = mapper.valueToTree(input);
         JsonNode expected = mapper.readTree("""
-                {"repo_name": "acme/shop", "scope": "repository", "target": "acme/shop",
+                {"scope": "repository", "target": "acme/shop",
                  "files": [{"path": "src/App.java", "language": "java", "content": "class App {}"}]}""");
 
         assertThat(actual).isEqualTo(expected);
