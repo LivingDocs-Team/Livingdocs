@@ -8,7 +8,6 @@ app = FastAPI(title="Source Code Analysis Service", version="1.0.0")
 
 @app.post("/api/v1/analyze-repo", response_model=RepoAnalysisResponse)
 async def analyze_repository(request: RepoAnalysisRequest):
-    """API Phân tích Repository nhận danh sách tệp theo Input Contract (LD-395)"""
     if not request.files:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -17,31 +16,26 @@ async def analyze_repository(request: RepoAnalysisRequest):
 
     analyzed_files = []
     for file_input in request.files:
-        # Tự nhận diện ngôn ngữ nếu client không truyền
         lang = file_input.language or FileReader.detect_language(file_input.path)
-        
-        # Xử lý tệp rỗng
+
         if not file_input.content.strip():
             analyzed_files.append(FileAnalysis(path=file_input.path, language=lang, status="empty"))
             continue
-            
-        # Xử lý ngôn ngữ chưa hỗ trợ
+
         if lang not in ("python", "java"):
             analyzed_files.append(FileAnalysis(
-                path=file_input.path, 
-                language=lang, 
-                status="unsupported", 
+                path=file_input.path,
+                language=lang,
+                status="unsupported",
                 error=f"Ngôn ngữ '{lang}' chưa hỗ trợ"
             ))
             continue
 
-        # Phân tích cú pháp AST
         tree, error = ASTAnalyzer.parse_code(file_input.content, lang)
         if error:
             analyzed_files.append(FileAnalysis(path=file_input.path, language=lang, status="invalid", error=error))
             continue
 
-        # Trích xuất các thực thể (Classes, Functions, Endpoints)
         if lang == "python":
             classes, functions, endpoints = EntityExtractor.extract_python_entities(tree, file_input.content)
         else:
@@ -58,6 +52,6 @@ async def analyze_repository(request: RepoAnalysisRequest):
 
     return RepoAnalysisResponse(
         scope=request.scope,
-        target=request.repo_name or "default_repo",
+        target=request.target,
         files=analyzed_files
     )
