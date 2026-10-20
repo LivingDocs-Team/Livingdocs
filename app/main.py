@@ -45,3 +45,6 @@ async def analyze_repository(request: RepoAnalysisRequest):
             ))
 
     return RepoAnalysisResponse(scope=request.scope, target=request.target, files=analyzed_files)
+@app.get("/health")
+async def health():
+    return {"status": "ok"}

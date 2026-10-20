@@ -194,3 +194,24 @@ jobs:
         run: |
           echo "--- analyzer ---"; cat "$RUNNER_TEMP/analyzer.log" || true
           echo "--- ai-service ---"; cat "$RUNNER_TEMP/ai-service.log" || true
+      - name: Start analyzer service (LD-328) on port 8000
+        working-directory: ai-service/tests/integration/fixtures
+        run: |
+          nohup python -m uvicorn --app-dir "$GITHUB_WORKSPACE" app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
+          sleep 3
+
+      - name: Start AI service on port 8001
+        working-directory: ai-service
+        run: |
+          nohup python -m uvicorn main:app --host 127.0.0.1 --port 8001 > "$RUNNER_TEMP/ai-service.log" 2>&1 &
+          sleep 3
+
+      - name: Wait for both services
+        run: |
+          curl --retry 30 --retry-delay 1 --retry-connrefused --fail http://127.0.0.1:8001/health
+          curl --retry 30 --retry-delay 1 --retry-connrefused --fail http://127.0.0.1:8000/openapi.json
+      - name: Show service logs
+        if: failure()
+        run: |
+          echo "--- analyzer ---"; cat "$RUNNER_TEMP/analyzer.log" || true
+          echo "--- ai-service ---"; cat "$RUNNER_TEMP/ai-service.log" || true
