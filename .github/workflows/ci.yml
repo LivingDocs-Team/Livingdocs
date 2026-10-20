@@ -99,6 +99,43 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+  github-integration-test:
+    name: GitHub Integration Service Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: services/github-integration-service/pom.xml
+
+      - name: Build and test (H2 database, mocked GitHub)
+        run: mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml verify
+
+      - name: Live test against real GitHub API
+        env:
+          GITHUB_LIVE_TEST: "true"
+          GITHUB_LIVE_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml test
+          -Dtest=GitHubRepositoryFetcherLiveTest -Dsurefire.failIfNoSpecifiedTests=false
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: github-integration-test-reports
+          path: services/github-integration-service/target/surefire-reports/
+          if-no-files-found: ignore
+
   ai-service-test:
     name: AI Service Build and Test
     runs-on: ubuntu-latest
