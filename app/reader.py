@@ -6,6 +6,16 @@ class FileReader:
         ".py": "python",
         ".java": "java"
     }
+    @staticmethod
+    def detect_language(file_path: str) -> str:
+        ext = os.path.splitext(file_path)[1].lower()
+
+        languages = {
+            **FileReader.SUPPORTED_LANGUAGES,
+            ".rb": "ruby",
+        }
+
+        return languages.get(ext, "unknown")
 
     @staticmethod
     def read_code_file(file_path: str, repo_path: str = "") -> tuple[FileAnalysis, str]:
