@@ -1,9 +1,8 @@
 """Data models: input from the code analyzer (LD-328), templates, and generation jobs."""
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, List, Optional
-
-from pydantic import AliasChoices, BaseModel, Field
+from typing import List, Optional
+from pydantic import BaseModel, Field, field_validator
 
 HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 
@@ -29,17 +28,8 @@ class Function(BaseModel):
     return_type: Optional[str] = None
     docstring: Optional[str] = None
     source: Optional[str] = None
-
-    line_start: Optional[int] = Field(
-        default=None,
-        ge=1,
-        validation_alias=AliasChoices("line_start", "lineno"),
-    )
-    line_end: Optional[int] = Field(
-        default=None,
-        ge=1,
-        validation_alias=AliasChoices("line_end", "end_lineno"),
-    )
+    lineno: Optional[int] = None
+    end_lineno: Optional[int] = None
 
 
 class ClassInfo(BaseModel):
@@ -47,17 +37,6 @@ class ClassInfo(BaseModel):
     bases: List[str] = Field(default_factory=list)
     docstring: Optional[str] = None
     methods: List[Function] = Field(default_factory=list)
-
-    line_start: Optional[int] = Field(
-        default=None,
-        ge=1,
-        validation_alias=AliasChoices("line_start", "lineno"),
-    )
-    line_end: Optional[int] = Field(
-        default=None,
-        ge=1,
-        validation_alias=AliasChoices("line_end", "end_lineno"),
-    )
 
 
 class Endpoint(BaseModel):
@@ -67,17 +46,6 @@ class Endpoint(BaseModel):
     parameters: List[Parameter] = Field(default_factory=list)
     request_body: Optional[str] = None
     response: Optional[str] = None
-
-    line_start: Optional[int] = Field(
-        default=None,
-        ge=1,
-        validation_alias=AliasChoices("line_start", "lineno"),
-    )
-    line_end: Optional[int] = Field(
-        default=None,
-        ge=1,
-        validation_alias=AliasChoices("line_end", "end_lineno"),
-    )
 
 
 class AnalysisStatus(str, Enum):
