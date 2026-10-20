@@ -63,7 +63,20 @@ Poll `GET /jobs/{id}` until `status` is `completed` (or `failed`), then read `/j
 ## Tests
 
 ```bash
-pytest -q
+pytest -q                      # unit + in-process integration tests (no network)
+```
+
+### Integration tests (LD-390)
+
+`tests/integration/` checks the AI service together with the analyzer (LD-328). Details and the
+list of test cases: [`tests/integration/README.md`](tests/integration/README.md).
+
+```bash
+# two services running (CI job `ai-service-integration` does this automatically)
+ANALYZER_URL=http://localhost:8000 AI_SERVICE_URL=http://localhost:8001 pytest -m live -v
+
+# real Claude API, by hand only
+RUN_LLM_TESTS=1 ANTHROPIC_API_KEY=... pytest -m llm -v
 ```
 
 ## Documentation generation (LD-340)

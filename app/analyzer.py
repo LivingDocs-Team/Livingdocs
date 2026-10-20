@@ -6,15 +6,37 @@ import javalang
 class ASTAnalyzer:
     @staticmethod
     def parse_code(code: str, language: str):
-        if language == "python":
+        """
+        Parse source code according to the specified programming language.
+
+        Args:
+            code: Source code to parse.
+            language: Programming language ('python' or 'java').
+
+        Returns:
+            A tuple (syntax_tree, error_message).
+            On success, error_message is None.
+            On failure, syntax_tree is None.
+        """
+        if not isinstance(code, str):
+            return None, "Invalid input: code must be a string."
+
+        if not isinstance(language, str):
+            return None, "Invalid input: language must be a string."
+
+        normalized_language = language.strip().lower()
+
+        if normalized_language == "python":
             return ASTAnalyzer.parse_python_ast(code)
-        elif language == "java":
+
+        if normalized_language == "java":
             return ASTAnalyzer.parse_java_ast(code)
-        else:
-            return None, f"Unsupported language: {language}"
+
+        return None, f"Unsupported language: {language}"
 
     @staticmethod
     def parse_python_ast(code: str):
+        """Parse Python source code into an AST."""
         try:
             return ast.parse(code), None
         except SyntaxError as e:
@@ -24,6 +46,7 @@ class ASTAnalyzer:
 
     @staticmethod
     def parse_java_ast(code: str):
+        """Parse Java source code into an AST."""
         try:
             return javalang.parse.parse(code), None
         except javalang.parser.JavaSyntaxError as e:
