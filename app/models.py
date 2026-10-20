@@ -2,14 +2,16 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 class FileInput(BaseModel):
-    """Cấu trúc dữ liệu nhận vào của 1 tệp trong Repository"""
-    path: str = Field(..., description="Đường dẫn tương đối của tệp trong repo (vd: app/main.py)")
-    content: str = Field(..., description="Nội dung mã nguồn của tệp")
-    language: Optional[str] = Field(None, description="Ngôn ngữ lập trình (python, java,...). Tự nhận diện nếu bỏ trống.")
-
+    """Input data for a source file."""
+    path: str = Field(..., description="Path of the source file.")
+    content: str = Field(..., description="Source code content.")
+    language: Optional[str] = Field(
+        None,
+        description="Programming language, e.g. python or java."
+    )
 class RepoAnalysisRequest(BaseModel):
     """Payload gửi lên API POST /api/v1/analyze-repo"""
-    repo_name: Optional[str] = Field("default_repo", description="Tên của Repository")
+    target: str = Field(..., description="Tên repository, ví dụ owner/repo")
     scope: str = Field("repository", description="Phạm vi phân tích: file | module | repository")
     files: List[FileInput] = Field(default_factory=list, description="Danh sách các tệp mã nguồn cần phân tích")
     options: Optional[dict] = Field(default_factory=dict, description="Cấu hình bổ sung")

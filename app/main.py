@@ -58,6 +58,6 @@ async def analyze_repository(request: RepoAnalysisRequest):
 
     return RepoAnalysisResponse(
         scope=request.scope,
-        target=request.repo_name or "default_repo",
+        target=request.target,
         files=analyzed_files
     )
