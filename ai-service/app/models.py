@@ -21,15 +21,25 @@ class Parameter(BaseModel):
     description: Optional[str] = None
 
 
+# ai-service/app/models.py
 class Function(BaseModel):
     name: str = Field(min_length=1)
     signature: Optional[str] = None
     parameters: List[Parameter] = Field(default_factory=list)
     return_type: Optional[str] = None
     docstring: Optional[str] = None
-    source: Optional[str] = None  # optional code snippet, helps the AI explain logic
-    line_start: Optional[int] = Field(default=None, ge=1)  # location in the file (evidence)
-    line_end: Optional[int] = Field(default=None, ge=1)
+    source: Optional[str] = None
+
+    line_start: Optional[int] = Field(
+        default=None,
+        ge=1,
+        validation_alias=AliasChoices("line_start", "lineno"),
+    )
+    line_end: Optional[int] = Field(
+        default=None,
+        ge=1,
+        validation_alias=AliasChoices("line_end", "end_lineno"),
+    )
 
 
 class ClassInfo(BaseModel):
@@ -37,8 +47,17 @@ class ClassInfo(BaseModel):
     bases: List[str] = Field(default_factory=list)
     docstring: Optional[str] = None
     methods: List[Function] = Field(default_factory=list)
-    line_start: Optional[int] = Field(default=None, ge=1)
-    line_end: Optional[int] = Field(default=None, ge=1)
+
+    line_start: Optional[int] = Field(
+        default=None,
+        ge=1,
+        validation_alias=AliasChoices("line_start", "lineno"),
+    )
+    line_end: Optional[int] = Field(
+        default=None,
+        ge=1,
+        validation_alias=AliasChoices("line_end", "end_lineno"),
+    )
 
 
 class Endpoint(BaseModel):
@@ -48,16 +67,17 @@ class Endpoint(BaseModel):
     parameters: List[Parameter] = Field(default_factory=list)
     request_body: Optional[str] = None
     response: Optional[str] = None
-    line_start: Optional[int] = Field(default=None, ge=1)
-    line_end: Optional[int] = Field(default=None, ge=1)
 
-    @field_validator("http_method")
-    @classmethod
-    def _check_method(cls, v: str) -> str:
-        v = v.strip().upper()
-        if v not in HTTP_METHODS:
-            raise ValueError(f"invalid HTTP method '{v}'")
-        return v
+    line_start: Optional[int] = Field(
+        default=None,
+        ge=1,
+        validation_alias=AliasChoices("line_start", "lineno"),
+    )
+    line_end: Optional[int] = Field(
+        default=None,
+        ge=1,
+        validation_alias=AliasChoices("line_end", "end_lineno"),
+    )
 
 
 class AnalysisStatus(str, Enum):

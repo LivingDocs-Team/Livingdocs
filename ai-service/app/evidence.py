@@ -89,3 +89,33 @@ def location(ev: Evidence) -> str:
     if ev.line_start:
         return f"{ev.path}:{ev.line_start}"
     return ev.path
+
+# ai-service/app/evidence.py
+def _line_start(obj):
+    return getattr(obj, "line_start", None) or getattr(obj, "lineno", None)
+
+def _line_end(obj):
+    return getattr(obj, "line_end", None) or getattr(obj, "end_lineno", None)
+
+def build_catalog(f: FileAnalysis, retrieved: Optional[Retrieved] = None) -> EvidenceCatalog:
+    cat = EvidenceCatalog()
+    for n, ent in enumerate(entities(f), start=1):
+        obj = ent.obj
+        ev = Evidence(
+            id=f"E{n}",
+            kind=EvidenceKind.source,
+            path=f.path,
+            name=ent.key,
+            line_start=_line_start(obj),
+            line_end=_line_end(obj),
+            excerpt=_excerpt(obj),
+        )
+        cat.by_id[ev.id] = ev
+        cat.own[ent.key] = ev
+
+def normalize_line_numbers(obj):
+    if getattr(obj, "line_start", None) is None and hasattr(obj, "lineno"):
+        obj.line_start = obj.lineno
+    if getattr(obj, "line_end", None) is None and hasattr(obj, "end_lineno"):
+        obj.line_end = obj.end_lineno
+    return obj
