@@ -1,18 +1,6 @@
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
-class FileInput(BaseModel):
-    path: str
-    content: str
-    language: Optional[str] = None
-
-class RepoAnalysisRequest(BaseModel):
-    target: str = Field(..., description="Repository name, e.g. acme/shop")
-    scope: str = Field("repository", description="file | module | repository")
-    files: List[FileInput] = Field(default_factory=list)
-    file_paths: List[str] = Field(default_factory=list)
-    options: Optional[dict] = Field(default_factory=dict)
-
 class Parameter(BaseModel):
     name: str
     type: Optional[str] = None
@@ -26,8 +14,8 @@ class Function(BaseModel):
     return_type: Optional[str] = None
     docstring: Optional[str] = None
     source: Optional[str] = None
-    lineno: Optional[int] = None
-    end_lineno: Optional[int] = None
+    lineno: Optional[int] = None      # Dòng bắt đầu trong file
+    end_lineno: Optional[int] = None  # Dòng kết thúc trong file
 
 class ClassInfo(BaseModel):
     name: str
@@ -47,13 +35,8 @@ class FileAnalysis(BaseModel):
     path: str
     language: Optional[str] = None
     module: Optional[str] = None
-    status: str = "ok"
+    status: str = "ok"  # ok | empty | invalid | unsupported
     error: Optional[str] = None
     classes: List[ClassInfo] = Field(default_factory=list)
     functions: List[Function] = Field(default_factory=list)
     endpoints: List[Endpoint] = Field(default_factory=list)
-
-class RepoAnalysisResponse(BaseModel):
-    scope: str
-    target: str
-    files: List[FileAnalysis] = Field(default_factory=list)

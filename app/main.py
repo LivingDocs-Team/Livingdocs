@@ -1,50 +1,66 @@
-# app/main.py
-@app.post("/api/v1/analyze-repo", response_model=RepoAnalysisResponse)
-async def analyze_repository(request: RepoAnalysisRequest):
-    if not request.files:
-        raise HTTPException(status_code=422, detail="Danh sách files phân tích không được để rỗng.")
+from typing import List
+from fastapi import FastAPI
+from pydantic import BaseModel
+from app.models import FileAnalysis
+from app.reader import FileReader
+from app.analyzer import ASTAnalyzer
+from app.extractor import EntityExtractor
 
-    analyzed_files = []
-    for file_input in request.files:
-        lang = file_input.language or FileReader.detect_language(file_input.path)
-
-        try:
-            if not file_input.content.strip():
-                analyzed_files.append(FileAnalysis(path=file_input.path, language=lang, status="empty"))
-                continue
-
-            if lang not in ("python", "java"):
-                analyzed_files.append(FileAnalysis(path=file_input.path, language=lang, status="unsupported",
-                                                  error=f"Ngôn ngữ '{lang}' chưa hỗ trợ"))
-                continue
-
-            tree, error = ASTAnalyzer.parse_code(file_input.content, lang)
-            if error:
-                analyzed_files.append(FileAnalysis(path=file_input.path, language=lang, status="invalid", error=error))
-                continue
-
-            if lang == "python":
-                classes, functions, endpoints = EntityExtractor.extract_python_entities(tree, file_input.content)
-            else:
-                classes, functions, endpoints = EntityExtractor.extract_java_entities(tree, file_input.content)
-
-            analyzed_files.append(FileAnalysis(
-                path=file_input.path,
-                language=lang,
-                status="ok",
-                classes=classes,
-                functions=functions,
-                endpoints=endpoints
-            ))
-        except Exception as exc:
-            analyzed_files.append(FileAnalysis(
-                path=file_input.path,
-                language=lang,
-                status="invalid",
-                error=f"Analyzer crashed: {exc.__class__.__name__}: {exc}"
-            ))
-
-    return RepoAnalysisResponse(scope=request.scope, target=request.target, files=analyzed_files)
+app = FastAPI(title="LivingDocs - Source Code Analysis Service (LD-328)")
 @app.get("/health")
-async def health():
+def health():
     return {"status": "ok"}
+
+class AnalysisRequest(BaseModel):
+    scope: str = "file"  # file | module | repository
+    target: str
+    file_paths: List[str]
+
+class AnalysisResponse(BaseModel):
+    scope: str
+    target: str
+    files: List[FileAnalysis]
+
+@app.post("/api/v1/analyze-repo", response_model=AnalysisResponse)
+def analyze_repository(req: AnalysisRequest):
+    analyzed_files = []
+
+    for path in req.file_paths:
+        file_info, content = FileReader.read_code_file(path)
+
+        # Nếu file bị lỗi đọc / rỗng / không hỗ trợ -> giữ nguyên status & error
+        if file_info.status != "ok":
+            analyzed_files.append(file_info)
+            continue
+
+        # Phân tích Python
+        if file_info.language == "python":
+            tree, err = ASTAnalyzer.parse_python_ast(content)
+            if err:
+                file_info.status = "invalid"
+                file_info.error = err
+            else:
+                classes, funcs, endpoints = EntityExtractor.extract_python_entities(tree, content)
+                file_info.classes = classes
+                file_info.functions = funcs
+                file_info.endpoints = endpoints
+
+        # Phân tích Java
+        elif file_info.language == "java":
+            tree, err = ASTAnalyzer.parse_java_ast(content)
+            if err:
+                file_info.status = "invalid"
+                file_info.error = err
+            else:
+                classes, funcs, endpoints = EntityExtractor.extract_java_entities(tree, content)
+                file_info.classes = classes
+                file_info.functions = funcs
+                file_info.endpoints = endpoints
+
+        analyzed_files.append(file_info)
+
+    return AnalysisResponse(
+        scope=req.scope,
+        target=req.target,
+        files=analyzed_files
+    )

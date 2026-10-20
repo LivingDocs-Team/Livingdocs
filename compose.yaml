@@ -39,6 +39,7 @@
     ports:
       - "8080:8080"
     environment:
+      CODE_ANALYZER_URL: http://code-analyzer:8000
       DB_URL: jdbc:postgresql://backend-db:5432/cnpm
       DB_USERNAME: livingdocs
       DB_PASSWORD: livingdocs
@@ -72,6 +73,26 @@
       retries: 3
       start_period: 15s
 
+  code-analyzer:
+    build:
+      context: .
+      dockerfile: Dockerfile.analyzer
+    image: livingdocs-code-analyzer:local
+    ports:
+      - "8000:8000"
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   github-integration:
     build:
@@ -89,7 +110,6 @@
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-livingdocs-dev-hai}
       GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-http://localhost:8082/api/github/callback}
-
     depends_on:
       github-db:
         condition: service_healthy
@@ -111,6 +131,7 @@
       - backend
       - ai-service
       - github-integration
+      - code-analyzer
 
 volumes:
   backend-db-data:

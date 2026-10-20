@@ -3,19 +3,13 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, List, Optional
 
-from pydantic import AliasChoices, BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 
 
 def now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def _line(*names: str):
-    """Line number field. The analyzer (LD-328) sends `lineno` / `end_lineno` (Python ast names);
-    CONTRACT.md documents `line_start` / `line_end`. Both are accepted, output uses line_*."""
-    return Field(default=None, ge=1, validation_alias=AliasChoices(*names))
 
 
 # ---------- Input: source code analyzed by LD-328 (see CONTRACT.md) ----------
@@ -34,8 +28,8 @@ class Function(BaseModel):
     return_type: Optional[str] = None
     docstring: Optional[str] = None
     source: Optional[str] = None  # optional code snippet, helps the AI explain logic
-    line_start: Optional[int] = _line("line_start", "lineno")  # location in the file (evidence)
-    line_end: Optional[int] = _line("line_end", "end_lineno")
+    line_start: Optional[int] = Field(default=None, ge=1)  # location in the file (evidence)
+    line_end: Optional[int] = Field(default=None, ge=1)
 
 
 class ClassInfo(BaseModel):
@@ -43,8 +37,8 @@ class ClassInfo(BaseModel):
     bases: List[str] = Field(default_factory=list)
     docstring: Optional[str] = None
     methods: List[Function] = Field(default_factory=list)
-    line_start: Optional[int] = _line("line_start", "lineno")
-    line_end: Optional[int] = _line("line_end", "end_lineno")
+    line_start: Optional[int] = Field(default=None, ge=1)
+    line_end: Optional[int] = Field(default=None, ge=1)
 
 
 class Endpoint(BaseModel):
@@ -54,8 +48,8 @@ class Endpoint(BaseModel):
     parameters: List[Parameter] = Field(default_factory=list)
     request_body: Optional[str] = None
     response: Optional[str] = None
-    line_start: Optional[int] = _line("line_start", "lineno")
-    line_end: Optional[int] = _line("line_end", "end_lineno")
+    line_start: Optional[int] = Field(default=None, ge=1)
+    line_end: Optional[int] = Field(default=None, ge=1)
 
     @field_validator("http_method")
     @classmethod
