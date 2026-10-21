@@ -5,28 +5,32 @@ function GitHubConnection({ userId }) {
   const [connection, setConnection] = useState(null);
   const [isLoading, setIsLoading] = useState(Boolean(userId));
   const [isConnecting, setIsConnecting] = useState(false);
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [error, setError] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('github') === 'error'
+      ? `GitHub connection failed (${params.get('reason') || 'unknown error'}).`
+      : '';
+  });
+  const [notice, setNotice] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('github') === 'connected'
+      ? `GitHub connected${params.get('login') ? ` as @${params.get('login')}` : ''}.`
+      : '';
+  });
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('github') === 'connected') {
-      setNotice(`GitHub connected${params.get('login') ? ` as @${params.get('login')}` : ''}.`);
-      window.history.replaceState({}, document.title, window.location.pathname);
-    } else if (params.get('github') === 'error') {
-      setError(`GitHub connection failed (${params.get('reason') || 'unknown error'}).`);
+    if (params.has('github')) {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
 
-    if (!userId) {
-      setConnection(null);
-      setIsLoading(false);
-      return;
-    }
+    if (!userId) return;
 
     let cancelled = false;
-    setIsLoading(true);
-    githubApi('/api/github/connection', { userId })
+    Promise.resolve().then(() => {
+      if (!cancelled) setIsLoading(true);
+      return githubApi('/api/github/connection', { userId });
+    })
       .then((result) => {
         if (!cancelled) setConnection(result);
       })
