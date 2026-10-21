@@ -140,18 +140,18 @@ Trong Java dùng `e.getCode().httpStatus()`, `e.getCode().retryable()` và `e.ge
 
 ```
 RepositorySnapshot
-   │  AnalysisInput.from(snapshot)
+   │  AnalysisInput.from(snapshot)          = GET /api/repositories/{id}/sync/latest/analysis-input
    │  POST /api/v1/analyze-repo  { "scope": "repository", "target": "owner/repo",
-   │                               "files": [{ "path", "language", "content" }] }   ← service phân tích (LD-328, Lâm)
+   │                               "files": [{ "path", "language", "content" }] }   ← service phân tích (Lâm)
    ▼
 { "scope", "target", "files": [FileAnalysis] }
-   │  gửi nguyên văn sang POST /generate                                          ← ai-service (LD-340, Linh)
+   │  gửi nguyên văn sang POST /generate                                          ← ai-service (Linh)
    ▼
 job → GET /jobs/{id}/result → tài liệu Markdown
 ```
 
-- **Nội dung file được gửi kèm** trong request. Service phân tích chạy riêng nên không có code của repo trên máy, vì vậy không dùng được `file_paths` (đường dẫn trên máy).
-- ⚠️ Hiện `/api/v1/analyze-repo` mới nhận `file_paths`. **Cần Lâm thêm trường `files`** như trên (đã thử chạy được cả chuỗi với `docs/samples/analysis-input.sample.json`).
+- **Nội dung file được gửi kèm** trong request. Service phân tích chạy riêng nên không có code của repo trên máy, vì vậy không dùng đường dẫn file trên máy.
+- **`target`** (bắt buộc) là tên đầy đủ của repo. Service phân tích trả lại nguyên giá trị này trong kết quả (contract LD-395, chỉnh ở LD-396).
 - `AnalysisInput.from(snapshot)` chỉ lấy các file đã có nội dung (`analyzableFiles()`). Giá trị `language` (`"java"`, `"python"`) viết thường, giống service phân tích.
 - Kết quả của service phân tích có đúng dạng `{scope, target, files}` mà `/generate` nhận, nên gửi thẳng được.
 
