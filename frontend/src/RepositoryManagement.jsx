@@ -47,7 +47,9 @@ export default function RepositoryManagement({ userId }) {
 
   useEffect(() => {
     let active = true;
-    refreshRepositories(active);
+    Promise.resolve().then(() => {
+      if (active) refreshRepositories(active);
+    });
     return () => { active = false; };
   }, [refreshRepositories]);
 
