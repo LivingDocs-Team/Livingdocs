@@ -125,17 +125,13 @@ export default function DocumentationManagement({ userId }) {
   const [jobId, setJobId] = useState('');
 
   useEffect(() => {
-    if (!userId) {
-      setRepositories([]);
-      setRepositoryId('');
-      setIsLoadingRepositories(false);
-      setError('Sign in to LivingDocs before generating documentation.');
-      return undefined;
-    }
+    if (!userId) return undefined;
 
     let cancelled = false;
-    setIsLoadingRepositories(true);
-    githubApi(`/api/workspaces/${workspaceId}/repositories`, { userId })
+    Promise.resolve().then(() => {
+      if (!cancelled) setIsLoadingRepositories(true);
+      return githubApi(`/api/workspaces/${workspaceId}/repositories`, { userId });
+    })
       .then((items) => {
         if (cancelled) return;
         setRepositories(items || []);
@@ -385,8 +381,10 @@ export default function DocumentationManagement({ userId }) {
 
         {isLoadingRepositories && <p role="status">Loading workspace repositories…</p>}
 
-        {error && (
-          <p className="documentation-error" role="alert">{error}</p>
+        {(!userId || error) && (
+          <p className="documentation-error" role="alert">
+            {!userId ? 'Sign in to LivingDocs before generating documentation.' : error}
+          </p>
         )}
 
         {notice && (
