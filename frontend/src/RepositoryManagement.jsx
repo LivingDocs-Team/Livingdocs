@@ -1,403 +1,267 @@
-
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import './App.css';
+import { githubApi } from './githubApi';
 
-const SAMPLE_REPOSITORIES = [
-  {
-    githubRepoId: 1001,
-    fullName: 'demo-user/livingdocs',
-    privateRepo: false,
-    defaultBranch: 'main',
-    htmlUrl: 'https://github.com/',
-  },
-  {
-    githubRepoId: 1002,
-    fullName: 'demo-user/documentation',
-    privateRepo: true,
-    defaultBranch: 'main',
-    htmlUrl: 'https://github.com/',
-  },
-  {
-    githubRepoId: 1003,
-    fullName: 'demo-user/react-components',
-    privateRepo: false,
-    defaultBranch: 'develop',
-    htmlUrl: 'https://github.com/',
-  },
-  {
-    githubRepoId: 1004,
-    fullName: 'demo-user/project-notes',
-    privateRepo: true,
-    defaultBranch: 'main',
-    htmlUrl: 'https://github.com/',
-  },
-];
-
-const INITIAL_SYNC_STATE = {
-  status: 'not-synced',
-  lastSynced: null,
-  error: '',
-};
-
-export default function RepositoryManagement() {
+export default function RepositoryManagement({ userId }) {
+  const workspaceId = userId ? `ws-${userId}` : '';
   const [search, setSearch] = useState('');
   const [visibility, setVisibility] = useState('all');
   const [selectedIds, setSelectedIds] = useState([]);
-  const [workspaceIds, setWorkspaceIds] = useState([]);
+  const [availableRepositories, setAvailableRepositories] = useState([]);
+  const [workspaceRepositories, setWorkspaceRepositories] = useState([]);
   const [activeTab, setActiveTab] = useState('available');
   const [message, setMessage] = useState('');
-  const [syncStates, setSyncStates] = useState({});
-  const [isConnected, setIsConnected] = useState(true);
+  const [error, setError] = useState('');
+  const [syncErrors, setSyncErrors] = useState({});
+  const [syncingIds, setSyncingIds] = useState([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const [isLoading, setIsLoading] = useState(Boolean(userId));
+  const [isAdding, setIsAdding] = useState(false);
+
+  const refreshRepositories = useCallback(async (active = true) => {
+    if (!userId) {
+      setAvailableRepositories([]);
+      setWorkspaceRepositories([]);
+      setIsConnected(false);
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setError('');
+    try {
+      const connection = await githubApi('/api/github/connection', { userId });
+      setIsConnected(Boolean(connection.connected));
+      const workspace = await githubApi(`/api/workspaces/${workspaceId}/repositories`, { userId });
+      setWorkspaceRepositories(workspace || []);
+      const available = connection.connected
+        ? await githubApi('/api/github/repos/available', { userId })
+        : [];
+      setAvailableRepositories(available || []);
+    } catch (requestError) {
+      if (active) setError(requestError.message || 'Could not load repositories.');
+    } finally {
+      if (active) setIsLoading(false);
+    }
+  }, [userId, workspaceId]);
+
+  useEffect(() => {
+    let active = true;
+    refreshRepositories(active);
+    return () => { active = false; };
+  }, [refreshRepositories]);
+
+  const workspaceGithubIds = useMemo(
+    () => new Set(workspaceRepositories.map((repo) => repo.githubRepoId)),
+    [workspaceRepositories],
+  );
 
   const filteredRepositories = useMemo(() => {
-    return SAMPLE_REPOSITORIES.filter((repo) => {
-      const matchesSearch = repo.fullName
-        .toLowerCase()
-        .includes(search.trim().toLowerCase());
-
-      const matchesVisibility =
-        visibility === 'all' ||
-        (visibility === 'public' && !repo.privateRepo) ||
-        (visibility === 'private' && repo.privateRepo);
-
-      const matchesTab =
-        activeTab === 'available' ||
-        workspaceIds.includes(repo.githubRepoId);
-
-      return matchesSearch && matchesVisibility && matchesTab;
+    const source = activeTab === 'available'
+      ? availableRepositories.filter((repo) => !workspaceGithubIds.has(repo.githubRepoId))
+      : workspaceRepositories;
+    return source.filter((repo) => {
+      const matchesSearch = repo.fullName.toLowerCase().includes(search.trim().toLowerCase());
+      const matchesVisibility = visibility === 'all'
+        || (visibility === 'public' && !repo.privateRepo)
+        || (visibility === 'private' && repo.privateRepo);
+      return matchesSearch && matchesVisibility;
     });
-  }, [search, visibility, activeTab, workspaceIds]);
-
-  function getSyncState(repoId) {
-    return syncStates[repoId] || INITIAL_SYNC_STATE;
-  }
-
-  function updateSyncState(repoId, nextState) {
-    setSyncStates((current) => ({
-      ...current,
-      [repoId]: {
-        ...getSyncState(repoId),
-        ...nextState,
-      },
-    }));
-  }
+  }, [activeTab, availableRepositories, search, visibility, workspaceGithubIds, workspaceRepositories]);
 
   function toggleSelection(repoId) {
-    setSelectedIds((current) =>
-      current.includes(repoId)
-        ? current.filter((id) => id !== repoId)
-        : [...current, repoId]
-    );
+    setSelectedIds((current) => current.includes(repoId)
+      ? current.filter((id) => id !== repoId)
+      : [...current, repoId]);
     setMessage('');
   }
 
-  function addSelectedRepositories() {
-    if (selectedIds.length === 0) {
-      setMessage('Please select at least one repository.');
+  async function addSelectedRepositories() {
+    if (!selectedIds.length) {
+      setMessage('Select at least one repository.');
       return;
     }
-
-    const newIds = selectedIds.filter(
-      (id) => !workspaceIds.includes(id)
-    );
-
-    if (newIds.length === 0) {
-      setMessage('Selected repositories are already in the workspace.');
-      return;
-    }
-
-    setWorkspaceIds((current) => [...current, ...newIds]);
-    setSelectedIds([]);
-    setMessage(
-      `${newIds.length} repository/repositories added to workspace.`
-    );
-  }
-
-  function removeFromWorkspace(repoId) {
-    setWorkspaceIds((current) =>
-      current.filter((id) => id !== repoId)
-    );
-    setSelectedIds((current) =>
-      current.filter((id) => id !== repoId)
-    );
-    setMessage('Repository removed from workspace.');
-  }
-
-  function syncRepository(repoId, simulateError = false) {
-    if (!isConnected) {
-      setMessage('Connect GitHub before synchronizing repositories.');
-      return;
-    }
-
-    updateSyncState(repoId, {
-      status: 'syncing',
-      error: '',
-    });
+    setIsAdding(true);
+    setError('');
     setMessage('');
-
-    // Demo only: simulate a synchronization request.
-    window.setTimeout(() => {
-      if (simulateError) {
-        updateSyncState(repoId, {
-          status: 'failed',
-          error:
-            'Demo sync error: unable to retrieve repository data. Please try again.',
-        });
-        return;
-      }
-
-      updateSyncState(repoId, {
-        status: 'synced',
-        lastSynced: new Date().toLocaleString(),
-        error: '',
+    try {
+      await githubApi(`/api/workspaces/${workspaceId}/repositories`, {
+        method: 'POST',
+        userId,
+        body: { githubRepoIds: selectedIds },
       });
-    }, 1000);
+      setSelectedIds([]);
+      setMessage('Selected repositories added to workspace.');
+      await refreshRepositories();
+    } catch (requestError) {
+      setError(requestError.message || 'Could not add repositories to the workspace.');
+    } finally {
+      setIsAdding(false);
+    }
   }
 
-  const workspaceCount = workspaceIds.length;
+  async function connectGitHub() {
+    setError('');
+    try {
+      const urls = await githubApi('/api/github/authorize-url', { userId });
+      window.location.assign(urls.authorizeUrl);
+    } catch (requestError) {
+      setError(requestError.message || 'Could not start GitHub authorization.');
+    }
+  }
+
+  async function syncRepository(repository) {
+    setSyncingIds((current) => [...current, repository.id]);
+    setSyncErrors((current) => ({ ...current, [repository.id]: '' }));
+    setError('');
+    try {
+      const result = await githubApi(`/api/repositories/${repository.id}/sync`, {
+        method: 'POST',
+        userId,
+      });
+      setWorkspaceRepositories((current) => current.map((repo) => repo.id === repository.id
+        ? { ...repo, status: 'CONNECTED', lastSyncedAt: result.syncedAt || new Date().toISOString() }
+        : repo));
+      setMessage(`${repository.fullName} synchronized.`);
+    } catch (requestError) {
+      const detail = requestError.retryAfter
+        ? `${requestError.message} Retry after ${requestError.retryAfter} seconds.`
+        : requestError.message || 'Repository synchronization failed.';
+      setSyncErrors((current) => ({ ...current, [repository.id]: detail }));
+    } finally {
+      setSyncingIds((current) => current.filter((id) => id !== repository.id));
+    }
+  }
+
+  async function removeFromWorkspace(repository) {
+    setError('');
+    try {
+      await githubApi(`/api/repositories/${repository.id}`, { method: 'DELETE', userId });
+      setWorkspaceRepositories((current) => current.filter((repo) => repo.id !== repository.id));
+      setMessage(`${repository.fullName} removed from workspace.`);
+    } catch (requestError) {
+      setError(requestError.message || 'Could not remove repository.');
+    }
+  }
+
+  const syncedCount = workspaceRepositories.filter((repo) => repo.lastSyncedAt).length;
 
   return (
     <main className="page">
       <section className="login-card repository-page">
         <h1>Repository Management</h1>
-        <p className="subtitle">
-          Manage GitHub repositories and synchronize your workspace.
-        </p>
+        <p className="subtitle">Manage GitHub repositories and synchronize your workspace.</p>
 
-        <section className="sync-connection-panel">
-          <div>
-            <strong>GitHub connection</strong>
-            <p>
-              {isConnected
-                ? 'Demo GitHub account: @demo-user'
-                : 'GitHub is not connected.'}
-            </p>
-          </div>
-
-          <span
-            className={`connection-status ${
-              isConnected ? 'connected' : 'disconnected'
-            }`}
-            role="status"
-          >
-            <span className="status-dot" aria-hidden="true" />
-            {isConnected ? 'Connected' : 'Disconnected'}
-          </span>
-
-          <button
-            type="button"
-            className={isConnected ? 'sync-secondary-button' : ''}
-            onClick={() => {
-              setIsConnected((current) => !current);
-              setMessage('');
-            }}
-          >
-            {isConnected ? 'Disconnect' : 'Connect GitHub'}
-          </button>
-        </section>
-
-        <div className="repository-stats">
-          <div className="repository-stat">
-            <span>Available repositories</span>
-            <strong>{SAMPLE_REPOSITORIES.length}</strong>
-          </div>
-          <div className="repository-stat">
-            <span>Workspace repositories</span>
-            <strong>{workspaceCount}</strong>
-          </div>
-          <div className="repository-stat">
-            <span>Synced repositories</span>
-            <strong>
-              {workspaceIds.filter(
-                (id) => getSyncState(id).status === 'synced'
-              ).length}
-            </strong>
-          </div>
-        </div>
-
-        <div className="repository-tabs">
-          <button
-            type="button"
-            className={activeTab === 'available' ? 'active' : ''}
-            onClick={() => {
-              setActiveTab('available');
-              setMessage('');
-            }}
-          >
-            Available repositories
-          </button>
-
-          <button
-            type="button"
-            className={activeTab === 'workspace' ? 'active' : ''}
-            onClick={() => {
-              setActiveTab('workspace');
-              setMessage('');
-            }}
-          >
-            Workspace ({workspaceCount})
-          </button>
-        </div>
-
-        <div className="repository-toolbar">
-          <input
-            type="search"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search repositories..."
-            aria-label="Search repositories"
-          />
-
-          <select
-            value={visibility}
-            onChange={(event) => setVisibility(event.target.value)}
-            aria-label="Filter repositories by visibility"
-          >
-            <option value="all">All repositories</option>
-            <option value="public">Public</option>
-            <option value="private">Private</option>
-          </select>
-        </div>
-
-        {activeTab === 'available' && (
-          <div className="repository-actions">
-            <span>{selectedIds.length} selected</span>
-            <button
-              type="button"
-              onClick={addSelectedRepositories}
-            >
-              Add selected to workspace
-            </button>
-          </div>
-        )}
-
-        {message && (
-          <p className="repository-message" role="status">
-            {message}
-          </p>
-        )}
-
-        <p className="repository-result-count" role="status">
-          Showing {filteredRepositories.length} repositories
-        </p>
-
-        {filteredRepositories.length === 0 ? (
-          <div className="repository-empty">
-            <h2>No repositories found</h2>
-            <p>Try another search or filter.</p>
-          </div>
+        {!userId ? (
+          <p role="alert">Sign in to LivingDocs to load your GitHub repositories.</p>
         ) : (
-          <ul className="repository-list">
-            {filteredRepositories.map((repo) => {
-              const inWorkspace = workspaceIds.includes(
-                repo.githubRepoId
-              );
-              const sync = getSyncState(repo.githubRepoId);
+          <>
+            <section className="sync-connection-panel">
+              <div>
+                <strong>GitHub connection</strong>
+                <p>{isConnected ? 'Connected to GitHub.' : 'GitHub is not connected.'}</p>
+              </div>
+              <span className={`connection-status ${isConnected ? 'connected' : 'disconnected'}`} role="status">
+                <span className="status-dot" aria-hidden="true" />
+                {isConnected ? 'Connected' : 'Disconnected'}
+              </span>
+              {!isConnected && (
+                <button type="button" onClick={connectGitHub}>Connect GitHub</button>
+              )}
+              <button type="button" className="sync-secondary-button" onClick={() => refreshRepositories()}>
+                Refresh
+              </button>
+            </section>
 
-              return (
-                <li
-                  className="repository-item repository-sync-item"
-                  key={repo.githubRepoId}
-                >
-                  {activeTab === 'available' && (
-                    <input
-                      type="checkbox"
-                      aria-label={`Select ${repo.fullName}`}
-                      checked={selectedIds.includes(repo.githubRepoId)}
-                      onChange={() =>
-                        toggleSelection(repo.githubRepoId)
-                      }
-                    />
-                  )}
+            <div className="repository-stats">
+              <div className="repository-stat"><span>Available repositories</span><strong>{availableRepositories.length}</strong></div>
+              <div className="repository-stat"><span>Workspace repositories</span><strong>{workspaceRepositories.length}</strong></div>
+              <div className="repository-stat"><span>Synced repositories</span><strong>{syncedCount}</strong></div>
+            </div>
 
-                  <div className="repository-info">
-                    <h2>{repo.fullName}</h2>
+            <div className="repository-tabs">
+              <button type="button" className={activeTab === 'available' ? 'active' : ''} onClick={() => setActiveTab('available')}>
+                Available repositories
+              </button>
+              <button type="button" className={activeTab === 'workspace' ? 'active' : ''} onClick={() => setActiveTab('workspace')}>
+                Workspace ({workspaceRepositories.length})
+              </button>
+            </div>
 
-                    <div className="repository-meta">
-                      <span>
-                        {repo.privateRepo ? 'Private' : 'Public'}
-                      </span>
-                      <span>Branch: {repo.defaultBranch}</span>
-                      {inWorkspace && (
-                        <span>Added to workspace</span>
+            <div className="repository-toolbar">
+              <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search repositories..." aria-label="Search repositories" />
+              <select value={visibility} onChange={(event) => setVisibility(event.target.value)} aria-label="Filter repositories by visibility">
+                <option value="all">All repositories</option>
+                <option value="public">Public</option>
+                <option value="private">Private</option>
+              </select>
+            </div>
+
+            {activeTab === 'available' && (
+              <div className="repository-actions">
+                <span>{selectedIds.length} selected</span>
+                <button type="button" disabled={isAdding || !isConnected} onClick={addSelectedRepositories}>
+                  {isAdding ? 'Adding…' : 'Add selected to workspace'}
+                </button>
+              </div>
+            )}
+
+            {isLoading && <p role="status">Loading repositories…</p>}
+            {error && <p className="sync-error" role="alert">{error}</p>}
+            {message && <p className="repository-message" role="status">{message}</p>}
+            <p className="repository-result-count" role="status">Showing {filteredRepositories.length} repositories</p>
+
+            {!isLoading && filteredRepositories.length === 0 ? (
+              <div className="repository-empty">
+                <h2>No repositories found</h2>
+                <p>{!isConnected ? 'Connect GitHub to view repositories.' : 'Try another search or filter.'}</p>
+              </div>
+            ) : (
+              <ul className="repository-list">
+                {filteredRepositories.map((repo) => {
+                  const inWorkspace = activeTab === 'workspace';
+                  const syncing = syncingIds.includes(repo.id);
+                  const syncError = syncErrors[repo.id];
+                  return (
+                    <li className="repository-item repository-sync-item" key={repo.id || repo.githubRepoId}>
+                      {!inWorkspace && (
+                        <input type="checkbox" aria-label={`Select ${repo.fullName}`} checked={selectedIds.includes(repo.githubRepoId)} onChange={() => toggleSelection(repo.githubRepoId)} />
                       )}
-                    </div>
-
-                    <div className="sync-details">
-                      <span className={`sync-status sync-${sync.status}`}>
-                        {sync.status === 'not-synced' && 'Not synced'}
-                        {sync.status === 'syncing' && 'Syncing…'}
-                        {sync.status === 'synced' && 'Synced'}
-                        {sync.status === 'failed' && 'Sync failed'}
-                      </span>
-
-                      {sync.lastSynced && (
-                        <p className="sync-last-time">
-                          Last synced: {sync.lastSynced}
-                        </p>
-                      )}
-
-                      {sync.error && (
-                        <p className="sync-error" role="alert">
-                          {sync.error}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="sync-actions">
-                      <button
-                        type="button"
-                        disabled={
-                          !isConnected || sync.status === 'syncing'
-                        }
-                        onClick={() =>
-                          syncRepository(repo.githubRepoId)
-                        }
-                      >
-                        {sync.status === 'failed'
-                          ? 'Retry sync'
-                          : sync.status === 'syncing'
-                            ? 'Syncing…'
-                            : 'Sync now'}
-                      </button>
-
-                      {sync.status !== 'syncing' && (
-                        <button
-                          type="button"
-                          className="sync-secondary-button"
-                          disabled={!isConnected}
-                          onClick={() =>
-                            syncRepository(repo.githubRepoId, true)
-                          }
-                        >
-                          Test sync error
-                        </button>
-                      )}
-
-                      {activeTab === 'workspace' && (
-                        <button
-                          type="button"
-                          className="sync-secondary-button"
-                          onClick={() =>
-                            removeFromWorkspace(repo.githubRepoId)
-                          }
-                        >
-                          Remove
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+                      <div className="repository-info">
+                        <h2>{repo.fullName}</h2>
+                        <div className="repository-meta">
+                          <span>{repo.privateRepo ? 'Private' : 'Public'}</span>
+                          <span>Branch: {repo.defaultBranch}</span>
+                          {inWorkspace && <span>Added to workspace</span>}
+                        </div>
+                        <div className="sync-details">
+                          <span className={`sync-status sync-${syncing ? 'syncing' : syncError ? 'failed' : repo.status === 'ERROR' ? 'failed' : repo.lastSyncedAt ? 'synced' : 'not-synced'}`}>
+                            {syncing ? 'Syncing…' : syncError || repo.status === 'ERROR' ? 'Sync failed' : repo.lastSyncedAt ? 'Synced' : 'Not synced'}
+                          </span>
+                          {repo.lastSyncedAt && <p className="sync-last-time">Last synced: {new Date(repo.lastSyncedAt).toLocaleString()}</p>}
+                          {syncError && <p className="sync-error" role="alert">{syncError}</p>}
+                        </div>
+                        <div className="sync-actions">
+                          {inWorkspace && (
+                            <button type="button" disabled={syncing || !isConnected} onClick={() => syncRepository(repo)}>
+                              {syncing ? 'Syncing…' : syncError ? 'Retry sync' : 'Sync now'}
+                            </button>
+                          )}
+                          {inWorkspace && (
+                            <button type="button" className="sync-secondary-button" onClick={() => removeFromWorkspace(repo)}>
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <p className="repository-disclaimer">Repositories, workspace membership, and synchronization are loaded from GitHub Integration Service.</p>
+          </>
         )}
-
-        <p className="repository-disclaimer">
-          Demo mode: GitHub connection and synchronization are simulated.
-          No real GitHub API, OAuth, or backend is used. Changes are kept
-          in frontend state only.
-        </p>
       </section>
     </main>
   );

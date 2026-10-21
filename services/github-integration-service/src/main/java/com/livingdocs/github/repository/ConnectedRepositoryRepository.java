@@ -10,7 +10,13 @@ public interface ConnectedRepositoryRepository extends JpaRepository<ConnectedRe
 
     List<ConnectedRepository> findByWorkspaceIdOrderByFullNameAsc(String workspaceId);
 
+    List<ConnectedRepository> findByWorkspaceIdAndConnectionIdOrderByFullNameAsc(
+            String workspaceId, UUID connectionId);
+
     List<ConnectedRepository> findByConnectionId(UUID connectionId);
 
     boolean existsByWorkspaceIdAndGithubRepoId(String workspaceId, Long githubRepoId);
+
+    boolean existsByWorkspaceIdAndConnectionIdAndGithubRepoId(
+            String workspaceId, UUID connectionId, Long githubRepoId);
 }

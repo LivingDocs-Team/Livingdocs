@@ -24,9 +24,9 @@ Công nghệ: Java 21, Spring Boot 3.5, PostgreSQL, Flyway, Swagger (springdoc).
 | GET | `/api/repositories/{id}/sync/latest/analysis-input` | Dữ liệu gửi sang service phân tích code (`POST /api/v1/analyze-repo`, LD-395) |
 | DELETE | `/api/repositories/{id}` | Gỡ repo khỏi workspace |
 
-> Tạm thời người dùng được xác định bằng header **`X-User-Id`**. Khi service đăng nhập của TV1 xong, header này sẽ được thay bằng JWT.
+> Browser không gọi service này trực tiếp. Backend BFF xác minh session, lấy user ID từ principal phía server và gửi request kèm `GITHUB_INTEGRATION_INTERNAL_SECRET`. GitHub Integration từ chối request thiếu/sai credential. Chi tiết: [Backend BFF authentication contract](docs/backend-bff-authentication.md).
 
-Swagger UI: http://localhost:8082/swagger-ui.html
+Các endpoint API được mô tả trong OpenAPI; cổng service chỉ bind loopback cho OAuth callback và request nội bộ. Swagger UI không mở cho browser.
 
 **Frontend gọi API:** xem [docs/frontend-api-guide.md](docs/frontend-api-guide.md) (cấu hình proxy, CORS, luồng kết nối GitHub, bảng lỗi).
 
@@ -38,7 +38,7 @@ Cần cài: JDK 21, Docker Desktop, IntelliJ IDEA.
    ```bash
    docker compose up -d
    ```
-2. Copy `.env.example` thành `.env` rồi điền Client ID, Client secret của GitHub App và `TOKEN_ENCRYPTION_KEY`.
+2. Copy `.env.example` thành `.env` rồi điền Client ID, Client secret của GitHub App, `TOKEN_ENCRYPTION_KEY` và `GITHUB_INTEGRATION_INTERNAL_SECRET`.
    **Không commit file `.env`.**
 3. Tạo khoá mã hoá bằng PowerShell, rồi dán kết quả vào `TOKEN_ENCRYPTION_KEY`:
    ```powershell
@@ -60,7 +60,7 @@ CI (job **GitHub Integration Service Test** trong `.github/workflows/ci.yml`) ch
 ## Thử luồng kết nối thật
 
 1. Cài GitHub App vào tài khoản của bạn và chọn vài repo: https://github.com/apps/livingdocs-dev-hai/installations/new
-2. Gọi `GET /api/github/authorize-url` (có header `X-User-Id: demo-user`), rồi mở `authorizeUrl` trong trình duyệt và bấm **Authorize**.
+2. Đăng nhập qua Backend rồi gọi `GET /api/github/authorize-url` qua Backend BFF; mở `authorizeUrl` trong trình duyệt và bấm **Authorize**.
 3. GitHub tự gọi về `/api/github/callback`. Nếu thấy `"Kết nối GitHub thành công"` là xong. (Nếu đã đặt `FRONTEND_URL` trong `.env` thì trình duyệt chuyển về trang đó kèm `?github=connected&login=...`.)
 4. Gọi `GET /api/github/repos/available`, rồi `POST /api/workspaces/ws-1/repositories`.
 
@@ -79,5 +79,5 @@ Chạy thử với GitHub thật (repo public, không cần token): chạy `GitH
 - Webhook (`push`, `pull_request`) và kiểm tra chữ ký HMAC
 - Kéo Pull Request và commit về database, gửi event Kafka cho TV3 và TV4
 - Thông báo cho người dùng khi token hỏng (hiện tại mới đánh dấu trạng thái `INVALID`)
-- Thay header `X-User-Id` bằng JWT của TV1, chuyển nơi lưu OAuth state sang Redis
+- Duy trì credential service-to-service trong secret manager phù hợp với môi trường triển khai
 - Lưu kết quả đồng bộ vào database (hiện chỉ giữ lần gần nhất trong bộ nhớ) và chạy đồng bộ ở nền cho repo lớn

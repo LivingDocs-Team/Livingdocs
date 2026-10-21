@@ -1,5 +1,6 @@
 
 import { useState } from 'react';
+import { csrfHeaders } from './csrf';
 
 function Register() {
   const [username, setUsername] = useState('');
@@ -26,11 +27,11 @@ function Register() {
     setIsSubmitting(true);
 
     try {
-      const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080')
-        .replace(/\/$/, '');
+      const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
       const response = await fetch(`${apiBaseUrl}/api/auth/register`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await csrfHeaders({ 'Content-Type': 'application/json' }, apiBaseUrl),
+        credentials: 'include',
         body: JSON.stringify({ username, email, password, firstName, lastName }),
       });
 

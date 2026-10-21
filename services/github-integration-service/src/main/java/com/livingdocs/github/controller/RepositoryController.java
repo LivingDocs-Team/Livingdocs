@@ -53,14 +53,16 @@ public class RepositoryController {
 
     @GetMapping("/api/workspaces/{workspaceId}/repositories")
     @Operation(summary = "Danh sách repo của workspace (trạng thái, nhánh mặc định, lần đồng bộ cuối)")
-    public List<RepositoryResponse> list(@PathVariable String workspaceId) {
-        return repositoryService.listByWorkspace(workspaceId);
+    public List<RepositoryResponse> list(
+            @RequestHeader(USER_HEADER) String userId,
+            @PathVariable String workspaceId) {
+        return repositoryService.listByWorkspace(userId, workspaceId);
     }
 
     @GetMapping("/api/repositories/{id}")
     @Operation(summary = "Chi tiết một repo")
-    public RepositoryResponse get(@PathVariable UUID id) {
-        return repositoryService.get(id);
+    public RepositoryResponse get(@RequestHeader(USER_HEADER) String userId, @PathVariable UUID id) {
+        return repositoryService.get(userId, id);
     }
 
     // Đồng bộ repo với GitHub (LD-63): xem RepositorySyncController
