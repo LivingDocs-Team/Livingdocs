@@ -28,6 +28,7 @@ github:
 
 security:
   token-encryption-key: ${TOKEN_ENCRYPTION_KEY:}
+  internal-api-secret: ${GITHUB_INTEGRATION_INTERNAL_SECRET:}
 
 app:
   cors:
@@ -46,3 +47,9 @@ management:
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
+
+services:
+  code-analyzer:
+    base-url: ${CODE_ANALYZER_BASE_URL:http://localhost:8000}
+  ai-service:
+    base-url: ${AI_SERVICE_BASE_URL:http://localhost:8001}

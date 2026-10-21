@@ -217,6 +217,7 @@ jobs:
     timeout-minutes: 30
     env:
       TOKEN_ENCRYPTION_KEY: ci-validation-placeholder-only
+      GITHUB_INTEGRATION_INTERNAL_SECRET: ci-validation-placeholder-only
 
     steps:
       - name: Checkout source code
@@ -226,4 +227,4 @@ jobs:
         run: docker compose -f compose.yaml config --quiet
 
       - name: Build application images
-        run: docker compose -f compose.yaml build backend ai-service github-integration frontend
+        run: docker compose -f compose.yaml build backend ai-service code-analyzer github-integration frontend

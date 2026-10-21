@@ -159,7 +159,7 @@ job → GET /jobs/{id}/result → tài liệu Markdown
 
 ## 6. API đồng bộ
 
-Code: `controller/RepositorySyncController` và `service/RepositorySyncService`. Mọi API đều cần header `X-User-Id` (cho đến khi có JWT của TV1) và chỉ chủ repo mới gọi được (người khác nhận `403`).
+Code: `controller/RepositorySyncController` và `service/RepositorySyncService`. API này chỉ nhận request từ Backend BFF có service credential hợp lệ; Backend lấy user ID từ session đã xác thực. Chỉ chủ repository mới được đồng bộ và đọc snapshot.
 
 | Method | Endpoint | Trả về |
 |---|---|---|
