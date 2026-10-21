@@ -14,6 +14,11 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfTokenRepository;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.web.authentication.HttpStatusEntryPoint;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -57,33 +62,47 @@ public class SecurityConfig {
                 "http://localhost:3000",
                 "http://localhost:5174"
         ));
-        configuration.setAllowedMethods(List.of("POST", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Content-Type"));
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        configuration.setAllowedHeaders(List.of("Content-Type", "Accept", "X-XSRF-TOKEN"));
+        configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source =
                 new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration(
-                "/api/auth/register", configuration);
-        CorsConfiguration loginConfiguration =
-                new CorsConfiguration(configuration);
-        loginConfiguration.setAllowCredentials(true);
-        source.registerCorsConfiguration(
-                "/api/auth/login", loginConfiguration);
+        source.registerCorsConfiguration("/api/**", configuration);
         return source;
+    }
+
+    @Bean
+    public CsrfTokenRepository csrfTokenRepository(
+            @Value("${SESSION_COOKIE_SECURE:false}") boolean secure,
+            @Value("${SESSION_COOKIE_SAME_SITE:Lax}") String sameSite) {
+        CookieCsrfTokenRepository repository = new CookieCsrfTokenRepository();
+        repository.setCookieCustomizer(cookie -> cookie
+                .secure(secure)
+                .sameSite(sameSite)
+                .path("/"));
+        return repository;
     }
 
     @Bean
     public SecurityFilterChain securityFilterChain(
         HttpSecurity http,
         DaoAuthenticationProvider authenticationProvider,
-        GitHubOAuth2UserService gitHubOAuth2UserService)
+        GitHubOAuth2UserService gitHubOAuth2UserService,
+        CsrfTokenRepository csrfTokenRepository)
         throws Exception {
 
         http
-            .csrf(csrf -> csrf.disable())
+            .csrf(csrf -> csrf
+                    .csrfTokenRepository(csrfTokenRepository)
+                    .csrfTokenRequestHandler(new SpaCsrfTokenRequestHandler()))
             .cors(cors -> cors.configurationSource(
                     corsConfigurationSource()))
             .authenticationProvider(authenticationProvider)
+            .exceptionHandling(exceptions -> exceptions
+                    .defaultAuthenticationEntryPointFor(
+                            new HttpStatusEntryPoint(org.springframework.http.HttpStatus.UNAUTHORIZED),
+                            PathPatternRequestMatcher.pathPattern("/api/**")))
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
             )
@@ -94,12 +113,9 @@ public class SecurityConfig {
                 ).permitAll()
                 .requestMatchers(
                     HttpMethod.OPTIONS,
-                    "/api/auth/login"
+                    "/api/**"
                 ).permitAll()
-                .requestMatchers(
-                    HttpMethod.OPTIONS,
-                    "/api/auth/register"
-                ).permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/auth/csrf").permitAll()
                 .requestMatchers(
                     HttpMethod.POST,
                     "/api/auth/register",

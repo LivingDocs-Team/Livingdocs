@@ -1,6 +1,7 @@
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import './App.css';
+import { csrfHeaders } from './csrf';
 
 import Register from './Register';
 import Profile from './Profile';
@@ -10,12 +11,27 @@ import RepositoryManagement from './RepositoryManagement';
 import DocumentationManagement from './DocumentationManagement';
 
 function App() {
-  const [page, setPage] = useState('login');
+  const [page, setPage] = useState(() => (
+    new URLSearchParams(window.location.search).has('github') ? 'github' : 'login'
+  ));
+  const [userId, setUserId] = useState(() => sessionStorage.getItem('livingdocs.userId'));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [loginSuccess, setLoginSuccess] = useState('');
+  const [logoutError, setLogoutError] = useState('');
+
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      sessionStorage.removeItem('livingdocs.userId');
+      setUserId(null);
+      setPage('login');
+      setLoginError('Your LivingDocs session has expired. Please sign in again.');
+    };
+    window.addEventListener('livingdocs:unauthenticated', handleSessionExpired);
+    return () => window.removeEventListener('livingdocs:unauthenticated', handleSessionExpired);
+  }, []);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -26,11 +42,10 @@ function App() {
     setIsLoggingIn(true);
 
     try {
-      const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080')
-        .replace(/\/$/, '');
+      const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
       const response = await fetch(apiBaseUrl + '/api/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await csrfHeaders({ 'Content-Type': 'application/json' }, apiBaseUrl),
         credentials: 'include',
         body: JSON.stringify({ email, password }),
       });
@@ -64,11 +79,35 @@ function App() {
         return;
       }
 
+      sessionStorage.setItem('livingdocs.userId', String(result.id));
+      setUserId(String(result.id));
       setLoginSuccess('Signed in successfully as ' + result.email + '.');
     } catch {
       setLoginError('Could not connect to the backend. Check the backend URL and try again.');
     } finally {
       setIsLoggingIn(false);
+    }
+  }
+
+  async function handleLogout() {
+    setLogoutError('');
+    try {
+      const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+      const response = await fetch(apiBaseUrl + '/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+        headers: await csrfHeaders({}, apiBaseUrl),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok && response.status !== 401) {
+        setLogoutError('Could not sign out. Please retry.');
+        return;
+      }
+      sessionStorage.removeItem('livingdocs.userId');
+      setUserId(null);
+      setPage('login');
+    } catch {
+      setLogoutError('Could not connect to the backend to end the session.');
     }
   }
 
@@ -114,7 +153,7 @@ function App() {
       case 'github':
         return (
           <>
-            <GitHubConnection />
+            <GitHubConnection userId={userId} />
             <p className="switch-page">
               <button type="button" onClick={() => setPage('login')}>
                 Back to login
@@ -126,7 +165,7 @@ function App() {
       case 'repository':
         return (
           <>
-            <RepositoryManagement />
+            <RepositoryManagement userId={userId} />
             <p className="switch-page">
               <button type="button" onClick={() => setPage('login')}>
                 Back to login
@@ -138,7 +177,7 @@ function App() {
       case 'documentation':
         return (
           <>
-            <DocumentationManagement />
+            <DocumentationManagement userId={userId} />
             <p className="switch-page">
               <button type="button" onClick={() => setPage('login')}>
                 Back to login
@@ -314,10 +353,11 @@ function App() {
               Notifications
             </button>
 
-            <button type="button" onClick={() => setPage('login')}>
+            <button type="button" onClick={handleLogout}>
               Logout
             </button>
           </div>
+          {logoutError && <p role="alert">{logoutError}</p>}
         </nav>
       )}
 

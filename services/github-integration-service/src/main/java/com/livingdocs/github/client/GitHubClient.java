@@ -30,7 +30,6 @@ public class GitHubClient {
 
     private static final int PER_PAGE = 100;
     private static final int MAX_PAGES = 10;
-    private static final int MAX_ERROR_BODY_IN_MESSAGE = 300;
 
     private final GitHubProperties props;
     private final RestClient oauthClient;
@@ -212,8 +211,7 @@ public class GitHubClient {
         }
         if (response.error() != null) {
             // GitHub trả HTTP 200 kèm "error" khi code sai / hết hạn / đã dùng rồi.
-            throw new GitHubApiException("GitHub từ chối: " + response.error()
-                    + (response.errorDescription() != null ? " - " + response.errorDescription() : ""),
+            throw new GitHubApiException("GitHub OAuth token exchange was rejected.",
                     "bad_refresh_token".equals(response.error()));
         }
         return response;
@@ -237,13 +235,10 @@ public class GitHubClient {
         } catch (RestClientResponseException e) {
             int status = e.getStatusCode().value();
             String body = e.getResponseBodyAsString();
-            String shortBody = body.length() > MAX_ERROR_BODY_IN_MESSAGE
-                    ? body.substring(0, MAX_ERROR_BODY_IN_MESSAGE) + "..."
-                    : body;
-            throw new GitHubApiException("GitHub API trả lỗi " + status + ": " + shortBody,
+            throw new GitHubApiException("GitHub API returned HTTP " + status + ".",
                     status, e.getResponseHeaders(), body);
         } catch (RestClientException e) {
-            throw new GitHubApiException("Không gọi được GitHub API: " + e.getMessage(), e);
+            throw new GitHubApiException("Unable to contact GitHub API.", e);
         }
     }
 
