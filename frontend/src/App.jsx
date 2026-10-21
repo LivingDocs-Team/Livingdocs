@@ -13,10 +13,63 @@ function App() {
   const [page, setPage] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [loginError, setLoginError] = useState('');
+  const [loginSuccess, setLoginSuccess] = useState('');
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
-    alert('Login UI demo only. Backend is not connected yet.');
+    if (isLoggingIn) return;
+
+    setLoginError('');
+    setLoginSuccess('');
+    setIsLoggingIn(true);
+
+    try {
+      const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080')
+        .replace(/\/$/, '');
+      const response = await fetch(apiBaseUrl + '/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email, password }),
+      });
+
+      let result = null;
+      try {
+        result = await response.json();
+      } catch {
+        // An empty or invalid response body is handled below.
+      }
+
+      if (!response.ok) {
+        const errorMessage = response.status === 401
+          ? 'Invalid email or password.'
+          : response.status === 400
+            ? 'Please enter a valid email and password.'
+            : 'Login failed. Please try again.';
+        setLoginError(errorMessage);
+        return;
+      }
+
+      const hasValidResponse = result
+        && typeof result === 'object'
+        && !Array.isArray(result)
+        && typeof result.id === 'number'
+        && ['message', 'email', 'username', 'firstName', 'lastName', 'role']
+          .every((field) => typeof result[field] === 'string');
+
+      if (!hasValidResponse) {
+        setLoginError('The backend returned an invalid login response.');
+        return;
+      }
+
+      setLoginSuccess('Signed in successfully as ' + result.email + '.');
+    } catch {
+      setLoginError('Could not connect to the backend. Check the backend URL and try again.');
+    } finally {
+      setIsLoggingIn(false);
+    }
   }
 
   const renderPage = () => {
@@ -121,8 +174,12 @@ function App() {
                   required
                 />
 
-                <button type="submit">Sign in</button>
+                <button type="submit" disabled={isLoggingIn}>
+                  {isLoggingIn ? 'Signing in...' : 'Sign in'}
+                </button>
               </form>
+              {loginError && <p role="alert">{loginError}</p>}
+              {loginSuccess && <p role="status">{loginSuccess}</p>}
 
               <div className="separator">or</div>
 
