@@ -18,9 +18,9 @@ async function request(path, { method = 'GET', body, text = false } = {}) {
     });
   } catch (error) {
     if (error?.name === 'TimeoutError') {
-      throw new Error('The request timed out. Please try again.');
+      throw new Error('The request timed out. Please try again.', { cause: error });
     }
-    throw new Error('Could not connect to the GitHub integration service.');
+    throw new Error('Could not connect to the GitHub integration service.', { cause: error });
   }
 
   if (response.status === 204) return null;
