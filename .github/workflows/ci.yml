@@ -217,6 +217,7 @@ jobs:
     timeout-minutes: 30
     env:
       TOKEN_ENCRYPTION_KEY: ci-validation-placeholder-only
+      GITHUB_INTEGRATION_INTERNAL_SECRET: ci-validation-placeholder-only
 
     steps:
       - name: Checkout source code
