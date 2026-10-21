@@ -6,7 +6,8 @@
       POSTGRES_USER: livingdocs
       POSTGRES_PASSWORD: livingdocs
     ports:
-      - "5434:5432"
+      # Local developer database access only; keep PostgreSQL off host network interfaces.
+      - "127.0.0.1:5434:5432"
     volumes:
       - backend-db-data:/var/lib/postgresql/data
     healthcheck:
@@ -14,6 +15,8 @@
       interval: 5s
       timeout: 3s
       retries: 20
+    networks:
+      - backend-network
 
   github-db:
     image: postgres:16
@@ -22,7 +25,8 @@
       POSTGRES_USER: livingdocs
       POSTGRES_PASSWORD: livingdocs
     ports:
-      - "5433:5432"
+      # Local developer database access only; keep PostgreSQL off host network interfaces.
+      - "127.0.0.1:5433:5432"
     volumes:
       - github-db-data:/var/lib/postgresql/data
     healthcheck:
@@ -30,6 +34,8 @@
       interval: 5s
       timeout: 3s
       retries: 20
+    networks:
+      - github-internal
 
   backend:
     build:
@@ -37,15 +43,19 @@
       dockerfile: Dockerfile
     image: livingdocs-backend:local
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       DB_URL: jdbc:postgresql://backend-db:5432/cnpm
       DB_USERNAME: livingdocs
       DB_PASSWORD: livingdocs
       SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID: ${SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID:-local-placeholder}
       SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_SECRET: ${SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_SECRET:-local-placeholder}
+      GITHUB_INTEGRATION_BASE_URL: http://github-integration:8082
+      GITHUB_INTEGRATION_INTERNAL_SECRET: ${GITHUB_INTEGRATION_INTERNAL_SECRET:?GITHUB_INTEGRATION_INTERNAL_SECRET must be set in .env}
     depends_on:
       backend-db:
+        condition: service_healthy
+      github-integration:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
@@ -53,6 +63,9 @@
       timeout: 10s
       retries: 3
       start_period: 60s
+    networks:
+      - backend-network
+      - github-internal
 
   ai-service:
     build:
@@ -60,7 +73,8 @@
       dockerfile: Dockerfile
     image: livingdocs-ai:local
     ports:
-      - "8001:8001"
+      # Optional local debugging access; service-to-service traffic uses analysis-internal.
+      - "127.0.0.1:8001:8001"
     healthcheck:
       test:
         - CMD
@@ -71,7 +85,29 @@
       timeout: 5s
       retries: 3
       start_period: 15s
+    networks:
+      - analysis-internal
 
+  code-analyzer:
+    build:
+      context: .
+      dockerfile: code-analyzer/Dockerfile
+    image: livingdocs-code-analyzer:local
+    ports:
+      # Optional local debugging access; service-to-service traffic uses analysis-internal.
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/openapi.json', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - analysis-internal
 
   github-integration:
     build:
@@ -79,19 +115,29 @@
       dockerfile: Dockerfile
     image: livingdocs-github-integration:local
     ports:
-      - "8082:8082"
+      # The GitHub OAuth callback currently redirects the browser to localhost:8082.
+      # Other /api requests require the Backend-to-service credential.
+      - "${GITHUB_CALLBACK_BIND_ADDRESS:-127.0.0.1}:8082:8082"
     environment:
       DB_URL: jdbc:postgresql://github-db:5432/github_integration
       DB_USERNAME: livingdocs
       DB_PASSWORD: livingdocs
       TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:?TOKEN_ENCRYPTION_KEY must be set in .env}
+      GITHUB_INTEGRATION_INTERNAL_SECRET: ${GITHUB_INTEGRATION_INTERNAL_SECRET:?GITHUB_INTEGRATION_INTERNAL_SECRET must be set in .env}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-livingdocs-dev-hai}
       GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-http://localhost:8082/api/github/callback}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      CODE_ANALYZER_BASE_URL: http://code-analyzer:8000
+      AI_SERVICE_BASE_URL: http://ai-service:8001
 
     depends_on:
       github-db:
+        condition: service_healthy
+      code-analyzer:
+        condition: service_healthy
+      ai-service:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8082/actuator/health"]
@@ -99,6 +145,9 @@
       timeout: 5s
       retries: 3
       start_period: 30s
+    networks:
+      - github-internal
+      - analysis-internal
 
   frontend:
     build:
@@ -106,12 +155,18 @@
       dockerfile: Dockerfile
     image: livingdocs-frontend:local
     ports:
-      - "3000:80"
+      - "127.0.0.1:3000:80"
     depends_on:
-      - backend
-      - ai-service
-      - github-integration
+      backend:
+        condition: service_healthy
+    networks:
+      - backend-network
 
 volumes:
   backend-db-data:
   github-db-data:
+
+networks:
+  backend-network:
+  github-internal:
+  analysis-internal:

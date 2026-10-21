@@ -160,6 +160,17 @@ class GitHubClientRepositoryApiTest {
     }
 
     @Test
+    void upstreamErrorBodyIsRetainedForClassificationButNotIncludedInExceptionMessage() {
+        String upstreamMarker = "sensitive-upstream-marker";
+        stub("/repos/o/r", 403, "{\"message\": \"" + upstreamMarker + "\"}", Map.of());
+
+        GitHubApiException e = failure(() -> client.getRepositoryDetails("tok", "o", "r"));
+
+        assertThat(e.getResponseBody()).contains(upstreamMarker);
+        assertThat(e.getMessage()).doesNotContain(upstreamMarker);
+    }
+
+    @Test
     void withoutToken_sendsNoAuthorizationHeader() {
         stub("/repos/o/r/languages", 200, "{}", Map.of());
 

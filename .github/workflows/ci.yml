@@ -226,4 +226,4 @@ jobs:
         run: docker compose -f compose.yaml config --quiet
 
       - name: Build application images
-        run: docker compose -f compose.yaml build backend ai-service github-integration frontend
+        run: docker compose -f compose.yaml build backend ai-service code-analyzer github-integration frontend

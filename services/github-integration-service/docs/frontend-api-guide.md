@@ -1,41 +1,41 @@
 # Gọi API GitHub Integration từ frontend (cho Khôi)
 
-Service chạy ở `http://localhost:8082`. Danh sách đầy đủ và thử trực tiếp: http://localhost:8082/swagger-ui.html
+Browser APIs go through the Backend BFF at `/api/...`. GitHub Integration listens on `8082` for
+the GitHub OAuth callback and internal Backend requests; browser requests must not call it directly.
 
 ## 1. Địa chỉ gọi API
 
 | Frontend chạy bằng | Gọi tới | Cần làm gì |
 |---|---|---|
 | `npm run dev` (cổng 5173) | đường dẫn tương đối `/api/...` | Proxy của Vite chuyển tiếp, sửa `vite.config.js` như bên dưới |
-| Docker Compose (cổng 3000) | `http://localhost:8082/api/...` | Không cần gì, service đã cho phép cổng 3000 và 5173 (CORS) |
+| Docker Compose (cổng 3000) | đường dẫn tương đối `/api/...` | Nginx frontend proxy chuyển tiếp tới Backend (8080) |
 
-`vite.config.js`: `/api/auth` đi sang backend đăng nhập (8080), còn lại sang service GitHub (8082). Dòng `/api/auth` phải đứng **trước** dòng `/api`:
+`vite.config.js`: mọi request `/api` đi qua Backend (8080), nơi xác minh session rồi proxy các API tích hợp:
 
 ```js
 server: {
   proxy: {
-    '/api/auth': 'http://localhost:8080',
-    '/api': 'http://localhost:8082',
+    '/api': 'http://localhost:8080',
   },
 },
 ```
 
-Frontend chạy ở địa chỉ khác 3000 và 5173 thì thêm vào biến `CORS_ALLOWED_ORIGINS` của service (cách nhau bởi dấu phẩy).
+Frontend development origins được giới hạn trong allowlist CORS của Backend. CORS không được dùng để xác thực người dùng.
 
 ## 2. Hàm gọi API dùng chung
 
-Mọi request gửi header **`X-User-Id`** = `id` lấy từ response của `POST /api/auth/login` (backend). Sau này có JWT thì đổi sang header `Authorization`.
+Frontend gửi session cookie tới Backend bằng `credentials: 'include'`. Backend lấy user ID từ principal đã xác thực, thay thế mọi `X-User-Id`/Authorization do browser gửi, rồi dùng `GITHUB_INTEGRATION_INTERNAL_SECRET` để xác thực với GitHub Integration. Frontend không được tự gửi `X-User-Id`.
 
 ```js
-const GITHUB_API = import.meta.env.DEV ? '' : 'http://localhost:8082';
+const GITHUB_API = import.meta.env.VITE_API_BASE_URL || '';
 
-export async function githubApi(path, { method = 'GET', body, userId } = {}) {
+export async function githubApi(path, { method = 'GET', body } = {}) {
   const res = await fetch(`${GITHUB_API}${path}`, {
     method,
     headers: {
-      'X-User-Id': String(userId),
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
+    credentials: 'include',
     body: body ? JSON.stringify(body) : undefined,
   });
   if (res.status === 204) return null;
@@ -63,7 +63,7 @@ export async function githubApi(path, { method = 'GET', body, userId } = {}) {
 Khi bấm "Kết nối GitHub":
 
 ```js
-const { authorizeUrl, installUrl } = await githubApi('/api/github/authorize-url', { userId });
+const { authorizeUrl, installUrl } = await githubApi('/api/github/authorize-url');
 // Lần đầu (chưa cài GitHub App, chưa chọn repo) dùng installUrl; đã cài rồi thì dùng authorizeUrl
 window.location.href = installUrl;
 ```
@@ -83,11 +83,11 @@ if (params.get('github') === 'connected') { /* báo thành công, tải lại tr
 if (params.get('github') === 'error') { /* báo lỗi theo params.get('reason') */ }
 ```
 
-Không cấu hình `FRONTEND_URL` thì callback hiện JSON `"Kết nối GitHub thành công"` (cách cũ, dùng khi test bằng Swagger).
+Không cấu hình `FRONTEND_URL` thì callback trả JSON `"Kết nối GitHub thành công"`; callback vẫn chỉ hoàn tất state dùng một lần đã được tạo từ authorize request qua Backend BFF. Swagger UI của service không mở cho browser.
 
 ## 4. Màn hình "Repository"
 
-`workspaceId` hiện là chuỗi tuỳ ý, chưa có service workspace. Tạm dùng mỗi người một workspace, ví dụ `ws-${userId}`.
+`workspaceId` hiện là workspace cá nhân duy nhất `ws-${userId}`. Backend lấy `${userId}` từ session; GitHub Integration kiểm tra lại workspace ID và chỉ liệt kê repository thuộc connection của user đó.
 
 | Việc | API | Body / kết quả |
 |---|---|---|

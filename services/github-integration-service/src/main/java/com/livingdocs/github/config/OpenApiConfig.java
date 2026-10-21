@@ -16,8 +16,10 @@ public class OpenApiConfig {
                 .description("""
                         Epic 2 (GitHub Account Connection) và Epic 3 (Repository Management).
 
-                        Tạm thời người dùng được xác định bằng header `X-User-Id`.
-                        Khi service đăng nhập của TV1 xong, header này sẽ được thay bằng JWT.
+                        Browser requests go through the Backend BFF. Protected API routes require
+                        the Backend internal service credential before GitHub Integration trusts
+                        the user identity header. The OAuth callback is public and validates its
+                        one-time state value.
                         """));
     }
 }
