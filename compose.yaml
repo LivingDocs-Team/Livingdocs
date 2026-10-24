@@ -72,6 +72,11 @@
       context: ./ai-service
       dockerfile: Dockerfile
     image: livingdocs-ai:local
+    environment:
+      # custom documentation templates survive restarts (named volume below)
+      TEMPLATES_FILE: /app/data/templates.json
+    volumes:
+      - ai-templates:/app/data
     ports:
       # Optional local debugging access; service-to-service traffic uses analysis-internal.
       - "127.0.0.1:8001:8001"
@@ -165,6 +170,7 @@
 volumes:
   backend-db-data:
   github-db-data:
+  ai-templates:
 
 networks:
   backend-network:
