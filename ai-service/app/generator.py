@@ -21,12 +21,18 @@ from typing import List, Optional, Protocol
 from .doc_schema import FileDoc, InvalidAIOutput, parse_file_doc
 from .confidence import average, level_of, score_entity
 from .evidence import EvidenceCatalog, build_catalog, entities
-from .models import FileAnalysis, FileReport, FileResultStatus, Template
+from .models import SECTION_KINDS, FileAnalysis, FileReport, FileResultStatus, Template
 from .prompts import SYSTEM_PROMPT, build_file_prompt, build_repair_prompt
 from .renderer import doc_items, missing_entities, render_file, unknown_entities
 from .retrieval import Retrieved
 
 log = logging.getLogger(__name__)
+
+
+def template_entities(f: FileAnalysis, tpl: Template):
+    """Entities of the file that the template's sections document (others are not rendered)."""
+    kinds = set().union(*(SECTION_KINDS.get(s, set()) for s in tpl.sections))
+    return [e for e in entities(f) if e.kind in kinds]
 
 
 class LLMClient(Protocol):
@@ -95,7 +101,8 @@ class DocGenerator:
             return self._finish(f, FileDoc(), False, FileResultStatus.fallback, catalog, tpl, lang,
                                 warnings)
 
-        missing = missing_entities(f, doc)
+        in_tpl = {e.key for e in template_entities(f, tpl)}
+        missing = [m for m in missing_entities(f, doc) if m in in_tpl]
         if missing:
             warnings.append(f"{f.path}: AI gave no description for {', '.join(missing)}.")
         extra = unknown_entities(f, doc)
@@ -108,7 +115,8 @@ class DocGenerator:
                 warnings: List[str]) -> FileDocResult:
         """Score every entity, attach evidence, render Markdown."""
         items = doc_items(doc)
-        reports = [score_entity(ent, items.get(ent.key), catalog, ai_mode) for ent in entities(f)]
+        reports = [score_entity(ent, items.get(ent.key), catalog, ai_mode)
+                   for ent in template_entities(f, tpl)]
         by_key = {r.name: r for r in reports}
 
         cited_ids: List[str] = list(doc.overview_evidence)

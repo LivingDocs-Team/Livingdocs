@@ -31,6 +31,7 @@ import java.util.List;
         "/api/github/**", "/api/workspaces/**", "/api/repositories/**", "/api/documentation/**"
 }, method = {org.springframework.web.bind.annotation.RequestMethod.GET,
         org.springframework.web.bind.annotation.RequestMethod.POST,
+        org.springframework.web.bind.annotation.RequestMethod.PUT,
         org.springframework.web.bind.annotation.RequestMethod.DELETE})
 public class GitHubIntegrationBffController {
 

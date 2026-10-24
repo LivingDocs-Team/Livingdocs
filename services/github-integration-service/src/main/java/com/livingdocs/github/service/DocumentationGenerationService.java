@@ -91,6 +91,18 @@ public class DocumentationGenerationService {
                         "The AI service returned an unexpected HTTP status.");
             }
             job = response.getBody();
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "TEMPLATE_NOT_FOUND",
+                        "The selected documentation template does not exist. Choose another template.");
+            }
+            if (e.getStatusCode().value() == 422) {
+                String detail = DocumentationTemplateService.detail(e);
+                throw new ApiException(HttpStatus.BAD_REQUEST, "GENERATION_REQUEST_INVALID",
+                        detail != null ? detail : "The documentation generation settings are not valid.");
+            }
+            throw integrationFailure("AI_SERVICE_FAILED",
+                    "The AI service could not start documentation generation.");
         } catch (RestClientException e) {
             throw integrationFailure("AI_SERVICE_FAILED",
                     "The AI service could not start documentation generation.");

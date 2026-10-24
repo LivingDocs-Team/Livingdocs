@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .doc_schema import ClassDoc, EndpointDoc, FileDoc, FunctionDoc
 from .evidence import location
-from .models import (ClassInfo, Endpoint, EntityReport, Evidence, FileAnalysis, Function,
+from .models import (SECTION_NAMES, ClassInfo, Endpoint, EntityReport, Evidence, FileAnalysis, Function,
                      Parameter, Template)
 
 LABELS = {
@@ -89,6 +89,7 @@ LABELS = {
         },
         "lines": "dòng",
         "overall": "Độ tin cậy chung",
+        "template": "Mẫu tài liệu",
     },
     "en": {
         "Overview": "Overview", "Classes": "Classes", "Functions": "Functions",
@@ -105,7 +106,7 @@ LABELS = {
         "status": {"generated": "AI", "offline": "offline", "fallback": "fallback (AI error)"},
         "confidence": "Confidence", "evidence": "Evidence", "sources": "References",
         "levels": {"high": "high", "medium": "medium", "low": "low"},
-        "lines": "lines", "overall": "Overall confidence",
+        "lines": "lines", "overall": "Overall confidence", "template": "Template",
                 "class_fallback": "No confirmed description is available for class `{name}`.",
         "function_fallback": (
             "Inferred description: the name `{name}` suggests {action}; "
@@ -146,8 +147,7 @@ LABELS = {
     },
 }
 
-KNOWN_SECTIONS = {"overview": "Overview", "classes": "Classes",
-                  "functions": "Functions", "api endpoints": "API Endpoints"}
+KNOWN_SECTIONS = {name.lower(): name for name in SECTION_NAMES}
 
 
 def _labels(lang: str) -> dict:
@@ -350,10 +350,12 @@ def render_file(f: FileAnalysis, doc: FileDoc, tpl: Template, lang: str,
 
 def render_overview(target: str, documented: List[Tuple[str, str, Optional[float]]],
                     skipped: List[Tuple[str, str]], lang: str,
-                    overall: Optional[float] = None) -> str:
+                    overall: Optional[float] = None, template_name: Optional[str] = None) -> str:
     """documented: (path, status, confidence) ; skipped: (path, reason)."""
     L = _labels(lang)
     lines = [f"# {target}", "", L["repo_intro"].format(n=len(documented))]
+    if template_name:
+        lines += ["", f"{L['template']}: **{template_name}**"]
     if overall is not None:
         lines += ["", f"{L['overall']}: **{_score_text(overall, L)}**"]
     lines += ["", f"## {L['files_title']}", ""]

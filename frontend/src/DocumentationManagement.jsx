@@ -2,24 +2,9 @@
 import { useEffect, useState } from 'react';
 import './App.css';
 import { githubApi, githubApiText } from './githubApi';
+import { TemplateManager, TemplatePicker } from './DocumentationTemplates';
+import { useTemplates } from './templateApi';
 
-const TEMPLATES = [
-  {
-    id: 'api-reference',
-    name: 'API Documentation',
-    description: 'Document functions, parameters, and return values.',
-  },
-  {
-    id: 'default',
-    name: 'Technical Documentation',
-    description: 'Explain architecture, modules, and implementation.',
-  },
-  {
-    id: 'brief',
-    name: 'Brief summary',
-    description: 'Create a short code summary for review or onboarding.',
-  },
-];
 
 function escapeHtml(value) {
   return value
@@ -110,6 +95,8 @@ export default function DocumentationManagement({ userId }) {
   const [repositories, setRepositories] = useState([]);
   const [repositoryId, setRepositoryId] = useState('');
   const [template, setTemplate] = useState('default');
+  const [isManagingTemplates, setIsManagingTemplates] = useState(false);
+  const templateList = useTemplates(userId);
   const [status, setStatus] = useState('idle');
   const [document, setDocument] = useState('');
   const [evidence, setEvidence] = useState([]);
@@ -213,9 +200,16 @@ export default function DocumentationManagement({ userId }) {
       setEvidence(evidenceItems);
       setStatus('completed');
       const repoName = repositories.find((repo) => String(repo.id) === String(repositoryId))?.fullName;
-      setNotice(`Documentation generated from ${repoName || 'the selected repository'}.`);
+      const templateName = job.template_name
+        || templateList.templates.find((item) => item.id === template)?.name;
+      setNotice(`Documentation generated from ${repoName || 'the selected repository'}`
+        + (templateName ? ` using the "${templateName}" template.` : '.'));
     } catch (requestError) {
       setStatus('failed');
+      if (requestError.code === 'TEMPLATE_NOT_FOUND') {
+        templateList.reload();
+        setTemplate('default');
+      }
       setError(requestError.message || 'Documentation generation failed.');
     }
   }
@@ -343,30 +337,29 @@ export default function DocumentationManagement({ userId }) {
             ))}
           </select>
 
-          <label>Documentation template</label>
-          <div className="documentation-template-list">
-            {TEMPLATES.map((item) => (
-              <label
-                key={item.id}
-                className={`documentation-template ${template === item.id ? 'selected' : ''}`}
-              >
-                <input
-                  type="radio"
-                  name="documentation-template"
-                  value={item.id}
-                  checked={template === item.id}
-                  onChange={() => setTemplate(item.id)}
-                />
-                <span>
-                  <strong>{item.name}</strong>
-                  <small>{item.description}</small>
-                </span>
-              </label>
-            ))}
+          <div className="documentation-template-heading">
+            <label id="documentation-template-label">Documentation template</label>
+            <button
+              type="button"
+              className="documentation-secondary-button"
+              aria-expanded={isManagingTemplates}
+              onClick={() => setIsManagingTemplates((open) => !open)}
+            >
+              {isManagingTemplates ? 'Close template manager' : 'Manage templates'}
+            </button>
           </div>
+          <TemplatePicker
+            templates={templateList.templates}
+            value={template}
+            onChange={setTemplate}
+            isLoading={templateList.isLoading}
+            loadError={templateList.loadError}
+            disabled={status === 'generating'}
+          />
 
           <div className="documentation-actions">
-            <button type="submit" disabled={status === 'generating' || isLoadingRepositories || repositories.length === 0}>
+            <button type="submit" disabled={status === 'generating' || isLoadingRepositories || repositories.length === 0
+              || !templateList.templates.some((item) => item.id === template)}>
               {status === 'generating' ? 'Generating…' : 'Generate documentation'}
             </button>
             <button
@@ -378,6 +371,20 @@ export default function DocumentationManagement({ userId }) {
             </button>
           </div>
         </form>
+
+        {isManagingTemplates && (
+          <TemplateManager
+            templates={templateList.templates}
+            onSaved={(saved) => {
+              templateList.reload();
+              setTemplate(saved.id);
+            }}
+            onDeleted={(deleted) => {
+              templateList.reload();
+              if (deleted.id === template) setTemplate('default');
+            }}
+          />
+        )}
 
         {isLoadingRepositories && <p role="status">Loading workspace repositories…</p>}
 
