@@ -11,7 +11,7 @@ Ví dụ đầy đủ nằm trong `sample_data/sample_analysis.json`.
 | `scope` | `"file"` \| `"module"` \| `"repository"` | có | |
 | `target` | string | có | Tên file, module hoặc repository |
 | `files` | list `FileAnalysis` | có, ≥ 1 | Không được trùng `path` |
-| `template_id` | string | không | Mặc định `default` |
+| `template_id` | string | không | Mặc định `default`; id lấy từ `GET /templates`. Sai id → `404` |
 | `output_language` | `"vi"` \| `"en"` | không | Mặc định `vi` |
 | `context` | list `ContextDocument` | không | Tài liệu có sẵn làm ngữ cảnh (README, ghi chú thiết kế) |
 
@@ -73,6 +73,9 @@ thiếu thì bằng chứng chỉ trỏ được tới tên file thay vì `file.
 | `failed` | Lỗi không mong muốn ở riêng file này |
 
 Job chỉ `failed` khi không file nào sinh được tài liệu. Markdown lấy ở `GET /jobs/{id}/result`.
+
+Job ghi lại template đã dùng: `template_id`, `template_name`, `template_sections` (ảnh chụp lúc
+tạo job, không đổi nếu template bị sửa hoặc xoá sau đó).
 
 Mỗi job và mỗi phần tử `file_results` có thêm `confidence` (0–1); job có `confidence_level`
 (`high` ≥ 0,75, `medium` ≥ 0,5, `low`).
