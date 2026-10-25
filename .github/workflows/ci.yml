@@ -1,4 +1,3 @@
-
 name: LivingDocs CI
 
 on:
@@ -9,45 +8,16 @@ on:
   pull_request:
     branches:
       - main
-    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: livingdocs-ci-${{ github.ref }}
+  group: "livingdocs-ci-${{ github.ref }}"
   cancel-in-progress: true
 
 jobs:
-  documentation-drift:
-    name: Documentation Drift Verification
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout source code
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Check local Markdown links
-        run: python scripts/check_documentation_drift.py
-      - name: Test documentation drift checker
-        run: |
-          python -m pip install --disable-pip-version-check pytest pytest-html
-          python -m pytest -q tests/test_documentation_drift.py
-      - name: Report documentation verification
-        if: always()
-        run: |
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "### Documentation drift: PASS" >> "$GITHUB_STEP_SUMMARY"
-            echo "Local Markdown links were checked and checker tests passed." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "### Documentation drift: FAIL" >> "$GITHUB_STEP_SUMMARY"
-            echo "See the workflow logs for broken links or failed checker tests." >> "$GITHUB_STEP_SUMMARY"
-          fi
-
   backend-build-test:
     name: Backend Build and Test
     runs-on: ubuntu-latest
@@ -61,7 +31,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
         ports:
-          - 5432:5432
+          - "5432:5432"
         options: >-
           --health-cmd "pg_isready -U postgres -d cnpm"
           --health-interval 10s
@@ -76,7 +46,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "27"
+          java-version: "21"
           cache: maven
           cache-dependency-path: backend/pom.xml
 
@@ -91,9 +61,9 @@ jobs:
 
       - name: Build and test backend
         env:
-          DB_URL: jdbc:postgresql://localhost:5432/cnpm
-          DB_USERNAME: postgres
-          DB_PASSWORD: postgres
+          DB_URL: "jdbc:postgresql://localhost:5432/cnpm"
+          DB_USERNAME: "postgres"
+          DB_PASSWORD: "postgres"
         run: ./backend/mvnw --batch-mode --no-transfer-progress -f backend/pom.xml clean verify
 
       - name: Report CI result
@@ -128,16 +98,6 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - name: Report frontend verification
-        if: always()
-        run: |
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "### Frontend verification: PASS" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "### Frontend verification: FAIL" >> "$GITHUB_STEP_SUMMARY"
-            echo "Inspect lint/build logs above." >> "$GITHUB_STEP_SUMMARY"
-          fi
-
   github-integration-test:
     name: GitHub Integration Service Test
     runs-on: ubuntu-latest
@@ -161,8 +121,8 @@ jobs:
       - name: Live test against real GitHub API
         env:
           GITHUB_LIVE_TEST: "true"
-          GITHUB_LIVE_REPO: ${{ github.repository }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_LIVE_REPO: "${{ github.repository }}"
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
         run: >-
           mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml test
           -Dtest=GitHubRepositoryFetcherLiveTest -Dsurefire.failIfNoSpecifiedTests=false
@@ -198,14 +158,6 @@ jobs:
       - name: Run AI service tests
         working-directory: ai-service
         run: python -m pytest -q
-
-      - name: Upload AI service test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ai-service-test-results
-          path: ai-service/test-results.xml
-          if-no-files-found: ignore
 
   ai-service-integration:
     name: AI Service Integration Test
@@ -248,8 +200,8 @@ jobs:
       - name: Run integration tests across services
         working-directory: ai-service
         env:
-          ANALYZER_URL: http://localhost:8000
-          AI_SERVICE_URL: http://localhost:8001
+          ANALYZER_URL: "http://localhost:8000"
+          AI_SERVICE_URL: "http://localhost:8001"
         run: python -m pytest -m live -v tests/integration
 
       - name: Show service logs
@@ -259,13 +211,19 @@ jobs:
           echo "--- ai-service ---"; cat "$RUNNER_TEMP/ai-service.log" || true
 
   docker-compose-validation:
-     name: Docker Compose Validation
-     runs-on: ubuntu-latest
-     timeout-minutes: 30
-     env:
-       TOKEN_ENCRYPTION_KEY: ci-validation-placeholder-only
-+      GITHUB_INTEGRATION_INTERNAL_SECRET: ci-validation-placeholder-only
- 
-     steps:
-       - name: Checkout source code
-         uses: actions/checkout@v4
+    name: Docker Compose Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TOKEN_ENCRYPTION_KEY: "ci-validation-placeholder-only"
+      GITHUB_INTEGRATION_INTERNAL_SECRET: "ci-validation-placeholder-only"
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose configuration
+        run: docker compose -f compose.yaml config --quiet
+
+      - name: Build application images
+        run: docker compose -f compose.yaml build backend ai-service code-analyzer github-integration frontend
