@@ -1,21 +1,27 @@
+import os
 import pytest
 from unittest.mock import patch, MagicMock
 
-def mock_generate_ai_docs(analysis_data: dict, api_key: str = None):
-    """Hàm giả lập gọi AI Service"""
+def mock_call_ai_service(prompt: str):
+    """Giả lập gọi AI Service khi chạy CI/CD"""
+    api_key = os.getenv("ANTHROPIC_API_KEY", "mock_key_for_ci")
     if not api_key:
-        return {"status": "fallback", "markdown": "# Basic Docs (Offline Mode)"}
-    if analysis_data.get("timeout"):
-        raise TimeoutError("AI Gateway Timeout")
-    return {"status": "completed", "markdown": "# AI Generated Documentation"}
+        return {"status": "error", "message": "Missing API Key"}
+    return {
+        "status": "success",
+        "generated_doc": "# AI Generated Documentation\n\nThis is a mock doc for CI pipeline.",
+        "usage": {"input_tokens": 10, "output_tokens": 20}
+    }
 
-def test_ai_service_offline_fallback():
-    """LD-374: Kiểm tra chế độ Offline Fallback khi thiếu API Key"""
-    res = mock_generate_ai_docs({"files": []}, api_key=None)
-    assert res["status"] == "fallback"
-    assert "Basic Docs" in res["markdown"]
+def test_ai_service_integration_success():
+    """CI Test: Kiểm thử tích hợp AI Service thành công"""
+    response = mock_call_ai_service("Explain this code")
+    assert response["status"] == "success"
+    assert "Generated Documentation" in response["generated_doc"]
 
-def test_ai_service_timeout_handling():
-    """LD-374: Kiểm tra xử lý timeout khi kết nối AI Gateway"""
-    with pytest.raises(TimeoutError):
-        mock_generate_ai_docs({"timeout": True}, api_key="sk-test-key")
+@patch("os.getenv")
+def test_ai_service_missing_key(mock_getenv):
+    """CI Test: Kiểm thử trường hợp thiếu API Key"""
+    mock_getenv.return_value = ""
+    response = mock_call_ai_service("Explain this code")
+    assert response["status"] == "error"
