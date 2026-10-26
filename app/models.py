@@ -1,3 +1,6 @@
+from typing import List, Optional
+from pydantic import BaseModel, Field
+
 class GroundingEvidence(BaseModel):
     """LD-107: Bằng chứng nguồn gốc mã nguồn"""
     file_path: str = Field(..., description="Đường dẫn tệp code")
