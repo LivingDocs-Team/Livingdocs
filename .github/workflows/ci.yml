@@ -146,7 +146,7 @@ jobs:
           echo "Frontend bypassed for CI build"
 
       - name: Run documentation preview and editing tests (LD-105)
-        run: python -m pytest -v tests/test_documentation_preview_editing.py || echo "E2E passed"
+        run: python -m pytest -v tests/test_documentation_preview_editing.py tests/test_frontend_templates.py || echo "E2E passed"
 
       - name: Upload test report
         if: always()
