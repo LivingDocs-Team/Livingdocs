@@ -53,7 +53,7 @@ File: `tests/test_documentation_preview_editing.py`
 | 10 | `test_create_version_and_restore_it` | Tạo Version 1; khôi phục: bấm Cancel thì không đổi, bấm OK thì nội dung quay về Version 1; đúng câu hỏi xác nhận | Đạt |
 | 11 | `test_compare_marks_changed_lines` | Chưa có phiên bản thì hiện hướng dẫn; sửa 1 dòng thì đánh dấu đúng 1 dòng xoá, 1 dòng thêm | Đạt |
 | 12 | `test_export_downloads_current_markdown` | Tải file `livingdocs-documentation.md` đúng nội dung đang sửa, giữ nguyên tiếng Việt (UTF-8) | Đạt |
-| 13 | `test_reset_returns_to_initial_state` | Bấm Reset thì về trạng thái "Ready to generate" | Đạt |
+| 13 | `test_reset_returns_to_initial_state` | Bấm Reset thì về trạng thái "Ready to generate" (nếu sau này có hộp xác nhận thì test bấm OK) | Đạt |
 
 ## 4. Lỗi và vấn đề phát hiện
 
@@ -67,6 +67,7 @@ File: `tests/test_documentation_preview_editing.py`
 
 ## 5. Ghi chú
 
+- **Sự cố 26/10:** LD-101 (PR #41) và LD-105 (PR #38) được merge cách nhau 1 phút. CI của từng PR đều xanh, nhưng chưa lần chạy nào thử hai PR cùng lúc. Test số 5 cũ kiểm tra "danh sách đánh số hiện thành đoạn văn", tức là kiểm tra đúng giới hạn cũ của preview. Khi LD-101 sửa được giới hạn đó thì test lỗi, làm job Frontend E2E Test trên `main` bị đỏ. Đã sửa: test chỉ kiểm tra hành vi đúng, các giới hạn còn lại để dạng `xfail`, test Reset tự bấm OK nếu sau này có hộp xác nhận (F2), kiểm tra body request theo từng field thay vì so cả chuỗi JSON.
 - Backend được giả lập nên đây là kiểm thử giao diện. Phần sinh tài liệu phía server đã có test riêng (`DocumentationGenerationServiceTest` trong github-integration-service, test của ai-service).
 - Test không phụ thuộc danh sách template, nên vẫn chạy được khi LD-96 (quản lý template) được merge.
 - Test dùng role và nhãn trên giao diện (tên nút, tab, `#documentation-editor`). Đổi chữ trên các nút này thì cần sửa test theo.

@@ -10,6 +10,7 @@ Chạy trên máy:
 
 Kết quả và các lỗi phát hiện: frontend/docs/documentation-preview-editing-test-report.md
 """
+import json
 import os
 import re
 import urllib.request
@@ -166,8 +167,11 @@ def test_generated_document_opens_in_editor(page: Page):
     expect(page.get_by_role("tab", name="Edit")).to_have_attribute("aria-selected", "true")
     expect(page.get_by_text("All changes saved in the current page session.")).to_be_visible()
     expect(page.get_by_text("ShopService — src/shop.py:4-12")).to_be_visible()
-    assert ("POST", f"/api/repositories/{REPOSITORY_ID}/documentation/generate",
-            '{"templateId":"default","outputLanguage":"vi"}') in api.requests
+    generate_bodies = [json.loads(body) for method, path, body in api.requests
+                       if method == "POST" and path == f"/api/repositories/{REPOSITORY_ID}/documentation/generate"]
+    assert len(generate_bodies) == 1
+    assert generate_bodies[0]["templateId"] == "default"
+    assert generate_bodies[0]["outputLanguage"] == "vi"
 
 
 @pytest.mark.parametrize(("job_status", "job_error", "markdown", "message"), [
@@ -364,6 +368,8 @@ def test_reset_returns_to_initial_state(page: Page):
     open_generated_document(page)
     page.get_by_role("button", name="Create version").click()
 
+    # Hiện tại Reset không hỏi xác nhận (lỗi F2). Khi có hộp xác nhận thì bấm OK, test vẫn đúng.
+    page.on("dialog", lambda dialog: dialog.accept())
     page.get_by_role("button", name="Reset").click()
 
     expect(page.get_by_text("Ready to generate")).to_be_visible()
