@@ -145,8 +145,8 @@ jobs:
           done
           echo "Frontend did not start"; cat "$RUNNER_TEMP/frontend.log"; exit 1
 
-      - name: Run documentation preview and editing tests (LD-105)
-        run: python -m pytest -v tests/test_documentation_preview_editing.py
+      - name: Run documentation preview, editing (LD-105) and template (LD-96) UI tests
+        run: python -m pytest -v tests/test_documentation_preview_editing.py tests/test_frontend_templates.py
 
       - name: Upload test report
         if: always()
