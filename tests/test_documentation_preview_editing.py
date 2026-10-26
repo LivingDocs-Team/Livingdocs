@@ -10,6 +10,7 @@ Chạy trên máy:
 
 Kết quả và các lỗi phát hiện: frontend/docs/documentation-preview-editing-test-report.md
 """
+import json
 import os
 import re
 import urllib.request
@@ -166,8 +167,11 @@ def test_generated_document_opens_in_editor(page: Page):
     expect(page.get_by_role("tab", name="Edit")).to_have_attribute("aria-selected", "true")
     expect(page.get_by_text("All changes saved in the current page session.")).to_be_visible()
     expect(page.get_by_text("ShopService — src/shop.py:4-12")).to_be_visible()
-    assert ("POST", f"/api/repositories/{REPOSITORY_ID}/documentation/generate",
-            '{"templateId":"default","outputLanguage":"vi"}') in api.requests
+    generate_bodies = [json.loads(body) for method, path, body in api.requests
+                       if method == "POST" and path == f"/api/repositories/{REPOSITORY_ID}/documentation/generate"]
+    assert len(generate_bodies) == 1
+    assert generate_bodies[0]["templateId"] == "default"
+    assert generate_bodies[0]["outputLanguage"] == "vi"
 
 
 @pytest.mark.parametrize(("job_status", "job_error", "markdown", "message"), [
@@ -228,7 +232,7 @@ def test_preview_renders_supported_markdown(page: Page):
     expect(content.locator("pre > code")).to_have_text("def create_order(items):\n    return Order(items)")
     expect(content.locator("hr")).to_have_count(1)
     expect(content.locator("p").filter(has_text="Tài liệu kỹ thuật được sinh tự động.")).to_have_count(1)
-    expect(content.locator("p").filter(has_text="1. Bước đầu tiên")).to_have_count(1)
+    expect(content.locator("ol > li")).to_have_text(["Bước đầu tiên"])
 
 
 def test_preview_shows_unsaved_edits_and_edits_survive_tab_switch(page: Page):
@@ -250,6 +254,7 @@ def test_preview_does_not_run_html_or_scripts(page: Page):
         "<script>window.__ld105_xss = 'script'</script>",
         '<img src="x" onerror="window.__ld105_xss = \'img\'">',
         "- <a href=\"javascript:alert(1)\">link</a>",
+        "- [bấm vào đây](javascript:alert(1))",
     ])
     open_generated_document(page, markdown=malicious)
     content = preview(page)
@@ -264,15 +269,25 @@ def test_preview_does_not_run_html_or_scripts(page: Page):
     assert page.evaluate("window.__ld105_xss") is None
 
 
-@pytest.mark.xfail(reason="Phát hiện F1 trong báo cáo: preview chưa hiển thị in đậm, inline code, "
-                          "heading cấp 4, trích dẫn và bảng mà tài liệu do AI sinh ra có dùng", strict=False)
-def test_preview_renders_markdown_used_by_ai_output(page: Page):
+def test_preview_renders_inline_markdown_used_by_ai_output(page: Page):
+    """In đậm, inline code, heading cấp 4 và link http(s) (preview hỗ trợ từ LD-101)."""
+    open_generated_document(page, markdown=AI_STYLE_MARKDOWN + "\n\nXem [repo](https://github.com/LivingDocs-Team/Livingdocs).")
+    content = preview(page)
+
+    expect(content.locator("strong").first).to_have_text("0.32 (thấp)")
+    expect(content.locator("h4 code")).to_have_text("parse_python_ast")
+    link = content.locator("a")
+    expect(link).to_have_text("repo")
+    expect(link).to_have_attribute("href", "https://github.com/LivingDocs-Team/Livingdocs")
+    expect(link).to_have_attribute("rel", "noopener noreferrer")
+
+
+@pytest.mark.xfail(reason="Phát hiện F1 (phần còn lại) trong báo cáo: preview chưa hiển thị trích dẫn (>) "
+                          "và bảng mà tài liệu do AI sinh ra có dùng", strict=False)
+def test_preview_renders_blockquote_and_table(page: Page):
     open_generated_document(page, markdown=AI_STYLE_MARKDOWN)
     content = preview(page)
 
-    expect(content.locator("strong").first).to_have_text("0.32 (thấp)", timeout=2_000)
-    expect(content.locator("code").first).to_have_text("parse_python_ast", timeout=2_000)
-    expect(content.locator("h4")).to_have_count(1, timeout=2_000)
     expect(content.locator("blockquote")).to_have_count(1, timeout=2_000)
     expect(content.locator("table")).to_have_count(1, timeout=2_000)
 
@@ -353,6 +368,8 @@ def test_reset_returns_to_initial_state(page: Page):
     open_generated_document(page)
     page.get_by_role("button", name="Create version").click()
 
+    # Hiện tại Reset không hỏi xác nhận (lỗi F2). Khi có hộp xác nhận thì bấm OK, test vẫn đúng.
+    page.on("dialog", lambda dialog: dialog.accept())
     page.get_by_role("button", name="Reset").click()
 
     expect(page.get_by_text("Ready to generate")).to_be_visible()

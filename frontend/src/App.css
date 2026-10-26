@@ -3363,6 +3363,239 @@ button:disabled {
   }
 }
 
+
+/* Documentation templates: picker details and template manager */
+
+.documentation-template-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.documentation-template-heading label {
+  font-weight: 600;
+}
+
+.documentation-page .documentation-template-heading button {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.documentation-template strong {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.template-badge {
+  padding: 1px 7px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+  border-radius: 999px;
+}
+
+.template-badge.built-in {
+  color: #475569;
+  background: #f1f5f9;
+}
+
+.template-badge.custom {
+  color: #1d4ed8;
+  background: #dbeafe;
+}
+
+.documentation-template small.template-sections {
+  color: #334155;
+  font-size: 12px;
+}
+
+.template-details {
+  margin: 4px 0 8px;
+  padding: 12px 15px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #334155;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  overflow-wrap: anywhere;
+}
+
+.template-details p {
+  margin: 0;
+}
+
+.template-details p + p {
+  margin-top: 6px;
+}
+
+.template-manager {
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid #e2e8f0;
+  border-radius: 11px;
+  background: #fff;
+}
+
+.template-manager-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.template-manager-header h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.template-manager-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.template-manager-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+}
+
+.template-manager-list li > span:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.template-manager-list small {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.template-manager-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.documentation-page button.template-delete {
+  color: #b91c1c;
+}
+
+.template-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.template-form h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.template-form > label {
+  margin-top: 6px;
+  font-weight: 600;
+}
+
+.template-section-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 14px;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+}
+
+.template-section-picker legend {
+  padding: 0 4px;
+  font-weight: 600;
+}
+
+.template-section-picker label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.template-section-picker small {
+  color: #64748b;
+}
+
+.template-section-order {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding-left: 22px;
+  font-size: 13px;
+}
+
+.template-section-order li span {
+  display: inline-block;
+  min-width: 120px;
+}
+
+.documentation-page .template-section-order button {
+  margin-left: 6px;
+  padding: 2px 9px;
+  font-size: 13px;
+}
+
+@media (max-width: 640px) {
+  .template-section-picker {
+    grid-template-columns: 1fr;
+  }
+
+  .template-manager-list li {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.documentation-page .template-section-picker input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  box-shadow: none;
+  accent-color: #2563eb;
+}
+
+.template-section-picker label {
+  align-items: center;
+}
+
+.documentation-page .template-section-picker input[type="checkbox"] {
+  margin-right: 6px;
+}
+
+.documentation-page .template-form textarea {
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  border: 1px solid #cbd5e1;
+  border-radius: 9px;
+  resize: vertical;
+}
 /* Sprint 4 - Documentation Preview improvements */
 
 .documentation-page .markdown-preview-content {
