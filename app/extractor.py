@@ -9,8 +9,11 @@ MAX_SOURCE_CHARS = 1500
 HTTP_METHODS = {"get", "post", "put", "delete", "patch", "options", "head"}
 
 
-def _ann(node):
-    return ast.unparse(node) if node is not None else None
+def _safe_unparse(node):
+    try:
+        return _safe_unparse(node)
+    except Exception:
+        return None
 
 
 def _python_parameters(node, is_method=False):
@@ -25,34 +28,34 @@ def _python_parameters(node, is_method=False):
             continue
         params.append(Parameter(
             name=arg.arg,
-            type=_ann(arg.annotation),
+            type=_safe_unparse(arg.annotation),
             default=default,
         ))
 
     if args.vararg:
         params.append(Parameter(
             name="*" + args.vararg.arg,
-            type=_ann(args.vararg.annotation),
+            type=_safe_unparse(args.vararg.annotation),
         ))
 
     for arg, default in zip(args.kwonlyargs, args.kw_defaults):
         params.append(Parameter(
             name=arg.arg,
-            type=_ann(arg.annotation),
-            default=ast.unparse(default) if default is not None else None,
+            type=_safe_unparse(arg.annotation),
+            default=_safe_unparse(default) if default is not None else None,
         ))
 
     if args.kwarg:
         params.append(Parameter(
             name="**" + args.kwarg.arg,
-            type=_ann(args.kwarg.annotation),
+            type=_safe_unparse(args.kwarg.annotation),
         ))
 
     return params
 
 
 def parse_py_func(node, lines, is_method=False) -> Function:
-    returns = _ann(node.returns)
+    returns = _safe_unparse(node.returns)
     prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
     signature = f"{prefix} {node.name}({ast.unparse(node.args)})"
     if returns:
@@ -245,7 +248,7 @@ class EntityExtractor:
                 ))
 
         return classes, functions, endpoints
-
+    
     @staticmethod
     def extract_java_entities(tree, full_code: str = ""):
         classes = []
@@ -253,51 +256,48 @@ class EntityExtractor:
         endpoints = []
 
         for _, node in tree.filter(javalang.tree.ClassDeclaration):
-            methods = []
+           methods = []
 
-            for method in node.methods:
-                params = [
-                    Parameter(
-                        name=param.name,
-                        type=_java_type(param.type),
-                    )
-                    for param in method.parameters
-                ]
-
-                start_line = (
-                    method.position.line
-                    if method.position is not None
-                    else None
-                )
-                start_line, end_line, source = _java_source_range(
-                    full_code, start_line
-                )
-
-                signature = (
-                    f"{_java_type(method.return_type)} "
-                    f"{method.name}("
-                    + ", ".join(
-                        f"{param.type or 'Object'} {param.name}"
-                        for param in params
-                    )
-                    + ")"
-                )
-
-                methods.append(Function(
-                    name=method.name,
-                    signature=signature,
-                    parameters=params,
-                    return_type=_java_type(method.return_type),
-                    source=source,
-                    lineno=start_line,
-                    end_lineno=end_line,
+        for method in getattr(node, "methods", []):
+            params = []
+            for param in getattr(method, "parameters", []):
+                try:
+                    param_type = getattr(param.type, "name", None) or _java_type(param.type)
+                except Exception:
+                    param_type = "Object"
+                params.append(Parameter(
+                    name=getattr(param, "name", "arg"),
+                    type=param_type,
                 ))
 
-            bases = [node.extends.name] if node.extends else []
-            classes.append(ClassInfo(
-                name=node.name,
-                bases=bases,
-                methods=methods,
+            start_line = getattr(getattr(method, "position", None), "line", None)
+            start_line, end_line, source = _java_source_range(full_code, start_line)
+
+            signature = (
+                f"{_java_type(method.return_type)} "
+                f"{method.name}("
+                + ", ".join(
+                    f"{param.type or 'Object'} {param.name}"
+                    for param in params
+                )
+                + ")"
+            )
+
+            methods.append(Function(
+                name=method.name,
+                signature=signature,
+                parameters=params,
+                return_type=_java_type(method.return_type),
+                source=source,
+                lineno=start_line,
+                end_lineno=end_line,
             ))
+
+        bases = [node.extends.name] if getattr(node, "extends", None) and getattr(node.extends, "name", None) else []
+        classes.append(ClassInfo(
+            name=node.name,
+            bases=bases,
+            methods=methods,
+        ))
 
         return classes, functions, endpoints
