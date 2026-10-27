@@ -1,11 +1,16 @@
 import os
 from app.models import FileAnalysis
+from pathlib import Path
 
 class FileReader:
-    SUPPORTED_LANGUAGES = {
-        ".py": "python",
-        ".java": "java"
-    }
+    @staticmethod
+    def detect_language(path: str):
+        suffix = Path(path).suffix.lower()
+        mapping = {
+            ".py": "python",
+            ".java": "java",
+        }
+        return mapping.get(suffix)
 
     @staticmethod
     def read_code_file(file_path: str, repo_path: str = "") -> tuple[FileAnalysis, str]:
