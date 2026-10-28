@@ -1,3 +1,4 @@
+
 import ast
 import javalang
 
@@ -15,6 +16,7 @@ class ASTAnalyzer:
 
     @staticmethod
     def parse_python_ast(code: str):
+        """Parse Python source code into an AST."""
         try:
             return ast.parse(code), None
         except SyntaxError as e:
@@ -24,6 +26,7 @@ class ASTAnalyzer:
 
     @staticmethod
     def parse_java_ast(code: str):
+        """Parse Java source code into an AST."""
         try:
             return javalang.parse.parse(code), None
         except javalang.parser.JavaSyntaxError as e:

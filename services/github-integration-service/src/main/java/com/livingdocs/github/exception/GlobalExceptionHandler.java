@@ -45,8 +45,18 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(GitHubApiException.class)
     public ResponseEntity<ErrorResponse> handleGitHub(GitHubApiException e) {
-        log.warn("GitHub API error: {}", e.getMessage());
-        return build(HttpStatus.BAD_GATEWAY, "GITHUB_API_ERROR", e.getMessage());
+        log.warn("GitHub API error: status={}, rateLimited={}, networkError={}",
+                e.getStatusCode(), e.isRateLimited(), e.isNetworkError());
+        String message = e.isRateLimited()
+                ? "GitHub API rate limit exceeded. Please retry later."
+                : e.isUnauthorized()
+                        ? "GitHub authorization is no longer valid. Reconnect the account."
+                        : e.isNotFound()
+                                ? "The requested GitHub resource was not found."
+                                : e.isNetworkError()
+                                        ? "Unable to contact GitHub. Please retry later."
+                                        : "GitHub request failed (HTTP " + e.getStatusCode() + ").";
+        return build(HttpStatus.BAD_GATEWAY, "GITHUB_API_ERROR", message);
     }
 
     @ExceptionHandler({MissingRequestHeaderException.class, MissingServletRequestParameterException.class})

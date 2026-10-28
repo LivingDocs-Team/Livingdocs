@@ -20,6 +20,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -49,6 +50,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@Import(com.livingdocs.github.security.InternalServiceTestMvcConfig.class)
 class RepositorySyncApiTest {
 
     private static final String USER_HEADER = "X-User-Id";
@@ -72,7 +74,7 @@ class RepositorySyncApiTest {
     void sync_returnsResultWithoutContent_andUpdatesRepository() throws Exception {
         String user = "sync-ok";
         String repoId = connectAndAddRepo(user);
-        Instant addedAt = lastSyncedAt(repoId);
+        assertThat(lastSyncedAt(repoId)).isNull();
         mockShopOnGitHub("develop");
         // Trong lúc đang gọi GitHub, repo phải ở trạng thái SYNCING
         AtomicReference<RepositoryStatus> statusDuringSync = new AtomicReference<>();
@@ -96,10 +98,10 @@ class RepositorySyncApiTest {
                 .andExpect(jsonPath("$.syncedAt").exists());
 
         assertThat(statusDuringSync.get()).isEqualTo(RepositoryStatus.SYNCING);
-        mvc.perform(get("/api/repositories/" + repoId))
+        mvc.perform(get("/api/repositories/" + repoId).header(USER_HEADER, "sync-ok"))
                 .andExpect(jsonPath("$.status").value("CONNECTED"))
                 .andExpect(jsonPath("$.defaultBranch").value("develop"));
-        assertThat(lastSyncedAt(repoId)).isAfter(addedAt); // LD-66
+        assertThat(lastSyncedAt(repoId)).isNotNull(); // LD-66
     }
 
     @Test
@@ -163,7 +165,7 @@ class RepositorySyncApiTest {
                 .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
 
         verify(gitHubClient, never()).getRepositoryDetails(anyString(), anyString(), anyString());
-        mvc.perform(get("/api/repositories/" + repoId)).andExpect(jsonPath("$.status").value("CONNECTED"));
+        mvc.perform(get("/api/repositories/" + repoId).header(USER_HEADER, "sync-input")).andExpect(jsonPath("$.status").value("CONNECTED"));
     }
 
     @Test
@@ -178,7 +180,7 @@ class RepositorySyncApiTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("BRANCH_NOT_FOUND"));
 
-        mvc.perform(get("/api/repositories/" + repoId)).andExpect(jsonPath("$.status").value("CONNECTED"));
+        mvc.perform(get("/api/repositories/" + repoId).header(USER_HEADER, "sync-branch")).andExpect(jsonPath("$.status").value("CONNECTED"));
     }
 
     @Test
@@ -191,7 +193,7 @@ class RepositorySyncApiTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("REPOSITORY_NOT_FOUND"));
 
-        mvc.perform(get("/api/repositories/" + repoId)).andExpect(jsonPath("$.status").value("ERROR"));
+        mvc.perform(get("/api/repositories/" + repoId).header(USER_HEADER, "sync-gone")).andExpect(jsonPath("$.status").value("ERROR"));
     }
 
     @Test
@@ -206,7 +208,7 @@ class RepositorySyncApiTest {
 
         assertThat(connectionRepository.findByUserId(user).orElseThrow().getStatus())
                 .isEqualTo(ConnectionStatus.INVALID);
-        mvc.perform(get("/api/repositories/" + repoId)).andExpect(jsonPath("$.status").value("CONNECTED"));
+        mvc.perform(get("/api/repositories/" + repoId).header(USER_HEADER, "sync-token")).andExpect(jsonPath("$.status").value("CONNECTED"));
     }
 
     @Test
@@ -223,7 +225,7 @@ class RepositorySyncApiTest {
                 .andExpect(header().exists(HttpHeaders.RETRY_AFTER))
                 .andExpect(jsonPath("$.code").value("RATE_LIMITED"));
 
-        mvc.perform(get("/api/repositories/" + repoId)).andExpect(jsonPath("$.status").value("CONNECTED"));
+        mvc.perform(get("/api/repositories/" + repoId).header(USER_HEADER, "sync-limit")).andExpect(jsonPath("$.status").value("CONNECTED"));
     }
 
     // ------------------------------------------------------------------ dữ liệu giả
@@ -253,10 +255,11 @@ class RepositorySyncApiTest {
     }
 
     private Instant lastSyncedAt(String repoId) throws Exception {
-        String body = mvc.perform(get("/api/repositories/" + repoId))
+        String body = mvc.perform(get("/api/repositories/" + repoId).header(USER_HEADER, "sync-ok"))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
-        return Instant.parse(json.readTree(body).get("lastSyncedAt").asText());
+        var value = json.readTree(body).get("lastSyncedAt");
+        return value == null || value.isNull() ? null : Instant.parse(value.asText());
     }
 
     /** Repo acme/shop trên GitHub: 1 file Java (lấy nội dung) và 1 README (bỏ qua vì không phải code). */
