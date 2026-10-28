@@ -82,11 +82,27 @@ def _indent(text: Optional[str]) -> str:
     return (text or "").replace("\n", "\n  ")
 
 
+_SCOPE_KEYS = {"Overview": "overview", "Classes": "classes",
+               "Functions": "functions", "API Endpoints": "endpoints"}
+
+
+def template_scope(tpl: Template) -> str:
+    """Tell the model which parts of the JSON the template uses; the rest is not rendered."""
+    used = [_SCOPE_KEYS[s] for s in tpl.sections if s in _SCOPE_KEYS]
+    unused = [k for k in _SCOPE_KEYS.values() if k not in used]
+    text = (f"This template contains these sections, in order: {', '.join(tpl.sections)}. "
+            f"Fill in: {', '.join(used)}.")
+    if unused:
+        text += f" Leave these empty (they are not part of the template): {', '.join(unused)}."
+    return text
+
+
 def build_file_prompt(f: FileAnalysis, tpl: Template, lang: str,
                       catalog: Optional[EvidenceCatalog] = None) -> str:
     prompt = (
         f"Language for all descriptions: {LANGUAGE_NAMES.get(lang, lang)}\n\n"
         f"Documentation style (from template '{tpl.name}'):\n{tpl.instructions}\n\n"
+        f"{template_scope(tpl)}\n\n"
         f"Return JSON with exactly this shape (lists may be empty):\n{EXAMPLE_JSON}\n\n"
         f"Code analysis of file '{f.path}':\n{compact_analysis(f)}"
     )

@@ -30,7 +30,6 @@ def test_entity_extractor_async_function():
     code = "async def fetch_data(url: str) -> dict:\n    return {}"
     tree, _ = ASTAnalyzer.parse_code(code, "python")
     classes, functions, endpoints = EntityExtractor.extract_python_entities(tree, code)
-    
     assert len(functions) == 1
     func = functions[0]
     assert func.name == "fetch_data"

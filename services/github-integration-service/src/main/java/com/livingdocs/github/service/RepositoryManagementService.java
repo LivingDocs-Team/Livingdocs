@@ -13,7 +13,6 @@ import com.livingdocs.github.repository.ConnectedRepositoryRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -47,6 +46,7 @@ public class RepositoryManagementService {
 
     @Transactional(noRollbackFor = ApiException.class)
     public List<RepositoryResponse> addRepositories(String userId, String workspaceId, List<Long> githubRepoIds) {
+        requirePersonalWorkspace(userId, workspaceId);
         GitHubConnection connection = connectionService.getActiveConnection(userId);
         Map<Long, GitHubRepo> accessible = fetchAccessibleRepos(userId).stream()
                 .collect(Collectors.toMap(GitHubRepo::id, Function.identity(), (a, b) -> a));
@@ -58,7 +58,8 @@ public class RepositoryManagementService {
                 throw ApiException.badRequest("Repository " + repoId
                         + " không nằm trong danh sách repo mà GitHub App được phép truy cập.");
             }
-            if (repositoryRepository.existsByWorkspaceIdAndGithubRepoId(workspaceId, repoId)) {
+            if (repositoryRepository.existsByWorkspaceIdAndConnectionIdAndGithubRepoId(
+                    workspaceId, connection.getId(), repoId)) {
                 continue; // đã thêm rồi thì bỏ qua
             }
             ConnectedRepository entity = new ConnectedRepository();
@@ -70,22 +71,28 @@ public class RepositoryManagementService {
             entity.setPrivateRepo(repo.privateRepo());
             entity.setHtmlUrl(repo.htmlUrl());
             entity.setStatus(RepositoryStatus.CONNECTED);
-            entity.setLastSyncedAt(Instant.now());
+            entity.setLastSyncedAt(null);
             added.add(RepositoryResponse.from(repositoryRepository.save(entity)));
         }
         return added;
     }
 
     @Transactional(readOnly = true)
-    public List<RepositoryResponse> listByWorkspace(String workspaceId) {
-        return repositoryRepository.findByWorkspaceIdOrderByFullNameAsc(workspaceId).stream()
+    public List<RepositoryResponse> listByWorkspace(String userId, String workspaceId) {
+        requirePersonalWorkspace(userId, workspaceId);
+        GitHubConnection connection = connectionService.findConnection(userId).orElse(null);
+        if (connection == null) return List.of();
+        return repositoryRepository.findByWorkspaceIdAndConnectionIdOrderByFullNameAsc(
+                        workspaceId, connection.getId()).stream()
                 .map(RepositoryResponse::from)
                 .toList();
     }
 
     @Transactional(readOnly = true)
-    public RepositoryResponse get(UUID id) {
-        return RepositoryResponse.from(find(id));
+    public RepositoryResponse get(String userId, UUID id) {
+        ConnectedRepository repo = find(id);
+        checkOwner(userId, repo);
+        return RepositoryResponse.from(repo);
     }
 
     @Transactional
@@ -119,6 +126,12 @@ public class RepositoryManagementService {
         GitHubConnection connection = connectionService.findConnection(userId).orElse(null);
         if (connection == null || !connection.getId().equals(repo.getConnectionId())) {
             throw ApiException.forbidden("Repository này không thuộc kết nối GitHub của bạn.");
+        }
+    }
+
+    private void requirePersonalWorkspace(String userId, String workspaceId) {
+        if (!("ws-" + userId).equals(workspaceId)) {
+            throw ApiException.forbidden("Workspace này không thuộc người dùng đã xác thực.");
         }
     }
 }

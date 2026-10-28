@@ -18,6 +18,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -39,6 +40,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@Import(com.livingdocs.github.security.InternalServiceTestMvcConfig.class)
 class GitHubIntegrationFlowTest {
 
     @Autowired MockMvc mvc;
@@ -77,7 +79,7 @@ class GitHubIntegrationFlowTest {
                 .andExpect(jsonPath("$.length()").value(2));
 
         // Thêm repo vào workspace (thêm trùng sẽ bị bỏ qua)
-        mvc.perform(post("/api/workspaces/ws-1/repositories").header("X-User-Id", user)
+        mvc.perform(post("/api/workspaces/ws-user-flow/repositories").header("X-User-Id", user)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"githubRepoIds\":[101,101]}"))
                 .andExpect(status().isCreated())
@@ -86,17 +88,26 @@ class GitHubIntegrationFlowTest {
                 .andExpect(jsonPath("$[0].defaultBranch").value("main"));
 
         // Repo không được cấp quyền thì bị từ chối
-        mvc.perform(post("/api/workspaces/ws-1/repositories").header("X-User-Id", user)
+        mvc.perform(post("/api/workspaces/ws-user-flow/repositories").header("X-User-Id", user)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"githubRepoIds\":[999]}"))
                 .andExpect(status().isBadRequest());
 
         // Danh sách repo của workspace
-        String listBody = mvc.perform(get("/api/workspaces/ws-1/repositories"))
+        String listBody = mvc.perform(get("/api/workspaces/ws-user-flow/repositories").header("X-User-Id", user))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andReturn().getResponse().getContentAsString();
         String repoId = json.readTree(listBody).get(0).get("id").asText();
+
+        mvc.perform(get("/api/workspaces/ws-user-flow/repositories").header("X-User-Id", "other-user"))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/api/workspaces/ws-user-flow/repositories").header("X-User-Id", "other-user")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"githubRepoIds\":[101]}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/repositories/" + repoId).header("X-User-Id", "other-user"))
+                .andExpect(status().isForbidden());
 
         // Đồng bộ (LD-63): nhánh mặc định đã đổi trên GitHub. Chi tiết các trường hợp: RepositorySyncApiTest
         String head = "a".repeat(40);
@@ -113,7 +124,7 @@ class GitHubIntegrationFlowTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.repository.defaultBranch").value("develop"))
                 .andExpect(jsonPath("$.headCommit.sha").value(head));
-        mvc.perform(get("/api/repositories/" + repoId))
+        mvc.perform(get("/api/repositories/" + repoId).header("X-User-Id", user))
                 .andExpect(jsonPath("$.defaultBranch").value("develop"))
                 .andExpect(jsonPath("$.status").value("CONNECTED"));
 
@@ -124,7 +135,7 @@ class GitHubIntegrationFlowTest {
         // Gỡ repo
         mvc.perform(delete("/api/repositories/" + repoId).header("X-User-Id", user))
                 .andExpect(status().isNoContent());
-        mvc.perform(get("/api/repositories/" + repoId)).andExpect(status().isNotFound());
+        mvc.perform(get("/api/repositories/" + repoId).header("X-User-Id", user)).andExpect(status().isNotFound());
 
         // Ngắt kết nối GitHub
         mvc.perform(delete("/api/github/connection").header("X-User-Id", user))
