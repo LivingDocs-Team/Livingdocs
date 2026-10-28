@@ -3,15 +3,44 @@ from app.main import app
 
 client = TestClient(app)
 
-def test_unsupported_and_empty_file():
-    res = client.post("/api/v1/analyze-repo", json={
+def test_unsupported_file():
+    response = client.post("/api/v1/analyze-repo", json={
         "scope": "file",
         "target": "test",
-        "file_paths": ["non_existent_file.txt"]
+        "files": [{
+            "path": "main.rb",
+            "content": "puts 'hello'",
+            "language": "ruby"
+        }]
     })
-    assert res.status_code == 200
-    data = res.json()
-    assert data["files"][0]["status"] in ["unsupported", "invalid"]
+
+    assert response.status_code == 200
+    assert response.json()["files"][0]["status"] == "unsupported"
+
+
+def test_empty_content_file():
+    response = client.post("/api/v1/analyze-repo", json={
+        "scope": "file",
+        "target": "test",
+        "files": [{
+            "path": "empty.py",
+            "content": "",
+            "language": "python"
+        }]
+    })
+
+    assert response.status_code == 200
+    assert response.json()["files"][0]["status"] == "empty"
+
+
+def test_empty_files_returns_422():
+    response = client.post("/api/v1/analyze-repo", json={
+        "scope": "repository",
+        "target": "test",
+        "files": []
+    })
+
+    assert response.status_code == 422
 
 import ast
 import javalang
