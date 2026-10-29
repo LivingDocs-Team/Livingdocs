@@ -4,7 +4,7 @@
 | :--- | :--- |
 | **Story Jira** | `LD-43`: GitHub OAuth Authentication & `LD-53`: Repository Connection |
 | **Task đã làm** | `LD-20`, `LD-38`, `LD-43`, `LD-53`, `LD-63`, `LD-292` |
-| **Người thực hiện** | [Lâm Gia Huy] |
+| **Người thực hiện** | Lâm Gia Huy |
 | **Thành phần** | Backend Gateway, Frontend Web App, GitHub OAuth API |
 | **Tác nhân (Actor)** | GitHub OAuth Gateway |
 
