@@ -38,3 +38,10 @@ def test_analyze_repo_api_unsupported_language():
     response = client.post("/api/v1/analyze-repo", json=payload)
     assert response.status_code == 200
     assert response.json()["files"][0]["status"] == "unsupported"
+
+
+def test_health_endpoint():
+    """LD-397: /health is used by the Docker Compose healthcheck"""
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "service": "code-analyzer"}

@@ -13,6 +13,12 @@ app = FastAPI(
 )
 
 
+@app.get("/health", tags=["health"])
+async def health():
+    """Liveness probe used by Docker Compose and other services."""
+    return {"status": "ok", "service": "code-analyzer"}
+
+
 @app.post("/api/v1/analyze-repo", response_model=RepoAnalysisResponse)
 async def analyze_repository(request: RepoAnalysisRequest):
     """Analyze repository files according to the input contract."""
