@@ -1,9 +1,236 @@
-ai-service-integration:
+name: LivingDocs CI
+
+on:
+  push:
+    branches:
+      - main
+      - "LD-*"
+      - "sprint-*"
+      - "LD-106-Implement-Evidence-&-Submission"
+  pull_request:
+    branches:
+      - main
+      - "LD-*"
+      - "sprint-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "livingdocs-ci-${{ github.ref }}"
+  cancel-in-progress: true
+
+env:
+  ANTHROPIC_API_KEY: "mock_key_for_ci_pipeline"
+
+jobs:
+  backend-build-test:
+    name: Backend Build and Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: cnpm
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d cnpm"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+
+      - name: Verify repository files
+        run: |
+          test -s README.md
+          test -s backend/pom.xml
+          test -s .github/workflows/ci.yml
+
+      - name: Make Maven Wrapper executable
+        run: chmod +x backend/mvnw
+
+      - name: Build and test backend
+        env:
+          DB_URL: "jdbc:postgresql://localhost:5432/cnpm"
+          DB_USERNAME: "postgres"
+          DB_PASSWORD: "postgres"
+        run: ./backend/mvnw --batch-mode --no-transfer-progress -f backend/pom.xml clean verify
+
+      - name: Report CI result
+        if: success()
+        run: echo "LivingDocs backend build and tests passed."
+
+  frontend-build:
+    name: Frontend Build and Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+  frontend-e2e-test:
+    name: Frontend E2E Test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      FRONTEND_URL: http://localhost:3000
+      FRONTEND_E2E_REQUIRED: "true"
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Serve built frontend on port 3000
+        working-directory: frontend
+        run: nohup npx vite preview --port 3000 --strictPort --host 127.0.0.1 > "$RUNNER_TEMP/frontend.log" 2>&1 &
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Playwright
+        run: |
+          python -m pip install "pytest==9.1.1" "pytest-html==4.2.0" "pytest-playwright==0.10.0" "playwright==1.56.0"
+          python -m playwright install --with-deps chromium
+
+      - name: Wait for frontend
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:3000/; then exit 0; fi
+            sleep 1
+          done
+          echo "Frontend did not start"; cat "$RUNNER_TEMP/frontend.log"; exit 1
+
+      - name: Run documentation preview and editing tests (LD-105)
+        run: python -m pytest -v tests/test_documentation_preview_editing.py tests/test_frontend_templates.py
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-e2e-test-report
+          path: |
+            test-report.html
+            test-results.xml
+          if-no-files-found: ignore
+
+  github-integration-test:
+    name: GitHub Integration Service Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: services/github-integration-service/pom.xml
+
+      - name: Build and test (H2 database, mocked GitHub)
+        run: mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml verify
+
+      - name: Live test against real GitHub API
+        env:
+          GITHUB_LIVE_TEST: "true"
+          GITHUB_LIVE_REPO: "${{ github.repository }}"
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+        run: >-
+          mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml test
+          -Dtest=GitHubRepositoryFetcherLiveTest -Dsurefire.failIfNoSpecifiedTests=false
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: github-integration-test-reports
+          path: services/github-integration-service/target/surefire-reports/
+          if-no-files-found: ignore
+
+  ai-service-test:
+    name: AI Service Build and Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ai-service/requirements.txt
+
+      - name: Install AI service dependencies
+        working-directory: ai-service
+        run: python -m pip install -r requirements.txt
+
+      - name: Run AI service tests
+        working-directory: ai-service
+        run: python -m pytest -q
+
+  ai-service-integration:
     name: AI Service Integration Test
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      ANTHROPIC_API_KEY: "mock_key_for_ci_pipeline"
       ANALYZER_URL: "http://localhost:8000"
       AI_SERVICE_URL: "http://localhost:8001"
 
@@ -48,3 +275,21 @@ ai-service-integration:
         run: |
           echo "--- analyzer ---"; cat "$RUNNER_TEMP/analyzer.log" || true
           echo "--- ai-service ---"; cat "$RUNNER_TEMP/ai-service.log" || true
+
+  docker-compose-validation:
+    name: Docker Compose Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TOKEN_ENCRYPTION_KEY: "ci-validation-placeholder-only"
+      GITHUB_INTEGRATION_INTERNAL_SECRET: "ci-validation-placeholder-only"
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose configuration
+        run: docker compose -f compose.yaml config --quiet
+
+      - name: Build application images
+        run: docker compose -f compose.yaml build backend ai-service code-analyzer github-integration frontend
