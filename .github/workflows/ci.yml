@@ -250,4 +250,50 @@ jobs:
       - name: Start AI service on port 8001
         working-directory: ai-service
         env:
-          PYTHONPATH: "${{ github.workspace }
+          PYTHONPATH: "${{ github.workspace }}/ai-service"
+          ANTHROPIC_API_KEY: "mock_ci_key_for_integration_testing"
+        run: nohup python -m uvicorn main:app --host 0.0.0.0 --port 8001 > "$RUNNER_TEMP/ai-service.log" 2>&1 &
+
+      - name: Wait for both services
+        run: |
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:8001/health > /dev/null 2>&1 && curl -fsS http://127.0.0.1:8000/openapi.json > /dev/null 2>&1; then
+              echo "Both background services started successfully!"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Services did not start"; cat "$RUNNER_TEMP/analyzer.log"; cat "$RUNNER_TEMP/ai-service.log"; exit 1
+
+      - name: Run integration tests across services
+        working-directory: ai-service
+        env:
+          ANALYZER_URL: "http://127.0.0.1:8000"
+          AI_SERVICE_URL: "http://127.0.0.1:8001"
+          PYTHONPATH: "${{ github.workspace }}/ai-service"
+          ANTHROPIC_API_KEY: "mock_ci_key_for_integration_testing"
+        run: python -m pytest -v tests/integration -m "not live"
+
+      - name: Show service logs
+        if: failure()
+        run: |
+          echo "--- analyzer ---"; cat "$RUNNER_TEMP/analyzer.log" || true
+          echo "--- ai-service ---"; cat "$RUNNER_TEMP/ai-service.log" || true
+
+  docker-compose-validation:
+    name: Docker Compose Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TOKEN_ENCRYPTION_KEY: "ci-validation-placeholder-only"
+      GITHUB_INTEGRATION_INTERNAL_SECRET: "ci-validation-placeholder-only"
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose configuration
+        run: docker compose -f compose.yaml config --quiet
+
+      - name: Build application images
+        run: docker compose -f compose.yaml build backend ai-service code-analyzer github-integration frontend
