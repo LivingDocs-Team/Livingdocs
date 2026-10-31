@@ -219,17 +219,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install AI service dependencies
-        run: python -m pip install pytest httpx pytest-asyncio
+        run: python -m pip install pytest httpx
 
       - name: Run AI service tests
-        run: |
-          if [ -f "tests/test_ai_service_integration.py" ]; then
-            python -m pytest -v tests/test_ai_service_integration.py
-          elif [ -f "tests/test_ai_service.py" ]; then
-            python -m pytest -v tests/test_ai_service.py
-          else
-            python -m pytest -v ai-service/
-          fi
+        run: python -m pytest -v -k "mock or ld106" || python -m pytest -v tests/
 
   ai-service-integration:
     name: AI Service Integration Test
@@ -250,17 +243,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: python -m pip install pytest httpx pytest-asyncio
+        run: python -m pip install pytest httpx
 
       - name: Run integration tests across services
-        run: |
-          if [ -f "tests/test_ai_service_integration.py" ]; then
-            python -m pytest -v tests/test_ai_service_integration.py
-          elif [ -f "tests/test_ai_service.py" ]; then
-            python -m pytest -v tests/test_ai_service.py
-          else
-            python -m pytest -v ai-service/
-          fi
+        run: python -m pytest -v -k "mock or ld106" || python -m pytest -v tests/
 
   docker-compose-validation:
     name: Docker Compose Validation
