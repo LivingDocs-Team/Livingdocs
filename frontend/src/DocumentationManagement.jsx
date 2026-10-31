@@ -638,7 +638,7 @@ export default function DocumentationManagement({ userId }) {
                 status === 'generating'
                 || isLoadingRepositories
                 || repositories.length === 0
-                || !templateList.templates.some((item) => item.id === template)
+                || !TEMPLATES.some((item) => item.id === template)
               }
             >
               {status === 'generating' ? 'Generating…' : 'Generate documentation'}
