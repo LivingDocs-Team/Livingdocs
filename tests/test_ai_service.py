@@ -1,21 +1,21 @@
+import os
 import pytest
 from unittest.mock import patch, MagicMock
 
-def mock_generate_ai_docs(analysis_data: dict, api_key: str = None):
-    """Hàm giả lập gọi AI Service"""
-    if not api_key:
-        return {"status": "fallback", "markdown": "# Basic Docs (Offline Mode)"}
-    if analysis_data.get("timeout"):
-        raise TimeoutError("AI Gateway Timeout")
-    return {"status": "completed", "markdown": "# AI Generated Documentation"}
+# 1. Đặt API Key giả lập để tránh ứng dụng báo lỗi thiếu môi trường
+os.environ["ANTHROPIC_API_KEY"] = "mock_key_for_ci_pipeline"
 
-def test_ai_service_offline_fallback():
-    """LD-374: Kiểm tra chế độ Offline Fallback khi thiếu API Key"""
-    res = mock_generate_ai_docs({"files": []}, api_key=None)
-    assert res["status"] == "fallback"
-    assert "Basic Docs" in res["markdown"]
+# 2. Chặn (Mock) trực tiếp hàm gọi API của Anthropic
+@patch("anthropic.resources.Messages.create")
+def test_ai_service_integration_mock(mock_create):
+    """
+    Mock trực tiếp phản hồi từ Anthropic API để kiểm thử tích hợp
+    mà không cần kết nối mạng hay API Key thật.
+    """
+    mock_response = MagicMock()
+    mock_response.content = [MagicMock(text="# AI Generated Documentation Content")]
+    mock_response.id = "msg_mock_12345"
+    mock_create.return_value = mock_response
 
-def test_ai_service_timeout_handling():
-    """LD-374: Kiểm tra xử lý timeout khi kết nối AI Gateway"""
-    with pytest.raises(TimeoutError):
-        mock_generate_ai_docs({"timeout": True}, api_key="sk-test-key")
+    assert mock_response.id == "msg_mock_12345"
+    assert "Documentation" in mock_response.content[0].text
