@@ -2,10 +2,8 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock
 
-# 1. Đặt API Key giả lập để tránh ứng dụng báo lỗi thiếu biến môi trường
 os.environ["ANTHROPIC_API_KEY"] = "mock_key_for_ci_pipeline"
 
-# 2. Mock hàm gọi API của Anthropic Client ở cấp độ hàm test
 @patch("anthropic.resources.Messages.create")
 def test_ai_service_integration_mock(mock_create):
     """
