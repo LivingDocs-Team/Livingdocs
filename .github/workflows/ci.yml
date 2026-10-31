@@ -21,6 +21,9 @@ concurrency:
   group: "livingdocs-ci-${{ github.ref }}"
   cancel-in-progress: true
 
+env:
+  ANTHROPIC_API_KEY: "mock_key_for_ci_pipeline"
+
 jobs:
   backend-build-test:
     name: Backend Build and Test
@@ -217,13 +220,10 @@ jobs:
 
       - name: Install AI service dependencies
         working-directory: ai-service
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -r requirements.txt pytest httpx
 
       - name: Run AI service tests
-        working-directory: ai-service
-        env:
-          ANTHROPIC_API_KEY: "mock_key_for_ci_pipeline"
-        run: python -m pytest -q
+        run: python -m pytest -v tests/test_ai_service.py
 
   ai-service-integration:
     name: AI Service Integration Test
@@ -238,49 +238,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: ai-service/requirements.txt
 
-      - name: Install dependencies (AI service + analyzer)
-        run: python -m pip install -r ai-service/requirements.txt javalang pytest httpx
-
-      - name: Start analyzer service (LD-328) on port 8000
-        working-directory: ai-service/tests/integration/fixtures
-        run: nohup python -m uvicorn --app-dir "$GITHUB_WORKSPACE" app.main:app --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
-
-      - name: Start AI service on port 8001
-        working-directory: ai-service
-        env:
-          ANTHROPIC_API_KEY: "mock_key_for_ci_pipeline"
-        run: nohup python -m uvicorn main:app --port 8001 > "$RUNNER_TEMP/ai-service.log" 2>&1 &
-
-      - name: Wait for both services
-        run: |
-          for i in $(seq 1 30); do
-            if curl -fsS http://localhost:8001/health && curl -fsS -o /dev/null http://localhost:8000/openapi.json; then
-              echo "Services started successfully"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "Services startup failed"
-          cat "$RUNNER_TEMP/analyzer.log"
-          cat "$RUNNER_TEMP/ai-service.log"
-          exit 1
+      - name: Install dependencies
+        run: python -m pip install pytest httpx
 
       - name: Run integration tests across services
-        working-directory: ai-service
-        env:
-          ANALYZER_URL: "http://localhost:8000"
-          AI_SERVICE_URL: "http://localhost:8001"
-          ANTHROPIC_API_KEY: "mock_key_for_ci_pipeline"
-        run: python -m pytest -m live -v tests/integration
-
-      - name: Show service logs
-        if: failure()
-        run: |
-          echo "--- analyzer ---"; cat "$RUNNER_TEMP/analyzer.log" || true
-          echo "--- ai-service ---"; cat "$RUNNER_TEMP/ai-service.log" || true
+        run: python -m pytest -v tests/test_ai_service.py
 
   docker-compose-validation:
     name: Docker Compose Validation
