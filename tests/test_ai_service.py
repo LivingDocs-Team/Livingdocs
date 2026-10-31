@@ -1,11 +1,11 @@
 import os
 import pytest
 
-# Thiết lập API Key giả lập để bài test integration không bị crash
-os.environ["ANTHROPIC_API_KEY"] = "mock_key_for_ci_pipeline"
+# Thiết lập môi trường API Key giả lập để tránh crash khi khởi tạo client
+os.environ.setdefault("ANTHROPIC_API_KEY", "mock_key_for_ci_pipeline")
 
 def test_ai_service_integration_mock():
-    """Integration test chuẩn cho AI Service"""
+    """Unit & Integration mock test cho AI Service (LD-106)"""
     mock_response = {
         "status": "success",
         "documentation": "# AI Generated Content",
@@ -13,3 +13,4 @@ def test_ai_service_integration_mock():
     }
     assert mock_response["status"] == "success"
     assert "documentation" in mock_response
+    assert mock_response["usage"]["total_tokens"] > 0
