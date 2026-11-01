@@ -211,15 +211,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: ai-service/requirements.txt
 
       - name: Install AI service dependencies
-        working-directory: ai-service
-        run: python -m pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f ai-service/requirements.txt ]; then python -m pip install -r ai-service/requirements.txt; fi
+          python -m pip install pytest fastapi httpx uvicorn pydantic javalang
 
       - name: Run AI service tests
-        working-directory: ai-service
         run: python -m pytest -q
 
   ai-service-integration:
@@ -235,8 +234,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: ai-service/requirements.txt
 
       - name: Install dependencies
         run: |
@@ -245,21 +242,9 @@ jobs:
           python -m pip install uvicorn httpx fastapi pytest javalang pydantic
 
       - name: Run Integration Tests
-        run: |
-          if [ -d "ai-service/app" ]; then
-            export PYTHONPATH="${{ github.workspace }}/ai-service:${{ github.workspace }}"
-          else
-            export PYTHONPATH="${{ github.workspace }}"
-          fi
-
-          if [ -f "tests/test_evidence_submission.py" ]; then
-            python -m pytest -v tests/test_evidence_submission.py
-          elif [ -f "ai-service/tests/test_evidence_submission.py" ]; then
-            python -m pytest -v ai-service/tests/test_evidence_submission.py
-          else
-            echo "ERROR: Could not find test_evidence_submission.py!"
-            exit 1
-          fi
+        env:
+          PYTHONPATH: "${{ github.workspace }}"
+        run: python -m pytest -v tests/test_evidence_submission.py
 
   docker-compose-validation:
     name: Docker Compose Validation
