@@ -245,8 +245,51 @@ jobs:
         env:
           PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/ai-service"
         run: |
-          nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/app.log" 2>&1 &
+          # Tự động tìm vị trí app để bật uvicorn
+          if [ -d "ai-service/app" ]; then
+            nohup python -m uvicorn app.main:app --app-dir "$GITHUB_WORKSPACE/ai-service" --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/app.log" 2>&1 &
+          else
+            nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/app.log" 2>&1 &
+          fi
           
           # Readiness Check loop nghiêm ngặt (Strict Timeout Check)
           for i in $(seq 1 30); do
-            if curl -fsS
+            if curl -fsS http://127.0.0.1:8000/openapi.json > /dev/null 2>&1 || curl -fsS http://127.0.0.1:8000/ > /dev/null 2>&1; then
+              echo "FastAPI background service is ready!"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "ERROR: Service failed to respond within 30s timeout!"
+          cat "$RUNNER_TEMP/app.log"
+          exit 1
+
+      - name: Run Pytest suite
+        env:
+          PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/ai-service"
+        run: |
+          if [ -f "ai-service/tests/test_evidence_submission.py" ]; then
+            python -m pytest -v ai-service/tests/test_evidence_submission.py
+          elif [ -f "tests/test_evidence_submission.py" ]; then
+            python -m pytest -v tests/test_evidence_submission.py
+          else
+            python -m pytest -v ai-service/tests/
+          fi
+
+  docker-compose-validation:
+    name: Docker Compose Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TOKEN_ENCRYPTION_KEY: "ci-validation-placeholder-only"
+      GITHUB_INTEGRATION_INTERNAL_SECRET: "ci-validation-placeholder-only"
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose configuration
+        run: docker compose -f compose.yaml config --quiet
+
+      - name: Build application images
+        run: docker compose -f compose.yaml build backend ai-service code-analyzer github-integration frontend
