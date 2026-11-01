@@ -1,26 +1,27 @@
-from datetime import datetime
+from pydantic import BaseModel
 from typing import List, Optional
-from pydantic import BaseModel, Field
 
-class GroundingEvidence(BaseModel):
-    evidence_id: str
+class EvidenceItem(BaseModel):
     file_path: str
     start_line: int
     end_line: int
-    code_snippet: str
     commit_hash: str
+    source_code: str
 
-class GenerationStatus(BaseModel):
-    document_id: str
-    status: str = Field(..., description="processing | completed | failed")
-    progress_percentage: int = Field(..., ge=0, le=100)
-    current_step: Optional[str] = None
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+class JobStatusResponse(BaseModel):
+    job_id: str
+    status: str
+    progress: int
+    message: Optional[str] = None
 
-class DocumentationSubmission(BaseModel):
+class SubmissionRequest(BaseModel):
+    job_id: str
+    repository: str
+    commit_hash: str
+    evidence_list: List[EvidenceItem]
+
+class SubmissionResponse(BaseModel):
     submission_id: str
-    document_id: str
-    submitted_by: str
-    status: str = Field(default="submitted", description="submitted | approved | rejected")
-    submitted_at: datetime = Field(default_factory=datetime.utcnow)
-    evidence_ids: List[str] = Field(default_factory=list)
+    job_id: str
+    status: str
+    timestamp: str
