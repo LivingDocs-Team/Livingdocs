@@ -1,47 +1,95 @@
+import json
+import os
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional
 from app.evidence_models import GroundingEvidence, GenerationStatus, DocumentationSubmission
 from app.models import FileAnalysis
 
-# Kho lưu trữ dữ liệu (Simulation Persistence Layer)
-STATUS_STORE: Dict[str, GenerationStatus] = {}
-SUBMISSION_STORE: Dict[str, DocumentationSubmission] = {}
-EVIDENCE_STORE: Dict[str, List[GroundingEvidence]] = {}
+STORAGE_FILE = "data_store.json"
+
+class PersistentStore:
+    """Lưu trữ dữ liệu ra file JSON để đảm bảo dữ liệu không bị mất khi Restart Service."""
+    
+    @staticmethod
+    def _load() -> dict:
+        if not os.path.exists(STORAGE_FILE):
+            return {"statuses": {}, "submissions": {}, "evidences": {}}
+        try:
+            with open(STORAGE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {"statuses": {}, "submissions": {}, "evidences": {}}
+
+    @staticmethod
+    def _save(data: dict):
+        with open(STORAGE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, default=str)
+
+    @classmethod
+    def get_status(cls, doc_id: str) -> Optional[dict]:
+        db = cls._load()
+        return db["statuses"].get(doc_id)
+
+    @classmethod
+    def save_status(cls, doc_id: str, status_data: dict):
+        db = cls._load()
+        db["statuses"][doc_id] = status_data
+        cls._save(db)
+
+    @classmethod
+    def get_evidences(cls, doc_id: str) -> List[dict]:
+        db = cls._load()
+        return db["evidences"].get(doc_id, [])
+
+    @classmethod
+    def save_evidences(cls, doc_id: str, evidences_data: List[dict]):
+        db = cls._load()
+        db["evidences"][doc_id] = evidences_data
+        cls._save(db)
+
+    @classmethod
+    def get_submission(cls, doc_id: str) -> Optional[dict]:
+        db = cls._load()
+        return db["submissions"].get(doc_id)
+
+    @classmethod
+    def save_submission(cls, doc_id: str, sub_data: dict):
+        db = cls._load()
+        db["submissions"][doc_id] = sub_data
+        cls._save(db)
 
 
 class EvidenceCollector:
-    """Trích xuất GroundingEvidence từ kết quả phân tích mã nguồn THỰC TẾ (FileAnalysis)."""
-    
     @staticmethod
     def extract_from_analysis(document_id: str, analysis_files: List[FileAnalysis], commit_hash: str) -> List[GroundingEvidence]:
         evidences = []
         for file in analysis_files:
             for func in file.functions:
-                # 🔴 Sửa lỗi 2: Lấy func.source thực tế, nếu không có mới đọc nội dung giới hạn
-                real_code = func.source if func.source else f"# Source line {func.lineno} to {func.end_lineno} in {file.path}"
-                
+                # 🔴 Yêu cầu 2 của Leader: Chỉ trích xuất từ source thực tế. Nếu không có source, KHÔNG tạo chuỗi mô tả thế chỗ!
+                if not func.source or not func.source.strip():
+                    continue
+
                 evidence = GroundingEvidence(
                     evidence_id=f"evi-{uuid.uuid4().hex[:8]}",
-                    file_path=file.path,              # 🔴 Dùng file.path của contract gốc
-                    start_line=func.lineno,          # 🔴 Dùng func.lineno của contract gốc
-                    end_line=func.end_lineno,        # 🔴 Dùng func.end_lineno của contract gốc
-                    code_snippet=real_code,           # 🔴 Mã nguồn thực tế
+                    file_path=file.path,             # Chuẩn contract gốc
+                    start_line=func.lineno,         # Chuẩn contract gốc
+                    end_line=func.end_lineno,       # Chuẩn contract gốc
+                    code_snippet=func.source,        # Mã nguồn thực tế
                     commit_hash=commit_hash
                 )
                 evidences.append(evidence)
-        
-        EVIDENCE_STORE[document_id] = evidences
+
+        PersistentStore.save_evidences(document_id, [e.model_dump() for e in evidences])
         return evidences
 
     @staticmethod
     def get_evidences(document_id: str) -> List[GroundingEvidence]:
-        return EVIDENCE_STORE.get(document_id, [])
+        data = PersistentStore.get_evidences(document_id)
+        return [GroundingEvidence(**item) for item in data]
 
 
 class StatusTracker:
-    """Theo dõi tiến độ job thực tế."""
-    
     @staticmethod
     def update_status(document_id: str, progress: int, status_str: str = "processing", step: str = "") -> GenerationStatus:
         status_obj = GenerationStatus(
@@ -51,34 +99,34 @@ class StatusTracker:
             current_step=step,
             updated_at=datetime.utcnow()
         )
-        STATUS_STORE[document_id] = status_obj
+        PersistentStore.save_status(document_id, status_obj.model_dump())
         return status_obj
 
     @staticmethod
     def get_status(document_id: str) -> Optional[GenerationStatus]:
-        # 🔴 Sửa lỗi 3: Không tự trả về processing nếu job không tồn tại
-        if document_id not in STATUS_STORE:
+        # 🔴 Yêu cầu 3 & 4 của Leader: Không tồn tại job -> Trả về None (để API bắn 404)
+        data = PersistentStore.get_status(document_id)
+        if not data:
             return None
-        return STATUS_STORE[document_id]
+        return GenerationStatus(**data)
 
 
 class SubmissionWorkflow:
-    """Xử lý nộp tài liệu phê duyệt với quy tắc kiểm tra nghiêm ngặt."""
-
     @staticmethod
     def submit_documentation(document_id: str, submitted_by: str) -> DocumentationSubmission:
         status = StatusTracker.get_status(document_id)
         if not status:
-            raise KeyError("Document generation job not found")
+            raise KeyError("Document generation job not found")  # Map 404
         if status.status != "completed" or status.progress_percentage < 100:
-            raise ValueError("Cannot submit document while generation is in progress or incomplete")
+            raise ValueError("Cannot submit document while generation is in progress")  # Map 400
 
-        if document_id in SUBMISSION_STORE:
-            raise ValueError("Document is locked and already submitted")
+        existing_sub = PersistentStore.get_submission(document_id)
+        if existing_sub:
+            raise AttributeError("Document is locked and already submitted")  # Map 409
 
         evidences = EvidenceCollector.get_evidences(document_id)
         if not evidences:
-            raise ValueError("Missing grounding evidence for required sections")
+            raise RuntimeError("Missing required source code grounding evidence")  # Map 422
 
         submission = DocumentationSubmission(
             submission_id=f"sub-{uuid.uuid4().hex[:8]}",
@@ -88,9 +136,12 @@ class SubmissionWorkflow:
             submitted_at=datetime.utcnow(),
             evidence_ids=[e.evidence_id for e in evidences]
         )
-        SUBMISSION_STORE[document_id] = submission
+        PersistentStore.save_submission(document_id, submission.model_dump())
         return submission
 
     @staticmethod
     def get_submission(document_id: str) -> Optional[DocumentationSubmission]:
-        return SUBMISSION_STORE.get(document_id)
+        data = PersistentStore.get_submission(document_id)
+        if not data:
+            return None
+        return DocumentationSubmission(**data)
