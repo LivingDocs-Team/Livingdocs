@@ -2,28 +2,22 @@ from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
-
 class GroundingEvidence(BaseModel):
-    """Bằng chứng đối chiếu mã nguồn thực tế."""
     evidence_id: str
     file_path: str
     start_line: int
     end_line: int
-    code_snippet: str
+    code_snippet: str      # Bắt buộc là source code thực tế trích xuất được
     commit_hash: str
 
-
 class GenerationStatus(BaseModel):
-    """Trạng thái tiến độ sinh tài liệu/bằng chứng."""
     document_id: str
-    status: str = Field(..., description="processing | completed | failed")
+    status: str = Field(..., description="processing | completed | failed | not_found")
     progress_percentage: int = Field(..., ge=0, le=100)
     current_step: Optional[str] = None
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-
 class DocumentationSubmission(BaseModel):
-    """Bản ghi nộp tài liệu phê duyệt."""
     submission_id: str
     document_id: str
     submitted_by: str
