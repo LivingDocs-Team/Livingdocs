@@ -1,43 +1,103 @@
-from typing import List, Optional
-from app.models import GroundingEvidence, GenerationStatus, DocumentationSubmission
+import uuid
+from datetime import datetime
+from typing import Dict, List, Optional
+from app.evidence_models import GroundingEvidence, GenerationStatus, DocumentationSubmission
+from app.models import FileAnalysis
+
+# Bộ lưu trữ dữ liệu (In-Memory Persistence Store cho demo & backend integration)
+STATUS_STORE: Dict[str, GenerationStatus] = {}
+SUBMISSION_STORE: Dict[str, DocumentationSubmission] = {}
+EVIDENCE_STORE: Dict[str, List[GroundingEvidence]] = {}
+
 
 class EvidenceCollector:
+    """Trích xuất GroundingEvidence từ kết quả phân tích mã nguồn thực tế (FileAnalysis)."""
+    
     @staticmethod
-    def collect_evidence(file_path: str, start_line: int, end_line: int, code: str) -> GroundingEvidence:
-        """LD-107: Thu thập bằng chứng mã nguồn gốc"""
-        lines = code.splitlines()
-        snippet = "\n".join(lines[max(0, start_line-1):min(len(lines), end_line)])
-        return GroundingEvidence(
-            file_path=file_path,
-            start_line=start_line,
-            end_line=end_line,
-            code_snippet=snippet
-        )
+    def extract_from_analysis(document_id: str, analysis_files: List[FileAnalysis], commit_hash: str) -> List[GroundingEvidence]:
+        evidences = []
+        for file in analysis_files:
+            # Trích xuất từ các hàm tìm thấy trong file
+            for func in file.functions:
+                evidence = GroundingEvidence(
+                    evidence_id=f"evi-{uuid.uuid4().hex[:8]}",
+                    file_path=file.file_path,
+                    start_line=func.start_line,
+                    end_line=func.end_line,
+                    code_snippet=f"def {func.name}(...):",
+                    commit_hash=commit_hash
+                )
+                evidences.append(evidence)
+        
+        # Lưu vào Store
+        EVIDENCE_STORE[document_id] = evidences
+        return evidences
 
-class EvidenceDisplayService:
     @staticmethod
-    def format_evidence_for_display(evidence: GroundingEvidence) -> dict:
-        """LD-108: Hiển thị bằng chứng đối chiếu mã nguồn lên giao diện UI"""
-        return {
-            "display_title": f"Nguồn gốc: {evidence.file_path} (Dòng {evidence.start_line}-{evidence.end_line})",
-            "code_preview": evidence.code_snippet,
-            "is_highlighted": True
-        }
+    def get_evidences(document_id: str) -> List[GroundingEvidence]:
+        return EVIDENCE_STORE.get(document_id, [])
+
 
 class StatusTracker:
+    """Theo dõi tiến độ job thực tế và lưu trữ trạng thái."""
+    
     @staticmethod
-    def get_generation_status(doc_id: str, is_done: bool = True) -> GenerationStatus:
-        """LD-109: Cập nhật và hiển thị trạng thái sinh tài liệu thời gian thực"""
-        if is_done:
-            return GenerationStatus(doc_id=doc_id, status="completed", progress_percentage=100, message="Sinh tài liệu thành công")
-        return GenerationStatus(doc_id=doc_id, status="processing", progress_percentage=50, message="Đang xử lý thu thập bằng chứng")
+    def update_status(document_id: str, progress: int, status_str: str = "processing", step: str = "") -> GenerationStatus:
+        status_obj = GenerationStatus(
+            document_id=document_id,
+            status=status_str,
+            progress_percentage=progress,
+            current_step=step,
+            updated_at=datetime.utcnow()
+        )
+        STATUS_STORE[document_id] = status_obj
+        return status_obj
+
+    @staticmethod
+    def get_status(document_id: str) -> GenerationStatus:
+        if document_id not in STATUS_STORE:
+            # Trạng thái mặc định nếu chưa khởi tạo job
+            return GenerationStatus(
+                document_id=document_id,
+                status="processing",
+                progress_percentage=0,
+                current_step="Initializing"
+            )
+        return STATUS_STORE[document_id]
+
 
 class SubmissionWorkflow:
+    """Xử lý nộp tài liệu phê duyệt với quy tắc lưu trữ và kiểm tra điều kiện nghiêm ngặt."""
+
     @staticmethod
-    def submit_documentation(doc_id: str, evidences: List[GroundingEvidence]) -> DocumentationSubmission:
-        """LD-110: Thực hiện quy trình gửi phê duyệt tài liệu"""
-        return DocumentationSubmission(
-            doc_id=doc_id,
+    def submit_documentation(document_id: str, submitted_by: str) -> DocumentationSubmission:
+        # 1. Kiểm tra trạng thái job sinh tài liệu
+        status = StatusTracker.get_status(document_id)
+        if status.status != "completed" or status.progress_percentage < 100:
+            raise ValueError("Cannot submit document while generation is in progress or incomplete")
+
+        # 2. Kiểm tra tài liệu đã nộp trước đó chưa (Persistence Check)
+        if document_id in SUBMISSION_STORE:
+            raise ValueError("Document is locked and already submitted")
+
+        # 3. Kiểm tra bằng chứng mã nguồn (Evidence Check)
+        evidences = EvidenceCollector.get_evidences(document_id)
+        if not evidences:
+            raise ValueError("Missing grounding evidence for required sections")
+
+        # 4. Tạo bản ghi Submission & Lưu trữ bền vững
+        submission = DocumentationSubmission(
+            submission_id=f"sub-{uuid.uuid4().hex[:8]}",
+            document_id=document_id,
+            submitted_by=submitted_by,
             status="submitted",
-            evidences=evidences
+            submitted_at=datetime.utcnow(),
+            evidence_ids=[e.evidence_id for e in evidences]
         )
+        SUBMISSION_STORE[document_id] = submission
+        return submission
+
+    @staticmethod
+    def get_submission(document_id: str) -> Optional[DocumentationSubmission]:
+        """Truy xuất bản ghi nộp bài đã lưu trữ."""
+        return SUBMISSION_STORE.get(document_id)
