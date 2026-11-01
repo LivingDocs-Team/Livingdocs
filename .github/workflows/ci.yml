@@ -244,30 +244,7 @@ jobs:
           if [ -f ai-service/requirements.txt ]; then python -m pip install -r ai-service/requirements.txt; fi
           python -m pip install uvicorn httpx fastapi pytest javalang pydantic
 
-      - name: Start FastAPI application & Readiness check
-        env:
-          PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/ai-service"
-        run: |
-          # Thử khởi chạy app với đường dẫn root hoặc sub-directory ai-service
-          if [ -d "ai-service/app" ]; then
-            nohup python -m uvicorn app.main:app --app-dir ai-service --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/app.log" 2>&1 &
-          else
-            nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/app.log" 2>&1 &
-          fi
-          
-          # Readiness Loop
-          for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8000/openapi.json > /dev/null 2>&1 || curl -fsS http://127.0.0.1:8000/docs > /dev/null 2>&1; then
-              echo "FastAPI Application is UP and READY!"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "ERROR: Service failed to start within 30s!"
-          cat "$RUNNER_TEMP/app.log"
-          exit 1
-
-      - name: Run Integration Tests
+      - name: Run Integration Tests via Pytest Client
         env:
           PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/ai-service"
         run: |
@@ -278,12 +255,6 @@ jobs:
           else
             python -m pytest -v
           fi
-
-      - name: Show logs on failure
-        if: failure()
-        run: |
-          echo "=== APP LOGS ==="
-          cat "$RUNNER_TEMP/app.log" || true
 
   docker-compose-validation:
     name: Docker Compose Validation
