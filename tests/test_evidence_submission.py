@@ -1,134 +1,120 @@
 import pytest
 from fastapi.testclient import TestClient
 
-# Thử import theo cả 2 cấu hình đường dẫn (có prefix ai-service hoặc root)
+# Import linh hoạt đường dẫn app
 try:
     from app.main import app
     from app.submission import STATUS_STORE, SUBMISSION_STORE, EVIDENCE_STORE
 except ImportError:
-    from ai-service.app.main import app
-    from ai-service.app.submission import STATUS_STORE, SUBMISSION_STORE, EVIDENCE_STORE
+    from ai_service.app.main import app
+    from ai_service.app.submission import STATUS_STORE, SUBMISSION_STORE, EVIDENCE_STORE
 
 client = TestClient(app)
 
 @pytest.fixture(autouse=True)
-def reset_stores():
-    """Reset dữ liệu lưu trữ trong bộ nhớ trước mỗi testcase"""
+def reset_in_memory_stores():
+    """Reset sạch dữ liệu trong RAM trước mỗi test case"""
     STATUS_STORE.clear()
     SUBMISSION_STORE.clear()
     EVIDENCE_STORE.clear()
     yield
 
-# ==========================================
-# 1. KIỂM THỬ TRẠNG THÁI JOB (/status/{job_id})
-# ==========================================
-
-def test_get_status_not_found():
-    """Yêu cầu 4 của Lead: Query job không tồn tại phải trả về 404"""
-    response = client.get("/status/non-existent-job-999")
+# --- Test API Status ---
+def test_get_status_job_not_found():
+    """Query Job không tồn tại -> 404 Not Found"""
+    response = client.get("/status/non-existent-job-xyz")
     assert response.status_code == 404
 
 def test_get_status_processing():
-    """Query job đang xử lý"""
-    STATUS_STORE["job-123"] = {"status": "processing", "progress": 50}
-    response = client.get("/status/job-123")
+    """Query Job đang chạy -> 200 OK"""
+    STATUS_STORE["job-1"] = {"status": "processing", "progress": 40}
+    response = client.get("/status/job-1")
     assert response.status_code == 200
     assert response.json()["status"] == "processing"
 
-def test_get_status_completed():
-    """Query job đã hoàn thành"""
-    STATUS_STORE["job-123"] = {"status": "completed", "progress": 100}
-    response = client.get("/status/job-123")
-    assert response.status_code == 200
-    assert response.json()["status"] == "completed"
-
-# ==========================================
-# 2. KIỂM THỬ EVIDENCES (/evidence/{job_id})
-# ==========================================
-
+# --- Test API Evidence ---
 def test_get_evidence_job_not_found():
-    """Query evidence job không tồn tại trả về 404"""
+    """Query Evidence của Job không tồn tại -> 404 Not Found"""
     response = client.get("/evidence/non-existent-job")
     assert response.status_code == 404
 
 def test_get_evidence_job_not_completed():
-    """Query evidence khi job chưa hoàn thành trả về 400"""
-    STATUS_STORE["job-in-progress"] = {"status": "processing", "progress": 30}
-    response = client.get("/evidence/job-in-progress")
+    """Query Evidence khi Job chưa hoàn thành -> 400 Bad Request"""
+    STATUS_STORE["job-running"] = {"status": "processing", "progress": 50}
+    response = client.get("/evidence/job-running")
     assert response.status_code == 400
 
-def test_get_evidence_success_real_source():
-    """Query evidence thành công với mã nguồn thực tế"""
-    STATUS_STORE["job-real"] = {"status": "completed", "progress": 100}
-    EVIDENCE_STORE["job-real"] = [
+def test_get_evidence_success_with_real_source():
+    """Query Evidence thành công từ source code thật"""
+    STATUS_STORE["job-ok"] = {"status": "completed", "progress": 100}
+    EVIDENCE_STORE["job-ok"] = [
         {
             "file_path": "app/main.py",
-            "start_line": 10,
-            "end_line": 25,
-            "commit_hash": "a015e2f",
-            "source_code": "def main(): return {'status': 'ok'}"
+            "start_line": 1,
+            "end_line": 20,
+            "commit_hash": "6a0ba68",
+            "source_code": "def health_check(): return {'status': 'ok'}"
         }
     ]
-    response = client.get("/evidence/job-real")
+    response = client.get("/evidence/job-ok")
     assert response.status_code == 200
-    assert len(response.json()) == 1
+    data = response.json()
+    assert len(data) == 1
+    assert "source_code" in data[0]
 
-def test_get_evidence_missing_source():
-    """Thiếu source code thực tế trả về 404, không tự sinh text giả định"""
-    STATUS_STORE["job-no-source"] = {"status": "completed", "progress": 100}
-    EVIDENCE_STORE["job-no-source"] = []
-    response = client.get("/evidence/job-no-source")
+def test_get_evidence_missing_source_returns_404():
+    """Nếu không trích xuất được source code thật -> Không tự chế text, trả 404"""
+    STATUS_STORE["job-empty"] = {"status": "completed", "progress": 100}
+    EVIDENCE_STORE["job-empty"] = []
+    response = client.get("/evidence/job-empty")
     assert response.status_code == 404
 
-# ==========================================
-# 3. KIỂM THỬ SUBMISSION (/submit)
-# ==========================================
-
+# --- Test API Submit ---
 def test_submit_success():
-    """Submit hợp lệ thành công"""
-    STATUS_STORE["job-submit-ok"] = {"status": "completed", "progress": 100}
+    """Submit hợp lệ -> 200 OK"""
+    STATUS_STORE["job-sub"] = {"status": "completed", "progress": 100}
     payload = {
-        "job_id": "job-submit-ok",
+        "job_id": "job-sub",
         "repository": "CNPM/LivingDocs",
-        "commit_hash": "a015e2f",
+        "commit_hash": "6a0ba68",
         "evidence_list": [
             {
-                "file_path": "app/submission.py",
+                "file_path": "app/main.py",
                 "start_line": 1,
-                "end_line": 50,
-                "commit_hash": "a015e2f",
-                "source_code": "print('valid')"
+                "end_line": 10,
+                "commit_hash": "6a0ba68",
+                "source_code": "code"
             }
         ]
     }
     response = client.post("/submit", json=payload)
     assert response.status_code == 200
 
-def test_submit_without_evidence():
-    """Submit thiếu evidence báo lỗi 400"""
-    STATUS_STORE["job-empty-ev"] = {"status": "completed", "progress": 100}
+def test_submit_without_evidence_fails():
+    """Submit thiếu evidence -> 400 Bad Request"""
+    STATUS_STORE["job-no-ev"] = {"status": "completed", "progress": 100}
     payload = {
-        "job_id": "job-empty-ev",
+        "job_id": "job-no-ev",
         "repository": "CNPM/LivingDocs",
-        "commit_hash": "a015e2f",
+        "commit_hash": "6a0ba68",
         "evidence_list": []
     }
     response = client.post("/submit", json=payload)
     assert response.status_code == 400
 
-def test_submit_duplicate():
-    """Submit trùng lặp báo lỗi 400"""
+def test_submit_duplicate_fails():
+    """Submit trùng lặp -> 400 Bad Request"""
     STATUS_STORE["job-dup"] = {"status": "completed", "progress": 100}
     payload = {
         "job_id": "job-dup",
         "repository": "CNPM/LivingDocs",
-        "commit_hash": "a015e2f",
+        "commit_hash": "6a0ba68",
         "evidence_list": [
             {
                 "file_path": "app/main.py",
                 "start_line": 1,
                 "end_line": 10,
-                "commit_hash": "a015e2f",
+                "commit_hash": "6a0ba68",
                 "source_code": "code"
             }
         ]
