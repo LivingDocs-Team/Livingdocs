@@ -3,21 +3,32 @@ from pydantic import BaseModel
 
 class Function(BaseModel):
     name: str
-    start_line: int
-    end_line: int
+    lineno: int
+    end_lineno: int
+    source: Optional[str] = None  # Mã nguồn thực tế của hàm
+
+class Endpoint(BaseModel):
+    path: str
+    method: str
 
 class ClassInfo(BaseModel):
     name: str
     methods: List[Function] = []
 
 class FileAnalysis(BaseModel):
-    file_path: str
+    path: str
+    language: Optional[str] = "python"
+    status: Optional[str] = "analyzed"
     classes: List[ClassInfo] = []
     functions: List[Function] = []
+    endpoints: List[Endpoint] = []
 
 class RepoAnalysisRequest(BaseModel):
-    repo_url: str
-    branch: Optional[str] = "main"
+    target: str          # Chuỗi định danh target / repo URL
+    scope: Optional[str] = "full"
+    files: Optional[List[str]] = None
 
 class RepoAnalysisResponse(BaseModel):
+    target: str
+    scope: str
     files: List[FileAnalysis] = []
