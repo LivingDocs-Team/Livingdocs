@@ -1,89 +1,100 @@
-import uuid
+from fastapi import APIRouter, HTTPException, status
+from typing import Dict, Any, List
 from datetime import datetime
-from typing import Dict, List, Optional
-from app.evidence_models import GroundingEvidence, GenerationStatus, DocumentationSubmission
-from app.models import FileAnalysis
+import uuid
 
-STATUS_STORE: Dict[str, GenerationStatus] = {}
-SUBMISSION_STORE: Dict[str, DocumentationSubmission] = {}
-EVIDENCE_STORE: Dict[str, List[GroundingEvidence]] = {}
+# Import Pydantic models từ file độc lập LD-106
+try:
+    from app.evidence_models import (
+        EvidenceItem,
+        JobStatusResponse,
+        SubmissionRequest,
+        SubmissionResponse
+    )
+except ImportError:
+    from evidence_models import (
+        EvidenceItem,
+        JobStatusResponse,
+        SubmissionRequest,
+        SubmissionResponse
+    )
 
-class EvidenceCollector:
-    """Trích xuất Evidence từ mã nguồn THỰC TẾ (Không tạo nội dung giả)."""
+router = APIRouter()
+
+# Bộ nhớ tạm trong RAM (In-memory persistence)
+STATUS_STORE: Dict[str, Dict[str, Any]] = {}
+SUBMISSION_STORE: Dict[str, Dict[str, Any]] = {}
+EVIDENCE_STORE: Dict[str, List[Dict[str, Any]]] = {}
+
+@router.get("/status/{job_id}", response_model=JobStatusResponse)
+def get_job_status(job_id: str):
+    """Bám sát Yêu cầu 4 của Lead: Job không tồn tại trả về 404"""
+    if job_id not in STATUS_STORE:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job '{job_id}' not found"
+        )
+    job_data = STATUS_STORE[job_id]
+    return JobStatusResponse(
+        job_id=job_id,
+        status=job_data.get("status", "processing"),
+        progress=job_data.get("progress", 0),
+        message=job_data.get("message")
+    )
+
+@router.get("/evidence/{job_id}", response_model=List[EvidenceItem])
+def get_job_evidence(job_id: str):
+    """Bám sát Yêu cầu 2 của Lead: Không có source_code thật thì trả 404, không tự chế chuỗi giả định"""
+    if job_id not in STATUS_STORE:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job '{job_id}' not found"
+        )
     
-    @staticmethod
-    def extract_from_analysis(document_id: str, analysis_files: List[FileAnalysis], commit_hash: str) -> List[GroundingEvidence]:
-        evidences = []
-        for file in analysis_files:
-            for func in file.functions:
-                # 🔴 Nếu thiếu source thực tế thì BỎ QUA, KHÔNG TỰ TẠO CHUỖI FAKE
-                if not func.source or not func.source.strip():
-                    continue
-                
-                evidence = GroundingEvidence(
-                    evidence_id=f"evi-{uuid.uuid4().hex[:8]}",
-                    file_path=file.path,             # Khớp với model contract gốc
-                    start_line=func.lineno,         # Khớp với model contract gốc
-                    end_line=func.end_lineno,       # Khớp với model contract gốc
-                    code_snippet=func.source,        # Mã nguồn THỰC TẾ
-                    commit_hash=commit_hash
-                )
-                evidences.append(evidence)
-        
-        EVIDENCE_STORE[document_id] = evidences
-        return evidences
-
-    @staticmethod
-    def get_evidences(document_id: str) -> List[GroundingEvidence]:
-        return EVIDENCE_STORE.get(document_id, [])
-
-
-class StatusTracker:
-    @staticmethod
-    def update_status(document_id: str, progress: int, status_str: str = "processing", step: str = "") -> GenerationStatus:
-        status_obj = GenerationStatus(
-            document_id=document_id,
-            status=status_str,
-            progress_percentage=progress,
-            current_step=step,
-            updated_at=datetime.utcnow()
+    job_info = STATUS_STORE[job_id]
+    if job_info.get("status") != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Job is not completed yet"
         )
-        STATUS_STORE[document_id] = status_obj
-        return status_obj
-
-    @staticmethod
-    def get_status(document_id: str) -> Optional[GenerationStatus]:
-        # 🔴 Trả về None nếu job không tồn tại (để API bắn lỗi 404)
-        return STATUS_STORE.get(document_id)
-
-
-class SubmissionWorkflow:
-    @staticmethod
-    def submit_documentation(document_id: str, submitted_by: str) -> DocumentationSubmission:
-        status = StatusTracker.get_status(document_id)
-        if not status:
-            raise KeyError("Generation job not found")
-        if status.status != "completed" or status.progress_percentage < 100:
-            raise ValueError("Cannot submit document while generation is in progress or incomplete")
-
-        if document_id in SUBMISSION_STORE:
-            raise ValueError("Document is locked and already submitted")
-
-        evidences = EvidenceCollector.get_evidences(document_id)
-        if not evidences:
-            raise ValueError("Missing required source grounding evidence")
-
-        submission = DocumentationSubmission(
-            submission_id=f"sub-{uuid.uuid4().hex[:8]}",
-            document_id=document_id,
-            submitted_by=submitted_by,
-            status="submitted",
-            submitted_at=datetime.utcnow(),
-            evidence_ids=[e.evidence_id for e in evidences]
+    
+    evidences = EVIDENCE_STORE.get(job_id, [])
+    if not evidences:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No source code evidence available for this job"
         )
-        SUBMISSION_STORE[document_id] = submission
-        return submission
+    
+    return [EvidenceItem(**item) for item in evidences]
 
-    @staticmethod
-    def get_submission(document_id: str) -> Optional[DocumentationSubmission]:
-        return SUBMISSION_STORE.get(document_id)
+@router.post("/submit", response_model=SubmissionResponse)
+def submit_evidence(req: SubmissionRequest):
+    """Bám sát Yêu cầu 4 của Lead: Kiểm thử validation lỗi 400 đối với submit thiếu evidence hoặc trùng lặp"""
+    if req.job_id not in STATUS_STORE:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job '{req.job_id}' not found"
+        )
+    
+    if req.job_id in SUBMISSION_STORE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Job '{req.job_id}' has already been submitted"
+        )
+    
+    if not req.evidence_list:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Submission must contain at least one evidence item"
+        )
+    
+    sub_id = str(uuid.uuid4())
+    sub_data = {
+        "submission_id": sub_id,
+        "job_id": req.job_id,
+        "status": "submitted",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    SUBMISSION_STORE[req.job_id] = sub_data
+    
+    return SubmissionResponse(**sub_data)
