@@ -1,18 +1,14 @@
-from fastapi import FastAPI, HTTPException, Status
+from fastapi import FastAPI, HTTPException
 from typing import List
 from app.models import RepoAnalysisRequest, RepoAnalysisResponse
 from app.evidence_models import GroundingEvidence, GenerationStatus, DocumentationSubmission
 from app.submission import EvidenceCollector, StatusTracker, SubmissionWorkflow
 
-app = FastAPI(title="LivingDocs AI Service")
-
-@app.get("/")
-async def root():
-    return {"status": "ok", "service": "ai-service"}
+app = FastAPI(title="Code Analyzer & Documentation Service")
 
 @app.post("/api/v1/analyze-repo", response_model=RepoAnalysisResponse)
 async def analyze_repo(request: RepoAnalysisRequest):
-    return RepoAnalysisResponse(target=request.target, scope=request.scope or "full", files=[])
+    return RepoAnalysisResponse(target=request.target, scope=request.scope, files=[])
 
 @app.get("/api/v1/documents/{document_id}/status", response_model=GenerationStatus)
 async def get_document_status(document_id: str):
@@ -33,10 +29,6 @@ async def submit_document(document_id: str, submitted_by: str):
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except AttributeError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=422, detail=str(e))
 
 @app.get("/api/v1/documents/{document_id}/submission", response_model=DocumentationSubmission)
 async def get_submission(document_id: str):
