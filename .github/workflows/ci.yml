@@ -244,38 +244,26 @@ jobs:
           if [ -f "ai-service/requirements.txt" ]; then python -m pip install -r ai-service/requirements.txt; fi
           python -m pip install uvicorn httpx fastapi pytest anthropic javalang
 
-      - name: Run integration and LD-106 tests
+      - name: Run Pytest Integration Suite
         env:
           PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/ai-service:${{ github.workspace }}/ai-service/app:${{ github.workspace }}/app"
           ANALYZER_URL: "http://127.0.0.1:8000"
           AI_SERVICE_URL: "http://127.0.0.1:8001"
           ANTHROPIC_API_KEY: "mock_ci_key_for_integration_testing"
         run: |
-          # 1. Bật Analyzer service ngầm nếu có fixture
-          if [ -d "ai-service/tests/integration/fixtures/app" ]; then
-            python -m uvicorn app.main:app --app-dir "$GITHUB_WORKSPACE/ai-service/tests/integration/fixtures" --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
-            sleep 3
-          fi
-
-          # 2. Chạy test LD-106
+          # 1. Chạy test LD-106
           if [ -f "tests/test_evidence_submission.py" ]; then
-            python -m pytest -v tests/test_evidence_submission.py
+            python -m pytest -v --tb=short tests/test_evidence_submission.py
           elif [ -f "ai-service/tests/test_evidence_submission.py" ]; then
-            python -m pytest -v ai-service/tests/test_evidence_submission.py
+            python -m pytest -v --tb=short ai-service/tests/test_evidence_submission.py
           fi
 
-          # 3. Chạy Integration test suite gốc
+          # 2. Khôi phục chạy bộ integration test gốc (không live) theo yêu cầu của Lead
           if [ -d "ai-service/tests/integration" ]; then
-            python -m pytest -v ai-service/tests/integration -m "not live"
+            python -m pytest -v --tb=short ai-service/tests/integration -m "not live"
           elif [ -d "tests/integration" ]; then
-            python -m pytest -v tests/integration -m "not live"
+            python -m pytest -v --tb=short tests/integration -m "not live"
           fi
-
-      - name: Show service logs on failure
-        if: failure()
-        run: |
-          echo "--- ANALYZER LOG ---"; cat "$RUNNER_TEMP/analyzer.log" || true
-          echo "--- AI SERVICE LOG ---"; cat "$RUNNER_TEMP/ai-service.log" || true
 
   docker-compose-validation:
     name: Docker Compose Validation
