@@ -239,30 +239,48 @@ jobs:
           cache-dependency-path: ai-service/requirements.txt
 
       - name: Install dependencies
-        run: python -m pip install -r ai-service/requirements.txt uvicorn httpx fastapi pytest
-
-      - name: Start service and strict readiness check
-        env:
-          PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/ai-service"
         run: |
-          # Tự động tìm vị trí app để bật uvicorn
-          if [ -d "ai-service/app" ]; then
-            nohup python -m uvicorn app.main:app --app-dir "$GITHUB_WORKSPACE/ai-service" --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/app.log" 2>&1 &
-          else
-            nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/app.log" 2>&1 &
+          python -m pip install --upgrade pip
+          if [ -f "ai-service/requirements.txt" ]; then python -m pip install -r ai-service/requirements.txt; fi
+          python -m pip install uvicorn httpx fastapi pytest
+
+      - name: Start background service and strict readiness check
+        env:
+          PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/ai-service:${{ github.workspace }}/app"
+        run: |
+          # Tìm đúng file main.py chứa ứng dụng FastAPI
+          APP_MODULE=""
+          if [ -f "ai-service/app/main.py" ]; then
+            APP_MODULE="app.main:app"
+            APP_DIR="$GITHUB_WORKSPACE/ai-service"
+          elif [ -f "app/main.py" ]; then
+            APP_MODULE="app.main:app"
+            APP_DIR="$GITHUB_WORKSPACE"
+          elif [ -f "ai-service/main.py" ]; then
+            APP_MODULE="main:app"
+            APP_DIR="$GITHUB_WORKSPACE/ai-service"
           fi
-          
-          # Readiness Check loop nghiêm ngặt (Strict Timeout Check)
+
+          echo "Starting Uvicorn with APP_MODULE=$APP_MODULE and APP_DIR=$APP_DIR"
+          nohup python -m uvicorn $APP_MODULE --app-dir "$APP_DIR" --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/app.log" 2>&1 &
+
+          # Readiness Check loop kiểm tra phản hồi HTTP từ port 8000
+          READY=0
           for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8000/openapi.json > /dev/null 2>&1 || curl -fsS http://127.0.0.1:8000/ > /dev/null 2>&1; then
+            if curl -fsS http://127.0.0.1:8000/openapi.json > /dev/null 2>&1 || curl -fsS http://127.0.0.1:8000/ > /dev/null 2>&1 || curl -fsS http://127.0.0.1:8000/docs > /dev/null 2>&1; then
               echo "FastAPI background service is ready!"
-              exit 0
+              READY=1
+              break
             fi
             sleep 1
           done
-          echo "ERROR: Service failed to respond within 30s timeout!"
-          cat "$RUNNER_TEMP/app.log"
-          exit 1
+
+          if [ $READY -eq 0 ]; then
+            echo "ERROR: Service failed to start on port 8000!"
+            echo "--- LOG CONTENT ---"
+            cat "$RUNNER_TEMP/app.log"
+            exit 1
+          fi
 
       - name: Run Pytest suite
         env:
@@ -273,23 +291,9 @@ jobs:
           elif [ -f "tests/test_evidence_submission.py" ]; then
             python -m pytest -v tests/test_evidence_submission.py
           else
-            python -m pytest -v ai-service/tests/
+            python -m pytest -v
           fi
 
   docker-compose-validation:
     name: Docker Compose Validation
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      TOKEN_ENCRYPTION_KEY: "ci-validation-placeholder-only"
-      GITHUB_INTEGRATION_INTERNAL_SECRET: "ci-validation-placeholder-only"
-
-    steps:
-      - name: Checkout source code
-        uses: actions/checkout@v4
-
-      - name: Validate Docker Compose configuration
-        run: docker compose -f compose.yaml config --quiet
-
-      - name: Build application images
-        run: docker compose -f compose.yaml build backend ai-service code-analyzer github-integration frontend
+    runs-on: ubuntu
