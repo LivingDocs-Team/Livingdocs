@@ -251,19 +251,25 @@ jobs:
           AI_SERVICE_URL: "http://127.0.0.1:8001"
           ANTHROPIC_API_KEY: "mock_ci_key_for_integration_testing"
         run: |
-          # 1. Chạy test LD-106
+          # 1. Chạy bài test LD-106 chính thức
           if [ -f "tests/test_evidence_submission.py" ]; then
             python -m pytest -v --tb=short tests/test_evidence_submission.py
           elif [ -f "ai-service/tests/test_evidence_submission.py" ]; then
             python -m pytest -v --tb=short ai-service/tests/test_evidence_submission.py
           fi
 
-          # 2. Khôi phục chạy bộ integration test gốc (không live) theo yêu cầu của Lead
+          # 2. Khôi phục bài test tích hợp gốc nguyên bản theo yêu cầu 5 của Lead
           if [ -d "ai-service/tests/integration" ]; then
             python -m pytest -v --tb=short ai-service/tests/integration -m "not live"
           elif [ -d "tests/integration" ]; then
             python -m pytest -v --tb=short tests/integration -m "not live"
           fi
+
+      - name: Show service logs on failure
+        if: failure()
+        run: |
+          echo "--- ANALYZER LOG ---"; cat "$RUNNER_TEMP/analyzer.log" || true
+          echo "--- AI SERVICE LOG ---"; cat "$RUNNER_TEMP/ai-service.log" || true
 
   docker-compose-validation:
     name: Docker Compose Validation
