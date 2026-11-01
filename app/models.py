@@ -5,7 +5,7 @@ class Function(BaseModel):
     name: str
     lineno: int
     end_lineno: int
-    source: Optional[str] = None  # Mã nguồn thực tế của hàm
+    source: Optional[str] = None  # Mã nguồn thực tế từ AST
 
 class Endpoint(BaseModel):
     path: str
@@ -24,7 +24,7 @@ class FileAnalysis(BaseModel):
     endpoints: List[Endpoint] = []
 
 class RepoAnalysisRequest(BaseModel):
-    target: str          # Chuỗi định danh target / repo URL
+    target: str
     scope: Optional[str] = "full"
     files: Optional[List[str]] = None
 
