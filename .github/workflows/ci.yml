@@ -243,8 +243,13 @@ jobs:
 
       - name: Start analyzer service (LD-328) on port 8000
         env:
-          PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/ai-service/tests/integration/fixtures"
-        run: nohup python -m uvicorn app.main:app --app-dir "$GITHUB_WORKSPACE/ai-service/tests/integration/fixtures" --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
+          PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/services/code-analyzer:${{ github.workspace }}/ai-service/tests/integration/fixtures"
+        run: |
+          if [ -d "services/code-analyzer" ]; then
+            nohup python -m uvicorn main:app --app-dir "$GITHUB_WORKSPACE/services/code-analyzer" --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
+          else
+            nohup python -m uvicorn app.main:app --app-dir "$GITHUB_WORKSPACE/ai-service/tests/integration/fixtures" --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
+          fi
 
       - name: Start AI service on port 8001
         working-directory: ai-service
@@ -256,7 +261,7 @@ jobs:
       - name: Wait for both services (Strict Exit on Timeout)
         run: |
           for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8001/health > /dev/null 2>&1 && curl -fsS http://127.0.0.1:8000/openapi.json > /dev/null 2>&1; then
+            if curl -fsS http://127.0.0.1:8001/health > /dev/null 2>&1 && (curl -fsS http://127.0.0.1:8000/openapi.json > /dev/null 2>&1 || curl -fsS http://127.0.0.1:8000/health > /dev/null 2>&1); then
               echo "Both background services started successfully!"
               exit 0
             fi
