@@ -238,8 +238,11 @@ jobs:
           cache: pip
           cache-dependency-path: ai-service/requirements.txt
 
-      - name: Install dependencies (AI service + analyzer)
-        run: python -m pip install -r ai-service/requirements.txt javalang uvicorn httpx fastapi pytest
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r ai-service/requirements.txt
+          python -m pip install uvicorn httpx fastapi pytest javalang pydantic
 
       - name: Start FastAPI application & Readiness check
         env:
@@ -258,15 +261,16 @@ jobs:
           cat "$RUNNER_TEMP/app.log"
           exit 1
 
-      - name: Run Full API & Persistence Integration Tests
+      - name: Run Integration Tests
         env:
           PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/ai-service"
         run: python -m pytest -v tests/test_evidence_submission.py
 
-      - name: Show service logs on failure
+      - name: Show logs on failure
         if: failure()
         run: |
-          echo "--- app log ---"; cat "$RUNNER_TEMP/app.log" || true
+          echo "=== APP LOGS ==="
+          cat "$RUNNER_TEMP/app.log" || true
 
   docker-compose-validation:
     name: Docker Compose Validation
