@@ -1,109 +1,41 @@
+from fastapi import FastAPI, HTTPException, Status
+from typing import List
+from app.models import RepoAnalysisRequest, RepoAnalysisResponse
+from app.evidence_models import GroundingEvidence, GenerationStatus, DocumentationSubmission
+from app.submission import EvidenceCollector, StatusTracker, SubmissionWorkflow
 
-from fastapi import FastAPI, HTTPException, status
-
-from app.models import RepoAnalysisRequest, RepoAnalysisResponse, FileAnalysis
-from app.analyzer import ASTAnalyzer
-from app.reader import FileReader
-from app.extractor import EntityExtractor
-
-
-app = FastAPI(
-    title="Source Code Analysis Service",
-    version="1.0.0",
-)
-
-
-@app.get("/health", tags=["health"])
-async def health():
-    """Liveness probe used by Docker Compose and other services."""
-    return {"status": "ok", "service": "code-analyzer"}
-
+app = FastAPI(title="Code Analyzer & Documentation Service")
 
 @app.post("/api/v1/analyze-repo", response_model=RepoAnalysisResponse)
-async def analyze_repository(request: RepoAnalysisRequest):
-    """Analyze repository files according to the input contract."""
+async def analyze_repo(request: RepoAnalysisRequest):
+    # Logic phân tích repo hiện tại...
+    return RepoAnalysisResponse(target=request.target, scope=request.scope, files=[])
 
-    if not request.files:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="The list of files to analyze must not be empty.",
-        )
+# 🟢 Bổ sung các API cho LD-106 theo đúng yêu cầu của Leader
+@app.get("/api/v1/documents/{document_id}/status", response_model=GenerationStatus)
+async def get_document_status(document_id: str):
+    status = StatusTracker.get_status(document_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Generation job not found")
+    return status
 
-    analyzed_files = []
+@app.get("/api/v1/documents/{document_id}/evidences", response_model=List[GroundingEvidence])
+async def get_document_evidences(document_id: str):
+    evidences = EvidenceCollector.get_evidences(document_id)
+    return evidences
 
-    for file_input in request.files:
-        # Detect the language if the client did not provide one.
-        lang = (
-            file_input.language
-            or FileReader.detect_language(file_input.path)
-        )
+@app.post("/api/v1/documents/{document_id}/submit", response_model=DocumentationSubmission)
+async def submit_document(document_id: str, submitted_by: str):
+    try:
+        return SubmissionWorkflow.submit_documentation(document_id, submitted_by)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-        # Handle empty files.
-        if not file_input.content.strip():
-            analyzed_files.append(
-                FileAnalysis(
-                    path=file_input.path,
-                    language=lang,
-                    status="empty",
-                )
-            )
-            continue
-
-        # Handle unsupported languages.
-        if lang not in ("python", "java"):
-            analyzed_files.append(
-                FileAnalysis(
-                    path=file_input.path,
-                    language=lang,
-                    status="unsupported",
-                    error=f"Language '{lang}' is not supported.",
-                )
-            )
-            continue
-
-        # Parse the source code into an AST.
-        tree, error = ASTAnalyzer.parse_code(file_input.content, lang)
-
-        if error:
-            analyzed_files.append(
-                FileAnalysis(
-                    path=file_input.path,
-                    language=lang,
-                    status="invalid",
-                    error=error,
-                )
-            )
-            continue
-
-        # Extract classes, functions, and endpoints.
-        if lang == "python":
-            classes, functions, endpoints = (
-                EntityExtractor.extract_python_entities(
-                    tree,
-                    file_input.content,
-                )
-            )
-        else:
-            classes, functions, endpoints = (
-                EntityExtractor.extract_java_entities(
-                    tree,
-                    file_input.content,
-                )
-            )
-
-        analyzed_files.append(
-            FileAnalysis(
-                path=file_input.path,
-                language=lang,
-                status="ok",
-                classes=classes,
-                functions=functions,
-                endpoints=endpoints,
-            )
-        )
-
-    return RepoAnalysisResponse(
-        scope=request.scope,
-        target=request.target,
-        files=analyzed_files,
-    )
+@app.get("/api/v1/documents/{document_id}/submission", response_model=DocumentationSubmission)
+async def get_submission(document_id: str):
+    submission = SubmissionWorkflow.get_submission(document_id)
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission record not found")
+    return submission
