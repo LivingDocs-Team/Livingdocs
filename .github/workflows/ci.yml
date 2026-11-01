@@ -246,7 +246,7 @@ jobs:
 
       - name: Run integration and LD-106 tests
         env:
-          PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/ai-service:${{ github.workspace }}/app"
+          PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/ai-service:${{ github.workspace }}/ai-service/app:${{ github.workspace }}/app"
           ANALYZER_URL: "http://127.0.0.1:8000"
           AI_SERVICE_URL: "http://127.0.0.1:8001"
           ANTHROPIC_API_KEY: "mock_ci_key_for_integration_testing"
@@ -270,6 +270,12 @@ jobs:
           elif [ -d "tests/integration" ]; then
             python -m pytest -v tests/integration -m "not live"
           fi
+
+      - name: Show service logs on failure
+        if: failure()
+        run: |
+          echo "--- ANALYZER LOG ---"; cat "$RUNNER_TEMP/analyzer.log" || true
+          echo "--- AI SERVICE LOG ---"; cat "$RUNNER_TEMP/ai-service.log" || true
 
   docker-compose-validation:
     name: Docker Compose Validation
