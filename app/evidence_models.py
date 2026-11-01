@@ -7,7 +7,7 @@ class GroundingEvidence(BaseModel):
     file_path: str
     start_line: int
     end_line: int
-    code_snippet: str      # Phải là mã nguồn thực tế
+    code_snippet: str
     commit_hash: str
 
 class GenerationStatus(BaseModel):
@@ -21,6 +21,6 @@ class DocumentationSubmission(BaseModel):
     submission_id: str
     document_id: str
     submitted_by: str
-    status: str = Field(default="submitted")
+    status: str = Field(default="submitted", description="submitted | approved | rejected")
     submitted_at: datetime = Field(default_factory=datetime.utcnow)
     evidence_ids: List[str] = Field(default_factory=list)
