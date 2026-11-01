@@ -239,7 +239,10 @@ jobs:
           cache-dependency-path: ai-service/requirements.txt
 
       - name: Install dependencies
-        run: python -m pip install -r ai-service/requirements.txt javalang uvicorn httpx fastapi pytest
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f "ai-service/requirements.txt" ]; then python -m pip install -r ai-service/requirements.txt; fi
+          python -m pip install uvicorn httpx fastapi pytest javalang
 
       - name: Start services and run tests
         working-directory: ai-service
@@ -251,17 +254,17 @@ jobs:
         run: |
           # 1. Bật Analyzer Service ở Port 8000
           if [ -d "tests/integration/fixtures/app" ]; then
-            nohup python -m uvicorn app.main:app --app-dir "$GITHUB_WORKSPACE/ai-service/tests/integration/fixtures" --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
+            python -m uvicorn app.main:app --app-dir "$GITHUB_WORKSPACE/ai-service/tests/integration/fixtures" --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
           elif [ -d "app" ]; then
-            nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
-          elif [ -d "$GITHUB_WORKSPACE/app" ]; then
-            nohup python -m uvicorn app.main:app --app-dir "$GITHUB_WORKSPACE" --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
+            python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
+          else
+            python -m uvicorn app.main:app --app-dir "$GITHUB_WORKSPACE" --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
           fi
 
           # 2. Bật AI Service ở Port 8001
-          nohup python -m uvicorn main:app --host 127.0.0.1 --port 8001 > "$RUNNER_TEMP/ai-service.log" 2>&1 &
+          python -m uvicorn main:app --host 127.0.0.1 --port 8001 > "$RUNNER_TEMP/ai-service.log" 2>&1 &
 
-          # 3. Readiness check nghiêm ngặt cho cả 2 port (tối đa 30s)
+          # 3. Readiness check nghiêm ngặt cho cả 2 port
           READY=0
           for i in $(seq 1 30); do
             if (curl -s http://127.0.0.1:8000/openapi.json > /dev/null 2>&1 || curl -s http://127.0.0.1:8000/ > /dev/null 2>&1) && (curl -s http://127.0.0.1:8001/health > /dev/null 2>&1 || curl -s http://127.0.0.1:8001/ > /dev/null 2>&1); then
@@ -273,21 +276,40 @@ jobs:
           done
 
           if [ $READY -eq 0 ]; then
-            echo "ERROR: Background services failed readiness check!"
-            echo "--- ANALYZER LOG ---"; cat "$RUNNER_TEMP/analyzer.log" || true
-            echo "--- AI SERVICE LOG ---"; cat "$RUNNER_TEMP/ai-service.log" || true
+            echo "================ ERROR: Background services failed readiness check! ================"
+            echo "--- ANALYZER LOG ---"
+            cat "$RUNNER_TEMP/analyzer.log" || true
+            echo "--- AI SERVICE LOG ---"
+            cat "$RUNNER_TEMP/ai-service.log" || true
             exit 1
           fi
 
-          # 4. Chạy Pytest integration & LD-106 tests
+          # 4. Chạy Pytest integration chính thức
           python -m pytest -v tests/integration -m "not live"
           if [ -f "tests/test_evidence_submission.py" ]; then
             python -m pytest -v tests/test_evidence_submission.py
           fi
+
+      - name: Show service logs on failure
+        if: failure()
+        run: |
+          echo "--- ANALYZER LOG ---"; cat "$RUNNER_TEMP/analyzer.log" || true
+          echo "--- AI SERVICE LOG ---"; cat "$RUNNER_TEMP/ai-service.log" || true
 
   docker-compose-validation:
     name: Docker Compose Validation
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      TOKEN_ENCRYPTION_KEY: "ci
+      TOKEN_ENCRYPTION_KEY: "ci-validation-placeholder-only"
+      GITHUB_INTEGRATION_INTERNAL_SECRET: "ci-validation-placeholder-only"
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose configuration
+        run: docker compose -f compose.yaml config --quiet
+
+      - name: Build application images
+        run: docker compose -f compose.yaml build backend ai-service code-analyzer github-integration frontend
