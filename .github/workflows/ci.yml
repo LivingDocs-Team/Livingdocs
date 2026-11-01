@@ -296,4 +296,18 @@ jobs:
 
   docker-compose-validation:
     name: Docker Compose Validation
-    runs-on: ubuntu
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TOKEN_ENCRYPTION_KEY: "ci-validation-placeholder-only"
+      GITHUB_INTEGRATION_INTERNAL_SECRET: "ci-validation-placeholder-only"
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose configuration
+        run: docker compose -f compose.yaml config --quiet
+
+      - name: Build application images
+        run: docker compose -f compose.yaml build backend ai-service code-analyzer github-integration frontend
