@@ -244,16 +244,21 @@ jobs:
           if [ -f ai-service/requirements.txt ]; then python -m pip install -r ai-service/requirements.txt; fi
           python -m pip install uvicorn httpx fastapi pytest javalang pydantic
 
-      - name: Run Integration Tests via Pytest Client
-        env:
-          PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/ai-service"
+      - name: Run Integration Tests
         run: |
+          if [ -d "ai-service/app" ]; then
+            export PYTHONPATH="${{ github.workspace }}/ai-service:${{ github.workspace }}"
+          else
+            export PYTHONPATH="${{ github.workspace }}"
+          fi
+
           if [ -f "tests/test_evidence_submission.py" ]; then
             python -m pytest -v tests/test_evidence_submission.py
           elif [ -f "ai-service/tests/test_evidence_submission.py" ]; then
             python -m pytest -v ai-service/tests/test_evidence_submission.py
           else
-            python -m pytest -v
+            echo "ERROR: Could not find test_evidence_submission.py!"
+            exit 1
           fi
 
   docker-compose-validation:
