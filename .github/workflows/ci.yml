@@ -241,19 +241,7 @@ jobs:
       - name: Install dependencies (AI service + analyzer)
         run: python -m pip install -r ai-service/requirements.txt javalang uvicorn httpx fastapi
 
-      - name: Run unit & feature tests
-        env:
-          PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/ai-service"
-        run: |
-          if [ -f "tests/test_evidence_submission.py" ]; then
-            python -m pytest -v tests/test_evidence_submission.py
-          elif [ -f "ai-service/tests/test_evidence_submission.py" ]; then
-            python -m pytest -v ai-service/tests/test_evidence_submission.py
-          else
-            python -m pytest -v ai-service/tests/test_ai_service.py
-          fi
-
-      - name: Start services and run integration tests
+      - name: Start background services and run tests
         working-directory: ai-service
         env:
           ANALYZER_URL: "http://127.0.0.1:8000"
@@ -261,23 +249,20 @@ jobs:
           PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/ai-service:${{ github.workspace }}/ai-service/tests/integration/fixtures"
           ANTHROPIC_API_KEY: "mock_ci_key_for_integration_testing"
         run: |
-          # Khởi động Analyzer
-          if [ -d "tests/integration/fixtures/app" ]; then
-            python -m uvicorn app.main:app --app-dir "$GITHUB_WORKSPACE/ai-service/tests/integration/fixtures" --host 127.0.0.1 --port 8000 &
-          elif [ -d "app" ]; then
-            python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 &
-          fi
+          # 1. Bật Analyzer Service ngầm
+          python -m uvicorn app.main:app --app-dir "$GITHUB_WORKSPACE/ai-service/tests/integration/fixtures" --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
           
-          # Khởi động AI Service
-          python -m uvicorn main:app --host 127.0.0.1 --port 8001 &
+          # 2. Bật AI Service ngầm
+          python -m uvicorn main:app --host 127.0.0.1 --port 8001 > "$RUNNER_TEMP/ai-service.log" 2>&1 &
           
-          # Đợi 5 giây cho cả 2 service sẵn sàng
+          # 3. Đợi 5s cho dịch vụ khởi động
           sleep 5
           
-          # Chạy test integration chính thức
-          python -m pytest -v tests/integration -m "not live"
+          # 4. Chạy toàn bộ pytest trong ai-service (loại trừ các test gọi API thật)
+          python -m pytest -v -m "not live"
 
-      - name: Show service logs
+      - name: Show service logs on failure
         if: failure()
         run: |
-          echo "Integration test step failed. Reviewing logs above."
+          echo "--- analyzer log ---"; cat "$RUNNER_TEMP/analyzer.log" || true
+          echo "--- ai-service log ---"; cat "$RUNNER_TEMP/ai-service.log" || true
