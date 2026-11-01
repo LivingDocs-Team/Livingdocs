@@ -5,7 +5,7 @@ class Function(BaseModel):
     name: str
     lineno: int
     end_lineno: int
-    source: Optional[str] = None  # Mã nguồn thực tế từ AST
+    source: Optional[str] = None  # Mã nguồn thực tế
 
 class Endpoint(BaseModel):
     path: str
