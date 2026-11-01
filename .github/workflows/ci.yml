@@ -244,21 +244,49 @@ jobs:
           if [ -f "ai-service/requirements.txt" ]; then python -m pip install -r ai-service/requirements.txt; fi
           python -m pip install javalang uvicorn httpx fastapi pytest anthropic
 
-      - name: Run integration tests with TestClient
+      - name: Start services and run integration tests
         env:
-          PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/ai-service:${{ github.workspace }}/app"
           ANALYZER_URL: "http://127.0.0.1:8000"
           AI_SERVICE_URL: "http://127.0.0.1:8001"
+          PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/ai-service:${{ github.workspace }}/ai-service/tests/integration/fixtures"
           ANTHROPIC_API_KEY: "mock_ci_key_for_integration_testing"
         run: |
-          # Kiểm tra và thực thi các bài test tích hợp LD-106 chính xác từ root workspace
+          # 1. Bật Analyzer Mock Service ở Port 8000
+          if [ -d "ai-service/tests/integration/fixtures/app" ]; then
+            python -m uvicorn app.main:app --app-dir "$GITHUB_WORKSPACE/ai-service/tests/integration/fixtures" --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
+          elif [ -d "app" ]; then
+            python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
+          fi
+
+          # 2. Bật AI Service ở Port 8001
+          if [ -f "ai-service/main.py" ]; then
+            python -m uvicorn main:app --app-dir "$GITHUB_WORKSPACE/ai-service" --host 127.0.0.1 --port 8001 > "$RUNNER_TEMP/ai-service.log" 2>&1 &
+          elif [ -f "main.py" ]; then
+            python -m uvicorn main:app --host 127.0.0.1 --port 8001 > "$RUNNER_TEMP/ai-service.log" 2>&1 &
+          fi
+
+          # 3. Đợi 5s cho 2 background service ổn định
+          sleep 5
+
+          # 4. Chạy Pytest kiểm thử LD-106
           if [ -f "tests/test_evidence_submission.py" ]; then
             python -m pytest -v tests/test_evidence_submission.py
           elif [ -f "ai-service/tests/test_evidence_submission.py" ]; then
             python -m pytest -v ai-service/tests/test_evidence_submission.py
-          else
-            python -m pytest -v ai-service/tests/
           fi
+
+          # 5. Chạy bộ Integration Test gốc của repo (Không live)
+          if [ -d "ai-service/tests/integration" ]; then
+            python -m pytest -v ai-service/tests/integration -m "not live"
+          elif [ -d "tests/integration" ]; then
+            python -m pytest -v tests/integration -m "not live"
+          fi
+
+      - name: Show service logs on failure
+        if: failure()
+        run: |
+          echo "--- ANALYZER LOG ---"; cat "$RUNNER_TEMP/analyzer.log" || true
+          echo "--- AI SERVICE LOG ---"; cat "$RUNNER_TEMP/ai-service.log" || true
 
   docker-compose-validation:
     name: Docker Compose Validation
