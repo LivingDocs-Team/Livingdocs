@@ -241,30 +241,43 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r ai-service/requirements.txt
+          if [ -f ai-service/requirements.txt ]; then python -m pip install -r ai-service/requirements.txt; fi
           python -m pip install uvicorn httpx fastapi pytest javalang pydantic
 
       - name: Start FastAPI application & Readiness check
         env:
           PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/ai-service"
         run: |
-          nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/app.log" 2>&1 &
+          # Thử khởi chạy app với đường dẫn root hoặc sub-directory ai-service
+          if [ -d "ai-service/app" ]; then
+            nohup python -m uvicorn app.main:app --app-dir ai-service --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/app.log" 2>&1 &
+          else
+            nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/app.log" 2>&1 &
+          fi
           
+          # Readiness Loop
           for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8000/openapi.json > /dev/null 2>&1; then
+            if curl -fsS http://127.0.0.1:8000/openapi.json > /dev/null 2>&1 || curl -fsS http://127.0.0.1:8000/docs > /dev/null 2>&1; then
               echo "FastAPI Application is UP and READY!"
               exit 0
             fi
             sleep 1
           done
-          echo "ERROR: Service failed to respond within 30s!"
+          echo "ERROR: Service failed to start within 30s!"
           cat "$RUNNER_TEMP/app.log"
           exit 1
 
       - name: Run Integration Tests
         env:
           PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/ai-service"
-        run: python -m pytest -v tests/test_evidence_submission.py
+        run: |
+          if [ -f "tests/test_evidence_submission.py" ]; then
+            python -m pytest -v tests/test_evidence_submission.py
+          elif [ -f "ai-service/tests/test_evidence_submission.py" ]; then
+            python -m pytest -v ai-service/tests/test_evidence_submission.py
+          else
+            python -m pytest -v
+          fi
 
       - name: Show logs on failure
         if: failure()
