@@ -245,32 +245,41 @@ jobs:
         working-directory: ai-service/tests/integration/fixtures
         env:
           PYTHONPATH: "${{ github.workspace }}"
-        run: nohup python -m uvicorn --app-dir "$GITHUB_WORKSPACE" app.main:app --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
+        run: nohup python -m uvicorn --app-dir "$GITHUB_WORKSPACE" app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
 
       - name: Start AI service on port 8001
         working-directory: ai-service
         env:
           PYTHONPATH: "${{ github.workspace }}/ai-service"
           ANTHROPIC_API_KEY: "mock_ci_key_for_integration_testing"
-        run: nohup python -m uvicorn main:app --port 8001 > "$RUNNER_TEMP/ai-service.log" 2>&1 &
+        run: nohup python -m uvicorn main:app --host 127.0.0.1 --port 8001 > "$RUNNER_TEMP/ai-service.log" 2>&1 &
 
-      - name: Wait for both services
+      - name: Wait for both services (Strict Exit on Timeout)
         run: |
           for i in $(seq 1 30); do
-            if curl -s http://localhost:8001/health > /dev/null 2>&1 && curl -s http://localhost:8000/openapi.json > /dev/null 2>&1; then
-              echo "Services are up!"
-              break
+            if curl -fsS http://127.0.0.1:8001/health > /dev/null 2>&1 && curl -fsS http://127.0.0.1:8000/openapi.json > /dev/null 2>&1; then
+              echo "Both background services started successfully!"
+              exit 0
             fi
             sleep 1
           done
+          echo "ERROR: Background services failed to start within 30 seconds!"
+          cat "$RUNNER_TEMP/analyzer.log"
+          cat "$RUNNER_TEMP/ai-service.log"
+          exit 1
 
-      - name: Run integration tests across services
+      - name: Run unit & feature tests
         working-directory: ai-service
         env:
-          ANALYZER_URL: "http://localhost:8000"
-          AI_SERVICE_URL: "http://localhost:8001"
           PYTHONPATH: "${{ github.workspace }}/ai-service"
-          ANTHROPIC_API_KEY: "mock_ci_key_for_integration_testing"
+        run: python -m pytest -v tests/test_evidence_submission.py
+
+      - name: Run service integration tests
+        working-directory: ai-service
+        env:
+          ANALYZER_URL: "http://127.0.0.1:8000"
+          AI_SERVICE_URL: "http://127.0.0.1:8001"
+          PYTHONPATH: "${{ github.workspace }}/ai-service"
         run: python -m pytest -v tests/integration -m "not live"
 
       - name: Show service logs
