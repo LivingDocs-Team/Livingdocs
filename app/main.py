@@ -4,11 +4,14 @@ from app.models import RepoAnalysisRequest, RepoAnalysisResponse
 from app.evidence_models import GroundingEvidence, GenerationStatus, DocumentationSubmission
 from app.submission import EvidenceCollector, StatusTracker, SubmissionWorkflow
 
-app = FastAPI(title="Code Analyzer & Documentation Service")
+app = FastAPI(title="LivingDocs AI Service")
+
+@app.get("/")
+async def root():
+    return {"status": "ok", "service": "ai-service"}
 
 @app.post("/api/v1/analyze-repo", response_model=RepoAnalysisResponse)
 async def analyze_repo(request: RepoAnalysisRequest):
-    # Logic phân tích gốc giữ nguyên
     return RepoAnalysisResponse(target=request.target, scope=request.scope or "full", files=[])
 
 @app.get("/api/v1/documents/{document_id}/status", response_model=GenerationStatus)
