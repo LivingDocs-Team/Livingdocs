@@ -244,48 +244,76 @@ jobs:
           if [ -f "ai-service/requirements.txt" ]; then python -m pip install -r ai-service/requirements.txt; fi
           python -m pip install uvicorn httpx fastapi pytest pytest-html anthropic javalang
 
-      - name: Start Background Services & Run Integration Tests
+      # In ra file main.py đang được nạp và danh sách route để dễ debug
+      - name: Debug which app is loaded
+        env:
+          PYTHONPATH: "${{ github.workspace }}"
+        run: |
+          python - <<'EOF'
+          import app.main as m
+          print("FILE:", m.__file__)
+          print("ROUTES:", sorted(r.path for r in m.app.routes))
+          EOF
+
+      # Test LD-106: chỉ để thư mục gốc trong PYTHONPATH để "app" luôn là app/ ở gốc repo
+      - name: LD-106 evidence submission tests
+        env:
+          PYTHONPATH: "${{ github.workspace }}"
+          ANTHROPIC_API_KEY: "mock_ci_key_for_integration_testing"
+        run: |
+          if [ -f "tests/test_evidence_submission.py" ]; then
+            python -m pytest -v tests/test_evidence_submission.py
+          elif [ -f "ai-service/tests/test_evidence_submission.py" ]; then
+            python -m pytest -v ai-service/tests/test_evidence_submission.py
+          else
+            echo "test_evidence_submission.py not found"; exit 1
+          fi
+
+      - name: Start background services
         env:
           PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/ai-service:${{ github.workspace }}/ai-service/app:${{ github.workspace }}/app"
           ANALYZER_URL: "http://127.0.0.1:8000"
           AI_SERVICE_URL: "http://127.0.0.1:8001"
           ANTHROPIC_API_KEY: "mock_ci_key_for_integration_testing"
         run: |
-          # 1. Bật Code Analyzer Service (Port 8000)
+          # 1. Code Analyzer Service (port 8000)
           if [ -d "ai-service/tests/integration/fixtures/app" ]; then
-            python -m uvicorn app.main:app --app-dir "$GITHUB_WORKSPACE/ai-service/tests/integration/fixtures" --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
+            nohup python -m uvicorn app.main:app --app-dir "$GITHUB_WORKSPACE/ai-service/tests/integration/fixtures" --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
           elif [ -d "app" ]; then
-            python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
+            nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/analyzer.log" 2>&1 &
           fi
 
-          # 2. Bật AI Service (Port 8001)
+          # 2. AI Service (port 8001)
           if [ -f "ai-service/main.py" ]; then
-            python -m uvicorn main:app --app-dir "$GITHUB_WORKSPACE/ai-service" --host 127.0.0.1 --port 8001 > "$RUNNER_TEMP/ai-service.log" 2>&1 &
+            nohup python -m uvicorn main:app --app-dir "$GITHUB_WORKSPACE/ai-service" --host 127.0.0.1 --port 8001 > "$RUNNER_TEMP/ai-service.log" 2>&1 &
           elif [ -f "main.py" ]; then
-            python -m uvicorn main:app --host 127.0.0.1 --port 8001 > "$RUNNER_TEMP/ai-service.log" 2>&1 &
+            nohup python -m uvicorn main:app --host 127.0.0.1 --port 8001 > "$RUNNER_TEMP/ai-service.log" 2>&1 &
           fi
 
-          # 3. Đợi và kiểm tra sẵn sàng (Health Check)
-          for i in {1..15}; do
-            if curl -s http://127.0.0.1:8001/ > /dev/null || curl -s http://127.0.0.1:8001/docs > /dev/null; then
+          # 3. Health check: fail thật nếu service không lên
+          for i in $(seq 1 15); do
+            if curl -sf http://127.0.0.1:8001/ > /dev/null || curl -sf http://127.0.0.1:8001/docs > /dev/null; then
               echo "AI Service & Analyzer Service Ready!"
-              break
+              exit 0
             fi
             sleep 1
           done
+          echo "AI Service did not start"; exit 1
 
-          # 4. Chạy bộ test LD-106
-          if [ -f "tests/test_evidence_submission.py" ]; then
-            python -m pytest -v tests/test_evidence_submission.py
-          elif [ -f "ai-service/tests/test_evidence_submission.py" ]; then
-            python -m pytest -v ai-service/tests/test_evidence_submission.py
-          fi
-
-          # 5. Khôi phục kiểm thử tích hợp thực tế gốc của repo (Yêu cầu 5 của Lead)
+      # Kiểm thử tích hợp gốc của repo (Yêu cầu 5 của Lead)
+      - name: Repo integration tests
+        env:
+          PYTHONPATH: "${{ github.workspace }}:${{ github.workspace }}/ai-service:${{ github.workspace }}/ai-service/app:${{ github.workspace }}/app"
+          ANALYZER_URL: "http://127.0.0.1:8000"
+          AI_SERVICE_URL: "http://127.0.0.1:8001"
+          ANTHROPIC_API_KEY: "mock_ci_key_for_integration_testing"
+        run: |
           if [ -d "ai-service/tests/integration" ]; then
             python -m pytest -v ai-service/tests/integration -m "not live"
           elif [ -d "tests/integration" ]; then
             python -m pytest -v tests/integration -m "not live"
+          else
+            echo "No integration tests directory found"
           fi
 
       - name: Show service logs on failure
