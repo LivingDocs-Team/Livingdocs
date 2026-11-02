@@ -130,6 +130,24 @@ class DocumentationGenerationServiceTest {
     }
 
     @Test
+    void reportsUnknownTemplateAsBadRequest() {
+        analyzerServer.expect(requestTo("http://analyzer.test/api/v1/analyze-repo"))
+                .andRespond(withSuccess(ANALYSIS, MediaType.APPLICATION_JSON));
+        aiServiceServer.expect(requestTo("http://ai.test/generate"))
+                .andExpect(content().json("{\"template_id\":\"deleted-template\"}"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"detail\":\"Template 'deleted-template' not found\"}"));
+
+        ApiException error = assertThrows(ApiException.class, () -> generationService.generate(
+                USER_ID, REPOSITORY_ID, new DocumentationGenerationRequest("deleted-template", null)));
+
+        assertEquals(HttpStatus.BAD_REQUEST, error.getStatus());
+        assertEquals("TEMPLATE_NOT_FOUND", error.getCode());
+        analyzerServer.verify();
+        aiServiceServer.verify();
+    }
+
+    @Test
     void mapsMissingUpstreamJobToNotFound() {
         analyzerServer.expect(requestTo("http://analyzer.test/api/v1/analyze-repo"))
                 .andRespond(withSuccess(ANALYSIS, MediaType.APPLICATION_JSON));
