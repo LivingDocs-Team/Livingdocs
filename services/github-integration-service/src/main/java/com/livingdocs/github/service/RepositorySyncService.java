@@ -96,6 +96,16 @@ public class RepositorySyncService {
         return snapshot;
     }
 
+    /**
+     * Kết quả đồng bộ gần nhất để sinh tài liệu (LD-77). Kết quả chỉ giữ trong bộ nhớ, nên nếu service vừa
+     * khởi động lại (hoặc repo chưa đồng bộ lần nào) thì đồng bộ lại với tuỳ chọn mặc định thay vì báo 404.
+     */
+    public RepositorySnapshot latestOrSync(String userId, UUID repositoryId) {
+        findOwned(userId, repositoryId);
+        RepositorySnapshot snapshot = latestResults.get(repositoryId);
+        return snapshot != null ? snapshot : sync(userId, repositoryId, SyncOptions.defaults());
+    }
+
     /** Repo phải tồn tại và thuộc kết nối GitHub của người dùng (kết quả đồng bộ có cả nội dung code). */
     private ConnectedRepository findOwned(String userId, UUID repositoryId) {
         ConnectedRepository repo = repositoryRepository.findById(repositoryId)
