@@ -631,27 +631,29 @@ export default function DocumentationManagement({ userId }) {
 
           </div>
 
-                  <div className="documentation-actions">
-            <button
-              type="submit"
-              disabled={
-                status === 'generating'
-                || isLoadingRepositories
-                || repositories.length === 0
-                || !TEMPLATES.some((item) => item.id === template)
-              }
-            >
-              {status === 'generating' ? 'Generating…' : 'Generate documentation'}
-            </button>
+```jsx
+<div className="documentation-actions">
+  <button
+    type="submit"
+    disabled={
+      status === 'generating'
+      || isLoadingRepositories
+      || repositories.length === 0
+      || !TEMPLATES.some((item) => item.id === template)
+    }
+  >
+    {status === 'generating' ? 'Generating…' : 'Generate documentation'}
+  </button>
 
-            <button
-              type="button"
-              className="documentation-secondary-button"
-              onClick={handleReset}
-            >
-              Reset
-            </button>
-          </div>
+  <button
+    type="button"
+    className="documentation-secondary-button"
+    onClick={handleReset}
+  >
+    Reset
+  </button>
+</div>
+```
 
         </form>
 
