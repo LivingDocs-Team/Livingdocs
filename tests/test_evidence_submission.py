@@ -3,7 +3,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-# Đảm bảo PYTHONPATH linh hoạt
+# Cấu hình PYTHONPATH động linh hoạt
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../ai-service")))
 
@@ -18,15 +18,18 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def reset_stores():
+    """Reset dữ liệu lưu trữ RAM trước từng test case"""
     STATUS_STORE.clear()
     SUBMISSION_STORE.clear()
     EVIDENCE_STORE.clear()
     yield
 
+# 1. Kiểm thử Status (404 khi không tồn tại)
 def test_get_status_not_found():
     response = client.get("/status/non-existent-job-xyz")
     assert response.status_code == 404
 
+# 2. Kiểm thử Evidence (404 khi chưa hoàn thành hoặc thiếu source)
 def test_get_evidence_job_not_found():
     response = client.get("/evidence/non-existent-job")
     assert response.status_code == 404
@@ -42,6 +45,7 @@ def test_get_evidence_missing_source():
     response = client.get("/evidence/job-empty")
     assert response.status_code == 404
 
+# 3. Kiểm thử Submit (400 khi thiếu evidence hoặc submit trùng)
 def test_submit_without_evidence_fails():
     STATUS_STORE["job-no-ev"] = {"status": "completed", "progress": 100}
     payload = {
