@@ -106,7 +106,9 @@ function GitHubConnection({ userId }) {
           <div className="github-connect-section">
             <div className="connection-status disconnected" role="status">
               <span className="status-dot" aria-hidden="true" />
-              GitHub not connected
+              {connection?.status === 'INVALID'
+                ? 'GitHub authorization expired. Reconnect GitHub.'
+                : 'GitHub not connected'}
             </div>
             <button
               className="github-connect-button"

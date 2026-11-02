@@ -237,8 +237,8 @@ export default function RepositoryManagement({ userId }) {
                           {inWorkspace && <span>Added to workspace</span>}
                         </div>
                         <div className="sync-details">
-                          <span className={`sync-status sync-${syncing ? 'syncing' : syncError ? 'failed' : repo.status === 'ERROR' ? 'failed' : repo.lastSyncedAt ? 'synced' : 'not-synced'}`}>
-                            {syncing ? 'Syncing…' : syncError || repo.status === 'ERROR' ? 'Sync failed' : repo.lastSyncedAt ? 'Synced' : 'Not synced'}
+                          <span className={`sync-status sync-${syncing ? 'syncing' : syncError ? 'failed' : repo.status === 'ERROR' ? 'failed' : repo.status === 'DISCONNECTED' ? 'not-synced' : repo.lastSyncedAt ? 'synced' : 'not-synced'}`}>
+                            {syncing ? 'Syncing…' : syncError || repo.status === 'ERROR' ? 'Sync failed' : repo.status === 'DISCONNECTED' ? 'Disconnected' : repo.lastSyncedAt ? 'Synced' : 'Not synced'}
                           </span>
                           {repo.lastSyncedAt && <p className="sync-last-time">Last synced: {new Date(repo.lastSyncedAt).toLocaleString()}</p>}
                           {syncError && <p className="sync-error" role="alert">{syncError}</p>}
