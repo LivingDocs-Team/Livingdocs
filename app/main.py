@@ -101,9 +101,16 @@ async def analyze_repository(request: RepoAnalysisRequest):
                 endpoints=endpoints,
             )
         )
-
     return RepoAnalysisResponse(
         scope=request.scope,
         target=request.target,
         files=analyzed_files,
     )
+    # Bổ sung các Route Healthcheck phục vụ CI Test
+@app.get("/")
+async def root():
+    return {"status": "ok", "generator": "online"}
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
