@@ -28,7 +28,10 @@ async function request(path, { method = 'GET', body, text = false } = {}) {
     ? await response.text()
     : await response.json().catch(() => ({}));
   if (!response.ok) {
-    if (response.status === 401) {
+    const code = !text && data && typeof data.code === 'string' ? data.code : undefined;
+    // A 401 without an error code comes from the Backend: the LivingDocs session has ended.
+    // A 401 with a code (for example GITHUB_REAUTH_REQUIRED) only means GitHub must be reconnected.
+    if (response.status === 401 && !code) {
       window.dispatchEvent(new Event('livingdocs:unauthenticated'));
     }
     const message = !text && data && typeof data.message === 'string'
@@ -36,7 +39,7 @@ async function request(path, { method = 'GET', body, text = false } = {}) {
       : `Request failed (HTTP ${response.status}).`;
     const error = new Error(message);
     error.status = response.status;
-    error.code = !text && data ? data.code : undefined;
+    error.code = code;
     error.retryAfter = response.headers.get('Retry-After');
     throw error;
   }
