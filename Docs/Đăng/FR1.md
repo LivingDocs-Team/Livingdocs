@@ -22,9 +22,9 @@ Developer liên kết tài khoản GitHub với tài khoản LivingDocs qua mộ
 | FR-GH-01.4 | Người dùng bấm Cancel trên GitHub (callback có `error` và không có `code`): báo lỗi `GITHUB_ACCESS_DENIED`, không tạo kết nối, không gọi GitHub. |
 | FR-GH-01.5 | Có cấu hình `FRONTEND_URL`: callback chuyển trình duyệt (`302`) về `FRONTEND_URL?github=connected&login=<login>`; lỗi thì về `?github=error&reason=<mã lỗi>` (`BAD_REQUEST`, `GITHUB_ACCESS_DENIED`, `GITHUB_API_ERROR`). Không cấu hình thì trả JSON `{"message": "Kết nối GitHub thành công", "githubLogin": "<login>"}`. |
 | FR-GH-01.6 | Access token và refresh token được mã hoá AES-256-GCM (IV 12 byte ngẫu nhiên cho mỗi lần mã hoá, tag 128 bit) trước khi ghi database. Không API nào trả token ra ngoài. Service không khởi động nếu `TOKEN_ENCRYPTION_KEY` thiếu, sai Base64 hoặc không đúng 32 byte. |
-| FR-GH-01.7 | Xem trạng thái kết nối: `connected`, `githubLogin`, `status` (`ACTIVE`, `INVALID`, `REVOKED`, hoặc `NOT_CONNECTED` khi chưa từng kết nối), `connectedAt`, `tokenExpiresAt`. `connected = true` chỉ khi `status = ACTIVE`. |
-| FR-GH-01.8 | Trước mọi lời gọi GitHub thay người dùng, lấy kết nối `ACTIVE` của người dùng; không có thì trả `409 GITHUB_NOT_CONNECTED`. Token còn dưới 5 phút là hết hạn thì tự làm mới bằng refresh token. Không có refresh token hoặc làm mới lỗi: kết nối chuyển `INVALID`, trả `401 GITHUB_REAUTH_REQUIRED`. |
-| FR-GH-01.9 | Khi GitHub trả HTTP 401 cho token đang dùng (ví dụ lúc liệt kê hoặc đồng bộ repo), kết nối chuyển `INVALID` để giao diện nhắc người dùng kết nối lại GitHub. |
+| FR-GH-01.7 | Xem trạng thái kết nối: `connected`, `githubLogin`, `status` (`ACTIVE`, `INVALID`, `REVOKED`, hoặc `NOT_CONNECTED` khi chưa từng kết nối), `connectedAt`, `tokenExpiresAt`. `connected = true` chỉ khi `status = ACTIVE`. Kết nối `ACTIVE` mà không giải mã được token đã lưu (ví dụ `TOKEN_ENCRYPTION_KEY` đã đổi) được báo là `INVALID`. |
+| FR-GH-01.8 | Trước mọi lời gọi GitHub thay người dùng, lấy kết nối `ACTIVE` của người dùng; không có thì trả `409 GITHUB_NOT_CONNECTED`. Token còn dưới 5 phút là hết hạn thì tự làm mới bằng refresh token. Không có refresh token, không giải mã được token, hoặc GitHub từ chối refresh token (`bad_refresh_token`): kết nối chuyển `INVALID`, trả `401 GITHUB_REAUTH_REQUIRED`. Lỗi mạng hoặc GitHub lỗi 5xx khi làm mới: giữ `ACTIVE`, trả `502 GITHUB_API_ERROR` để người dùng thử lại. Mỗi người dùng chỉ một request làm mới tại một thời điểm (refresh token chỉ dùng được một lần); request khác chờ rồi dùng token mới (LD-76). |
+| FR-GH-01.9 | Khi GitHub trả HTTP 401 cho token đang dùng (ví dụ lúc liệt kê hoặc đồng bộ repo), kết nối chuyển `INVALID` để giao diện nhắc người dùng kết nối lại GitHub. Chỉ cột trạng thái được cập nhật, token không bị ghi lại. |
 | FR-GH-01.10 | Ngắt kết nối: thu hồi quyền trên GitHub (`DELETE /applications/{client_id}/grant`; GitHub lỗi thì bỏ qua), xoá token đã lưu, đặt `REVOKED`, chuyển mọi repository của kết nối sang `DISCONNECTED`. Chưa kết nối mà ngắt thì trả `404`. |
 | FR-GH-01.11 | Kết nối lại khi đã có kết nối: cập nhật chính bản ghi cũ của người dùng (`user_id` là duy nhất), không tạo bản ghi mới. |
 
@@ -82,12 +82,13 @@ Bảng `github_connections` (Flyway `V1__init_github_integration.sql`), entity `
 | Bấm Cancel trên GitHub | `400 GITHUB_ACCESS_DENIED`, "Bạn chưa cho phép LivingDocs truy cập GitHub. Hãy bấm 'Kết nối GitHub' lại nếu muốn kết nối." (hoặc `reason=GITHUB_ACCESS_DENIED`) |
 | GitHub lỗi khi đổi code hoặc đọc tài khoản | `502 GITHUB_API_ERROR` (hoặc `reason=GITHUB_API_ERROR`); thông báo không chứa nội dung GitHub trả về |
 | Dùng chức năng cần GitHub khi chưa kết nối hoặc kết nối không còn `ACTIVE` | `409 GITHUB_NOT_CONNECTED` |
-| Token hết hạn và không làm mới được | `401 GITHUB_REAUTH_REQUIRED`, kết nối chuyển `INVALID` |
+| Token hết hạn và GitHub từ chối refresh token, hoặc không giải mã được token đã lưu | `401 GITHUB_REAUTH_REQUIRED`, kết nối chuyển `INVALID` |
+| Lỗi mạng hoặc GitHub lỗi 5xx khi làm mới token | `502 GITHUB_API_ERROR`, kết nối vẫn `ACTIVE` |
 | Ngắt kết nối khi chưa kết nối | `404 NOT_FOUND`, "Bạn chưa kết nối GitHub." |
 
 ## 7. Quy tắc nghiệp vụ
 
-- Mỗi người dùng LivingDocs có tối đa một kết nối GitHub; kết nối lại thì thay kết nối cũ.
+- Mỗi người dùng LivingDocs có tối đa một kết nối GitHub; kết nối lại thì thay kết nối cũ. Kết nối lại cùng tài khoản GitHub thì repo đang `DISCONNECTED` trở lại `CONNECTED`; kết nối bằng tài khoản GitHub khác thì repo cũ chuyển `DISCONNECTED` cho tới khi đồng bộ lại thành công (LD-76).
 - Token GitHub chỉ nằm trong database ở dạng mã hoá và không bao giờ gửi về trình duyệt.
 - Mỗi yêu cầu kết nối (`state`) chỉ dùng được một lần và hết hạn sau 10 phút.
 - Ngắt kết nối không xoá repo khỏi workspace, chỉ chuyển repo sang `DISCONNECTED`.
@@ -97,7 +98,8 @@ Bảng `github_connections` (Flyway `V1__init_github_integration.sql`), entity `
 - `authorizeUrl` chứa `client_id` và `state`; `installUrl` chứa `/apps/<GITHUB_APP_SLUG>/installations/new`.
 - Callback hợp lệ tạo kết nối `ACTIVE`; token trong database khác token gốc; API trạng thái không trả token.
 - Có `FRONTEND_URL` thì trình duyệt quay về frontend kèm kết quả trên URL; bấm Cancel thì về với `reason=GITHUB_ACCESS_DENIED`.
-- Token còn dưới 5 phút được tự làm mới; làm mới thất bại thì kết nối `INVALID` và API trả `GITHUB_REAUTH_REQUIRED`.
+- Token còn dưới 5 phút được tự làm mới; GitHub từ chối refresh token thì kết nối `INVALID` và API trả `GITHUB_REAUTH_REQUIRED`; lỗi mạng thì kết nối vẫn `ACTIVE`.
+- Hai request cùng làm mới token chỉ dùng refresh token một lần.
 - Ngắt kết nối thì `status = REVOKED`, `connected = false`, các repo của kết nối chuyển `DISCONNECTED`.
 
 ## 9. Kiểm thử
@@ -109,4 +111,6 @@ Test nằm trong `services/github-integration-service/src/test/java/com/livingdo
 | `security/TokenEncryptorTest` | 5 | Mã hoá rồi giải mã ra đúng chuỗi gốc; cùng đầu vào cho hai bản mã khác nhau; `null` giữ nguyên; từ chối khoá sai độ dài; từ chối thiếu khoá |
 | `security/OAuthStateStoreTest` | 3 | State chỉ dùng một lần; state lạ bị từ chối; state quá 10 phút bị từ chối |
 | `controller/GitHubConnectionControllerTest` | 6 | Không có `FRONTEND_URL` thì trả JSON; thành công thì chuyển về frontend; state sai, GitHub lỗi, bấm Cancel thì chuyển về với đúng `reason`; bấm Cancel không gọi service |
+| `security/EncryptedStringConverterTest` | 4 | Token mã hoá bằng khoá khác hoặc dữ liệu hỏng được coi như không có token (không lỗi 500) |
+| `GitHubErrorHandlingTest` | 9 (dùng chung với FR-GH-02) | Làm mới token: lỗi mạng và 5xx giữ `ACTIVE`, GitHub từ chối thì `INVALID`, hai request đồng thời chỉ làm mới một lần; token mã hoá bằng khoá khác thì trạng thái `INVALID`, API trả `GITHUB_REAUTH_REQUIRED` và vẫn ngắt kết nối được; kết nối lại cùng tài khoản hoặc tài khoản khác; thêm repo có id không được cấp quyền thì không lưu repo nào; đường dẫn không tồn tại vẫn `404` |
 | `GitHubIntegrationFlowTest` | 4 (dùng chung với FR-GH-02) | Cả luồng kết nối → xem trạng thái (không lộ token, token trong database đã mã hoá) → ngắt kết nối; callback với state giả bị `400`; thiếu `X-User-Id` bị `400`; GitHub trả 401 thì kết nối `INVALID` và API trả `GITHUB_REAUTH_REQUIRED` |
