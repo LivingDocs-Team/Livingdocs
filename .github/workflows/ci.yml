@@ -242,7 +242,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f "ai-service/requirements.txt" ]; then python -m pip install -r ai-service/requirements.txt; fi
-          # Cài đặt bổ sung pytest-html để tương thích với pytest.ini của repo
+          # Cài đặt pytest-html để khắc phục triệt để lỗi đuôi html từ pytest.ini
           python -m pip install uvicorn httpx fastapi pytest pytest-html anthropic javalang
 
       - name: Run Pytest Integration Suite
@@ -259,7 +259,7 @@ jobs:
             python -m pytest -v ai-service/tests/test_evidence_submission.py
           fi
 
-          # 2. Khôi phục bài test tích hợp gốc nguyên bản theo yêu cầu 5 của Lead
+          # 2. Khôi phục bài test tích hợp nguyên bản theo yêu cầu của Lead
           if [ -d "ai-service/tests/integration" ]; then
             python -m pytest -v ai-service/tests/integration -m "not live"
           elif [ -d "tests/integration" ]; then
