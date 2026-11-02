@@ -631,7 +631,6 @@ export default function DocumentationManagement({ userId }) {
 
           </div>
 
-```jsx
 <div className="documentation-actions">
   <button
     type="submit"
@@ -653,7 +652,7 @@ export default function DocumentationManagement({ userId }) {
     Reset
   </button>
 </div>
-```
+
 
         </form>
 
