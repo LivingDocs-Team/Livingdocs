@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 
 from .confidence import METHOD, level_of
 from .generator import DocGenerator, get_generator
+from .normalize import normalize
 from .models import (FileReport, FileResult, FileResultStatus, GenerateRequest, Job, JobReport,
                      JobStatus, Scope, Template, now)
 from .renderer import render_overview
@@ -51,6 +52,17 @@ class JobStore:
 jobs = JobStore()
 
 
+def skip_reason(error: Optional[str], status: str) -> str:
+    """Analyzer message for a skipped file. Some parsers return only a label such as
+    'JavaSyntaxError: ' with no detail; say so instead of showing an empty reason."""
+    text = (error or "").strip()
+    if not text:
+        return f"analyzer status '{status}'"
+    if text.endswith(":"):
+        return f"{text.rstrip(':').strip()} (analyzer status '{status}', no details)"
+    return text
+
+
 def run_job(job_id: str, req: GenerateRequest, generator: Optional[DocGenerator] = None,
             template: Optional[Template] = None) -> None:
     """Executed by FastAPI BackgroundTasks. One bad file never stops the whole job.
@@ -65,6 +77,8 @@ def run_job(job_id: str, req: GenerateRequest, generator: Optional[DocGenerator]
         if tpl is None:
             raise ValueError(f"Template '{req.template_id}' not found")
         gen = generator or get_generator()
+        for f in req.files:
+            normalize(f)                  # unique entity names, module from path
         index = build_index(req)          # related code + documentation context for retrieval
         total = len(req.files)
         jobs.update(job_id, status=JobStatus.running, message="Generating documentation",
@@ -74,7 +88,7 @@ def run_job(job_id: str, req: GenerateRequest, generator: Optional[DocGenerator]
         for i, f in enumerate(req.files, start=1):
             jobs.update(job_id, message=f"Documenting {f.path}")
             if f.status.value != "ok":
-                reason = f.error or f"analyzer status '{f.status.value}'"
+                reason = skip_reason(f.error, f.status.value)
                 skipped.append((f.path, reason))
                 results.append(FileResult(path=f.path, status=FileResultStatus.skipped,
                                           message=reason))
