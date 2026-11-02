@@ -21,6 +21,8 @@ Optional request body:
 ```
 
 `templateId` and `outputLanguage` may be omitted. The AI service defaults are `default` and `vi`.
+`templateId` is an `id` from `GET /api/documentation/templates`; an unknown id returns
+`400 TEMPLATE_NOT_FOUND`, an invalid setting `400 GENERATION_REQUEST_INVALID`.
 The selected repository must belong to the user and must have a latest sync with source content.
 Run `POST /api/repositories/{repositoryId}/sync` first when the latest snapshot is unavailable.
 
@@ -39,6 +41,31 @@ at `POST /api/v1/analyze-repo`, then forwards the analyzer response to the AI se
 
 The job can only be fetched by the user who started it. Job ownership is held in service memory;
 restarting either service loses its jobs, so generate again after a restart.
+
+## Documentation templates
+
+Templates are stored by the AI service and shared by all users. Built-in templates (`default`,
+`api-reference`, `brief`, `built_in: true`) are read-only.
+
+| Method | Endpoint | Response |
+|---|---|---|
+| GET | `/api/documentation/templates` | Template list, built-in first: `id`, `name`, `description`, `instructions`, `sections`, `built_in` |
+| GET | `/api/documentation/templates/sections` | `{"sections": ["Overview", "Classes", "Functions", "API Endpoints"], …}` |
+| GET | `/api/documentation/templates/{id}` | One template |
+| POST | `/api/documentation/templates` | `201` + the new template |
+| PUT | `/api/documentation/templates/{id}` | The updated template |
+| DELETE | `/api/documentation/templates/{id}` | `204` |
+
+Body for POST and PUT:
+
+```json
+{"name":"Onboarding","description":"For new team members",
+ "instructions":"One sentence per function.","sections":["Functions","Overview"]}
+```
+
+Errors: `400 TEMPLATE_INVALID` (message says which field, e.g. an unknown section),
+`409 TEMPLATE_NAME_TAKEN`, `403 TEMPLATE_READ_ONLY` (built-in template), `404 TEMPLATE_NOT_FOUND`,
+`502 AI_SERVICE_FAILED`. The Backend BFF forwards `PUT` for these routes.
 
 ## Errors
 

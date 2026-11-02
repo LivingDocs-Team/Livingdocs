@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 from .confidence import METHOD, level_of
 from .generator import DocGenerator, get_generator
 from .models import (FileReport, FileResult, FileResultStatus, GenerateRequest, Job, JobReport,
-                     JobStatus, Scope, now)
+                     JobStatus, Scope, Template, now)
 from .renderer import render_overview
 from .retrieval import build_index, retrieve
 from .templates import templates
@@ -18,9 +18,11 @@ class JobStore:
         self._jobs: Dict[str, Job] = {}
         self._reports: Dict[str, JobReport] = {}
 
-    def create(self, req: GenerateRequest) -> Job:
+    def create(self, req: GenerateRequest, tpl: Optional[Template] = None) -> Job:
         job = Job(id=uuid.uuid4().hex, scope=req.scope, target=req.target,
-                  template_id=req.template_id, files_total=len(req.files))
+                  template_id=req.template_id, files_total=len(req.files),
+                  template_name=tpl.name if tpl else None,
+                  template_sections=list(tpl.sections) if tpl else [])
         with self._lock:
             self._jobs[job.id] = job
         return job
@@ -49,19 +51,24 @@ class JobStore:
 jobs = JobStore()
 
 
-def run_job(job_id: str, req: GenerateRequest, generator: Optional[DocGenerator] = None) -> None:
-    """Executed by FastAPI BackgroundTasks. One bad file never stops the whole job."""
+def run_job(job_id: str, req: GenerateRequest, generator: Optional[DocGenerator] = None,
+            template: Optional[Template] = None) -> None:
+    """Executed by FastAPI BackgroundTasks. One bad file never stops the whole job.
+
+    `template` is the snapshot taken when the job was created; without it the template is
+    looked up now."""
     warnings: List[str] = []
     results: List[FileResult] = []
     file_reports: List[FileReport] = []
     try:
-        tpl = templates.get(req.template_id)
+        tpl = template or templates.get(req.template_id)
         if tpl is None:
             raise ValueError(f"Template '{req.template_id}' not found")
         gen = generator or get_generator()
         index = build_index(req)          # related code + documentation context for retrieval
         total = len(req.files)
-        jobs.update(job_id, status=JobStatus.running, message="Generating documentation")
+        jobs.update(job_id, status=JobStatus.running, message="Generating documentation",
+                    template_name=tpl.name, template_sections=list(tpl.sections))
 
         docs, documented, skipped = [], [], []
         for i, f in enumerate(req.files, start=1):
@@ -99,13 +106,15 @@ def run_job(job_id: str, req: GenerateRequest, generator: Optional[DocGenerator]
         # job confidence = mean over every documented entity (files weighted by size)
         scores = [e.confidence for fr in file_reports for e in fr.entities]
         overall = round(sum(scores) / len(scores), 2) if scores else None
-        jobs.set_report(JobReport(job_id=job_id, confidence=overall, level=level_of(overall),
+        jobs.set_report(JobReport(job_id=job_id, template_id=tpl.id, template_name=tpl.name,
+                                  confidence=overall, level=level_of(overall),
                                   method=METHOD, files=file_reports))
 
         if req.scope == Scope.file and len(docs) == 1 and not skipped:
             result = docs[0]
         else:
-            overview = render_overview(req.target, documented, skipped, req.output_language, overall)
+            overview = render_overview(req.target, documented, skipped, req.output_language, overall,
+                                       template_name=tpl.name)
             result = "\n\n---\n\n".join([overview, *docs])
 
         msg = "Completed" if not warnings else f"Completed with {len(warnings)} warning(s)"

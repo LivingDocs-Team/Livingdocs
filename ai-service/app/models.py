@@ -129,16 +129,57 @@ class GenerateRequest(BaseModel):
 
 # ---------- Managed templates ----------
 
+# Sections a template can contain, in their canonical spelling (rendered by renderer.py).
+SECTION_NAMES = ["Overview", "Classes", "Functions", "API Endpoints"]
+# Which analysed entities each section documents (used to scope warnings and scores).
+SECTION_KINDS = {"Overview": set(), "Classes": {"class", "method"},
+                 "Functions": {"function"}, "API Endpoints": {"endpoint"}}
+
+
 class TemplateIn(BaseModel):
-    name: str
-    description: str = ""
-    instructions: str                 # how the AI should write the docs
-    sections: List[str]               # ordered headings each file doc must contain
+    name: str = Field(min_length=1, max_length=80)
+    description: str = Field(default="", max_length=300)
+    instructions: str = Field(min_length=1, max_length=4000)  # how the AI should write the docs
+    sections: List[str] = Field(min_length=1)                  # ordered headings of every file doc
+
+    @field_validator("name", "instructions")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("must not be blank")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        return v.strip()
+
+    @field_validator("sections")
+    @classmethod
+    def _check_sections(cls, v: List[str]) -> List[str]:
+        canonical = {s.lower(): s for s in SECTION_NAMES}
+        out: List[str] = []
+        for raw in v:
+            name = canonical.get(str(raw).strip().lower())
+            if name is None:
+                raise ValueError(f"unknown section '{raw}'; allowed: {', '.join(SECTION_NAMES)}")
+            if name in out:
+                raise ValueError(f"duplicate section '{name}'")
+            out.append(name)
+        return out
 
 
 class Template(TemplateIn):
     id: str
     built_in: bool = False
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class TemplateSections(BaseModel):
+    sections: List[str]
+    documents: Dict[str, List[str]]   # section -> entity kinds it documents
 
 
 # ---------- Generation jobs (status + result) ----------
@@ -209,6 +250,8 @@ class FileReport(BaseModel):
 
 class JobReport(BaseModel):
     job_id: str
+    template_id: Optional[str] = None
+    template_name: Optional[str] = None
     confidence: Optional[float] = None
     level: Optional[ConfidenceLevel] = None
     method: str = ""                          # how the score is computed (human readable)
@@ -220,6 +263,8 @@ class Job(BaseModel):
     scope: Scope
     target: str
     template_id: str
+    template_name: Optional[str] = None
+    template_sections: List[str] = Field(default_factory=list)  # snapshot used for this job
     status: JobStatus = JobStatus.pending
     progress: float = 0.0             # 0.0 -> 1.0
     message: str = "Queued"

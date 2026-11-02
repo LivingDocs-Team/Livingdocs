@@ -17,6 +17,10 @@ __pycache__/
 .pytest_cache/
 *.py[cod]
 
+# Test reports written by pytest.ini
+test-report.html
+test-results.xml
+
 # IDE and operating system
 .vscode/
 .idea/

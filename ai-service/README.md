@@ -33,10 +33,29 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | GET | `/jobs/{id}` | Status, progress, message, error, result |
 | GET | `/jobs/{id}/result` | Generated Markdown |
 | GET | `/jobs/{id}/report` | Evidence and confidence per file and entity |
-| GET/POST | `/templates` | List / create templates |
+| GET/POST | `/templates` | List (built-in first, then custom by name) / create templates |
+| GET | `/templates/sections` | Sections a template may contain |
 | GET/PUT/DELETE | `/templates/{id}` | Read / update / delete (built-ins are read-only) |
 
 Built-in templates: `default`, `api-reference`, `brief`.
+
+### Documentation templates
+
+A template = `name` (unique, case-insensitive), `description`, `instructions` (writing style
+for the AI) and an ordered list of `sections` taken from `Overview`, `Classes`, `Functions`,
+`API Endpoints` (any letter case is accepted and stored in this spelling).
+
+- Every generated file has exactly the template's sections, in the template's order. The prompt
+  tells the AI which parts to fill; warnings and confidence scores cover only the entities the
+  template documents (e.g. `api-reference` scores endpoints only).
+- A job keeps a snapshot of its template (`template_id`, `template_name`, `template_sections` on
+  the job, `template_id` / `template_name` on the report): editing or deleting the template
+  later does not change a running job. The repository overview names the template used.
+- Custom templates are saved to `TEMPLATES_FILE` (default `data/templates.json`, written
+  atomically) and survive a restart. Set `TEMPLATES_FILE=` (empty) to keep them in memory only.
+  An unreadable file is renamed to `templates.corrupt-<time>.json` and the service starts with
+  the built-in templates.
+- Errors: `422` invalid template, `409` duplicate name, `403` built-in template, `404` unknown id.
 
 ### Example request
 
@@ -113,11 +132,11 @@ python scripts/run_sample.py                          # sample_data/sample_analy
 python scripts/run_sample.py path/to/real_analysis.json
 ```
 
-Environment variables: `ANTHROPIC_API_KEY`, `LLM_MODEL` (default `claude-sonnet-5-5`),
+Environment variables: `TEMPLATES_FILE` (default `data/templates.json`), `ANTHROPIC_API_KEY`, `LLM_MODEL` (default `claude-sonnet-5-5`),
 `LLM_MAX_TOKENS` (4096), `LLM_TIMEOUT` seconds (60), `LLM_MAX_ATTEMPTS` (3).
 
 ## Notes / next steps
 
-- Jobs and templates are stored in memory; they reset on restart. Swap `JobStore` /
-  `TemplateStore` for a database when the backend is ready.
+- Jobs are stored in memory and reset on restart. Custom templates are saved to
+  `TEMPLATES_FILE`; templates are shared by all users (the AI service has no user accounts).
 - The `files` input format should match what the LivingDocs code analyzer outputs.

@@ -3,3 +3,5 @@
 !app/**
 !code-analyzer/
 !code-analyzer/requirements.txt
+**/__pycache__
+**/*.pyc
