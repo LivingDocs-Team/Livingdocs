@@ -52,7 +52,7 @@ Endpoint cần header `X-User-Id` như các API khác của service (trình duy�
 3. Gửi nguyên body sang Code Analyzer `POST /api/v1/analyze-repo`; Code Analyzer trả `{"scope", "target", "files": [...]}` gồm lớp, hàm và endpoint của từng file.
 4. Gửi kết quả đó sang AI Service `POST /generate` để sinh tài liệu Markdown (phần của Linh, FR-AI-01).
 
-Từ LD-396, bước 2–4 chạy tự động khi Developer bấm Generate documentation.
+Từ LD-396, bước 2–4 chạy tự động khi Developer bấm Generate documentation. Nếu chưa có kết quả đồng bộ trong bộ nhớ (repo chưa đồng bộ, hoặc service vừa khởi động lại), bước sinh tài liệu tự đồng bộ lại với tuỳ chọn mặc định rồi mới phân tích (LD-77).
 
 ## 5. Luồng lỗi
 

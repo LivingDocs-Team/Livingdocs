@@ -19,14 +19,14 @@ Developer đã kết nối GitHub chọn các repository mà GitHub App được
 |---|---|
 | FR-GH-02.1 | Liệt kê các repo mà GitHub App được cấp quyền: lấy mọi installation của người dùng, rồi lấy repo của từng installation (100 repo mỗi trang, tối đa 10 trang mỗi installation). Mỗi repo gồm `githubRepoId`, `fullName`, `privateRepo`, `defaultBranch`, `htmlUrl`. |
 | FR-GH-02.2 | Thêm một hoặc nhiều repo vào workspace theo danh sách `githubRepoIds` (ít nhất 1). Id trùng trong cùng request chỉ tính một lần. |
-| FR-GH-02.3 | Chỉ thêm được repo nằm trong danh sách GitHub App được cấp quyền; id không có trong danh sách thì từ chối với `400`. |
+| FR-GH-02.3 | Chỉ thêm được repo nằm trong danh sách GitHub App được cấp quyền; có id không nằm trong danh sách thì từ chối cả request với `400`, không lưu repo nào. |
 | FR-GH-02.4 | Repo đã có trong workspace (cùng workspace, cùng kết nối, cùng `githubRepoId`) thì bỏ qua, không tạo bản ghi mới. |
 | FR-GH-02.5 | Repo mới thêm lưu `fullName`, `defaultBranch`, `privateRepo`, `htmlUrl` lấy từ GitHub, trạng thái `CONNECTED`, `lastSyncedAt = null`. API trả về danh sách các repo vừa thêm (`201`). |
 | FR-GH-02.6 | Xem danh sách repo của workspace, sắp theo `fullName`. Người dùng chưa từng kết nối GitHub thì nhận danh sách rỗng. |
 | FR-GH-02.7 | Xem chi tiết và gỡ một repo theo `id` (UUID). Gỡ repo chỉ xoá liên kết trong LivingDocs, không thay đổi gì trên GitHub. |
 | FR-GH-02.8 | Workspace phải là workspace cá nhân `ws-{userId}` của người dùng đã xác thực; workspace khác thì từ chối với `403`. |
 | FR-GH-02.9 | Chỉ chủ repo (repo thuộc kết nối GitHub của người dùng) được xem chi tiết hoặc gỡ repo; người khác nhận `403`. |
-| FR-GH-02.10 | Repo có một trong bốn trạng thái: `CONNECTED` (sẵn sàng), `SYNCING` (đang đồng bộ), `ERROR` (repo không còn đọc được trên GitHub), `DISCONNECTED` (người dùng đã ngắt kết nối GitHub). |
+| FR-GH-02.10 | Repo có một trong bốn trạng thái: `CONNECTED` (sẵn sàng), `SYNCING` (đang đồng bộ), `ERROR` (repo không còn đọc được trên GitHub), `DISCONNECTED` (người dùng đã ngắt kết nối GitHub, hoặc đã kết nối lại bằng tài khoản GitHub khác). |
 | FR-GH-02.11 | GitHub báo token không hợp lệ (401) khi liệt kê repo thì kết nối chuyển `INVALID` và trả `401 GITHUB_REAUTH_REQUIRED`; lỗi GitHub khác trả `502 GITHUB_API_ERROR`. |
 
 ## 3. API
@@ -84,7 +84,7 @@ Ràng buộc duy nhất `(workspace_id, github_repo_id)`; index theo `workspace_
 | Chưa kết nối GitHub, hoặc kết nối không còn `ACTIVE` | `409 GITHUB_NOT_CONNECTED` |
 | Token GitHub không còn hợp lệ | `401 GITHUB_REAUTH_REQUIRED`, kết nối chuyển `INVALID` |
 | `githubRepoIds` rỗng | `400 VALIDATION_ERROR`, "githubRepoIds: phải chọn ít nhất 1 repository" |
-| Repo không nằm trong danh sách GitHub App được cấp quyền | `400 BAD_REQUEST`, "Repository <id> không nằm trong danh sách repo mà GitHub App được phép truy cập." |
+| Có repo không nằm trong danh sách GitHub App được cấp quyền | `400 BAD_REQUEST`, "Repository <id>[, <id>…] không nằm trong danh sách repo mà GitHub App được phép truy cập."; không repo nào được lưu |
 | Workspace không phải `ws-{userId}` | `403 FORBIDDEN`, "Workspace này không thuộc người dùng đã xác thực." |
 | Xem hoặc gỡ repo thuộc kết nối của người khác | `403 FORBIDDEN`, "Repository này không thuộc kết nối GitHub của bạn." |
 | Repo không tồn tại | `404 NOT_FOUND`, "Không tìm thấy repository <id>" |
@@ -97,7 +97,7 @@ Ràng buộc duy nhất `(workspace_id, github_repo_id)`; index theo `workspace_
 - Chỉ repo mà GitHub App được cấp quyền mới thêm được vào workspace.
 - Một repo chỉ được liên kết với một workspace một lần; thêm lại không thay đổi gì.
 - Gỡ repo chỉ xoá liên kết trong LivingDocs, không ảnh hưởng tới GitHub.
-- Giới hạn hiện tại: nếu một request vừa có repo hợp lệ vừa có repo không được cấp quyền, các repo hợp lệ đứng trước repo lỗi vẫn được lưu rồi request mới báo `400`.
+- Request thêm nhiều repo được kiểm tra hết trước khi lưu: có một repo không được cấp quyền thì không lưu repo nào (LD-76).
 
 ## 8. Tiêu chí chấp nhận
 
