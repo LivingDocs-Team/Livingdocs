@@ -37,10 +37,13 @@ public class DocumentationGenerationService {
         this.aiServiceClient = aiServiceClient;
     }
 
-    /** Analyze the latest authorized repository snapshot and start an AI documentation job. */
+    /**
+     * Analyze the latest authorized repository snapshot and start an AI documentation job.
+     * The snapshot is kept in memory only: after a restart the repository is synchronized again (LD-77).
+     */
     public JsonNode generate(String userId, UUID repositoryId,
             DocumentationGenerationRequest request) {
-        RepositorySnapshot snapshot = repositorySyncService.latest(userId, repositoryId);
+        RepositorySnapshot snapshot = repositorySyncService.latestOrSync(userId, repositoryId);
         AnalysisInput input = AnalysisInput.from(snapshot);
         if (input.files().isEmpty()) {
             throw ApiException.badRequest("The latest repository sync contains no source files with content.");

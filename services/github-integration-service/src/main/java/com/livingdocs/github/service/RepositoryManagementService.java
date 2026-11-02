@@ -51,13 +51,18 @@ public class RepositoryManagementService {
         Map<Long, GitHubRepo> accessible = fetchAccessibleRepos(userId).stream()
                 .collect(Collectors.toMap(GitHubRepo::id, Function.identity(), (a, b) -> a));
 
+        List<Long> requested = githubRepoIds.stream().distinct().toList();
+        // Kiểm tra hết trước khi lưu (LD-76): có id không được cấp quyền thì không lưu repo nào.
+        List<Long> notAllowed = requested.stream().filter(id -> !accessible.containsKey(id)).toList();
+        if (!notAllowed.isEmpty()) {
+            throw ApiException.badRequest("Repository "
+                    + notAllowed.stream().map(String::valueOf).collect(Collectors.joining(", "))
+                    + " không nằm trong danh sách repo mà GitHub App được phép truy cập.");
+        }
+
         List<RepositoryResponse> added = new ArrayList<>();
-        for (Long repoId : githubRepoIds.stream().distinct().toList()) {
+        for (Long repoId : requested) {
             GitHubRepo repo = accessible.get(repoId);
-            if (repo == null) {
-                throw ApiException.badRequest("Repository " + repoId
-                        + " không nằm trong danh sách repo mà GitHub App được phép truy cập.");
-            }
             if (repositoryRepository.existsByWorkspaceIdAndConnectionIdAndGithubRepoId(
                     workspaceId, connection.getId(), repoId)) {
                 continue; // đã thêm rồi thì bỏ qua

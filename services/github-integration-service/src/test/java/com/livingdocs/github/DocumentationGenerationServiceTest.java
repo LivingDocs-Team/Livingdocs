@@ -68,7 +68,7 @@ class DocumentationGenerationServiceTest {
 
         generationService = new DocumentationGenerationService(
                 repositorySyncService, analyzerClient, aiClient);
-        when(repositorySyncService.latest(USER_ID, REPOSITORY_ID)).thenReturn(snapshot());
+        when(repositorySyncService.latestOrSync(USER_ID, REPOSITORY_ID)).thenReturn(snapshot());
     }
 
     @Test
@@ -210,7 +210,7 @@ class DocumentationGenerationServiceTest {
         RepositorySnapshot emptySnapshot = new RepositorySnapshot(
                 snapshot().repository(), "main", snapshot().headCommit(), Map.of(), List.of(), List.of(),
                 new RepositorySnapshot.SyncStats(1, 0, 0, 1, false, false), List.of(), Instant.now());
-        when(repositorySyncService.latest(USER_ID, REPOSITORY_ID)).thenReturn(emptySnapshot);
+        when(repositorySyncService.latestOrSync(USER_ID, REPOSITORY_ID)).thenReturn(emptySnapshot);
 
         ApiException error = assertThrows(ApiException.class,
                 () -> generationService.generate(USER_ID, REPOSITORY_ID, null));
