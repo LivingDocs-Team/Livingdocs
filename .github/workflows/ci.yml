@@ -252,17 +252,17 @@ jobs:
           python - <<'EOF'
           import app.main as m
           print("FILE:", m.__file__)
-          print("ROUTES:", sorted(r.path for r in m.app.routes))
+          print("ROUTES:", sorted(m.app.openapi()["paths"].keys()))
           EOF
 
-      # Test LD-106: chỉ để thư mục gốc trong PYTHONPATH để "app" luôn là app/ ở gốc repo
+      # Test LD-106: PYTHONPATH chỉ chứa thư mục gốc để "app" luôn là app/ ở gốc repo
       - name: LD-106 evidence submission tests
         env:
           PYTHONPATH: "${{ github.workspace }}"
           ANTHROPIC_API_KEY: "mock_ci_key_for_integration_testing"
         run: |
           if [ -f "tests/test_evidence_submission.py" ]; then
-            python -m pytest -v tests/test_evidence_submission.py
+            python -m pytest -v tests/test_evidence_submission.py tests/test_evidence_workflow.py
           elif [ -f "ai-service/tests/test_evidence_submission.py" ]; then
             python -m pytest -v ai-service/tests/test_evidence_submission.py
           else
