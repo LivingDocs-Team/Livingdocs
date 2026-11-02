@@ -4,9 +4,7 @@ import sys
 import pytest
 from fastapi.testclient import TestClient
 
-# Chỉ trỏ vào thư mục gốc repo để "app" luôn là app/ ở gốc
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from app.main import app
 from app.submission import STATUS_STORE, SUBMISSION_STORE, EVIDENCE_STORE
@@ -23,10 +21,12 @@ def reset_stores():
 
 
 def test_routes_are_registered():
-    paths = {r.path for r in app.routes}
+    # Dùng OpenAPI schema vì app.routes không còn ổn định giữa các bản FastAPI
+    paths = set(app.openapi()["paths"].keys())
     assert "/submit" in paths
     assert "/status/{job_id}" in paths
     assert "/evidence/{job_id}" in paths
+    assert "/jobs" in paths
 
 
 def test_get_status_not_found():
