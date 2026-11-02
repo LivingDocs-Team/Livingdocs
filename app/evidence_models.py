@@ -25,3 +25,7 @@ class SubmissionResponse(BaseModel):
     job_id: str
     status: str
     timestamp: str
+class JobCreateRequest(BaseModel):
+    job_id: str
+    repo_path: str      # đường dẫn tương đối so với REPOS_BASE_DIR
+    commit_hash: str
