@@ -941,6 +941,11 @@ button:disabled {
   background: #f1f5f9;
 }
 
+.sync-disconnected {
+  color: #92400e;
+  background: #fef3c7;
+}
+
 .sync-syncing {
   color: #1d4ed8;
   background: #dbeafe;
