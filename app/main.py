@@ -1,4 +1,7 @@
+import os
 
+# Cấu hình API Key cho AI Service
+AI_API_KEY = os.getenv("AI_SERVICE_API_KEY", "")
 from fastapi import FastAPI, HTTPException, status
 
 from app.models import RepoAnalysisRequest, RepoAnalysisResponse, FileAnalysis
