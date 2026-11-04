@@ -1,7 +1,7 @@
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 
-# --- ERR-BE-02: Khai báo trường của Class ---
+# --- ERR-BE-02: Khai báo thông tin thuộc tính/trường dữ liệu ---
 class FieldInfo(BaseModel):
     name: str
     type: Optional[str] = None
@@ -28,7 +28,7 @@ class Endpoint(BaseModel):
     lineno: Optional[int] = None                          # ERR-BE-01
     end_lineno: Optional[int] = None                      # ERR-BE-01
 
-# --- ERR-BE-03: Workflow Evidence & Submission (LD-106) ---
+# --- ERR-BE-03 & LD-106: Workflow Evidence & Submission ---
 class GroundingEvidence(BaseModel):
     file_path: str
     start_line: int
