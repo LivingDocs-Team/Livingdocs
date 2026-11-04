@@ -13,3 +13,5 @@ WORKDIR /app
 COPY --from=build /app/target/github-integration-service-*.jar app.jar
 EXPOSE 8082
 ENTRYPOINT ["java", "-jar", "app.jar"]
+COPY entrypoint.sh /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh
