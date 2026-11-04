@@ -94,6 +94,9 @@ class FakeApi:
 
         if (request.method, path) == ("GET", "/api/auth/csrf"):
             return route.fulfill(status=200, json={"token": "csrf-ld105"})
+        if (request.method, path) == ("GET", "/api/auth/me"):
+            # LD-396: App restores the session from the backend on load
+            return route.fulfill(status=200, json={"id": USER_ID, "email": "ld105@example.com"})
         if (request.method, path) == ("GET", f"/api/workspaces/{WORKSPACE_ID}/repositories"):
             return route.fulfill(status=200, json=[{
                 "id": REPOSITORY_ID, "workspaceId": WORKSPACE_ID, "githubRepoId": 4242,
