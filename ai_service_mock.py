@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 import uvicorn
 
-app = FastAPI(title="Mock AI Service")
+app = FastAPI(title="AI Service Mock for CI Port 8001")
 
 @app.get("/")
 async def root():
