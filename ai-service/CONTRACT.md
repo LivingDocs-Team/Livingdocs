@@ -59,6 +59,16 @@ thiếu thì bằng chứng chỉ trỏ được tới tên file thay vì `file.
 - Truyền `repo_path` khi đọc file để `path` là đường dẫn tương đối (`app/x.py`), vì `path` xuất
   hiện trong tài liệu và trong bằng chứng.
 
+## ai-service chuẩn hoá dữ liệu nhận vào
+
+- Tên trùng trong một file được đổi để mỗi thực thể có bằng chứng và mô tả riêng: overload Java
+  `get(Long)` / `get(String)`; còn trùng (định nghĩa lại hàm Python, hai lớp lồng cùng tên) thì
+  thêm `#2`, `#3`. Tên mới xuất hiện trong prompt, tài liệu và `/report`.
+- Thiếu `module` thì suy ra từ `path` (`app/services/cart.py` → `app.services.cart`; Java lấy thư
+  mục sau `src/main/java/`).
+- Docstring kiểu Google (`Args:`/`Returns:`), NumPy, reST (`:param x:`) và Javadoc (`@param`)
+  được đọc để điền mô tả tham số và giá trị trả về khi AI không mô tả.
+
 ## Kết quả trả về (cho frontend, LD-298/304)
 
 `GET /jobs/{id}` trả về `status` (`pending`/`running`/`completed`/`failed`), `progress`, `message`,
