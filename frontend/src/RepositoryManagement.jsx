@@ -15,6 +15,7 @@ export default function RepositoryManagement({ userId }) {
   const [syncErrors, setSyncErrors] = useState({});
   const [syncingIds, setSyncingIds] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState('DISCONNECTED');
   const [isLoading, setIsLoading] = useState(Boolean(userId));
   const [isAdding, setIsAdding] = useState(false);
 
@@ -23,6 +24,7 @@ export default function RepositoryManagement({ userId }) {
       setAvailableRepositories([]);
       setWorkspaceRepositories([]);
       setIsConnected(false);
+      setConnectionStatus('DISCONNECTED');
       setIsLoading(false);
       return;
     }
@@ -31,10 +33,14 @@ export default function RepositoryManagement({ userId }) {
     setError('');
     try {
       const connection = await githubApi('/api/github/connection', { userId });
-      setIsConnected(Boolean(connection.connected));
+      const nextConnectionStatus = String(connection.status || (connection.connected ? 'CONNECTED' : 'DISCONNECTED')).toUpperCase();
+      setConnectionStatus(nextConnectionStatus);
+      const canUseConnection = Boolean(connection.connected)
+        && !['INVALID', 'REVOKED', 'DISCONNECTED'].includes(nextConnectionStatus);
+      setIsConnected(canUseConnection);
       const workspace = await githubApi(`/api/workspaces/${workspaceId}/repositories`, { userId });
       setWorkspaceRepositories(workspace || []);
-      const available = connection.connected
+      const available = canUseConnection
         ? await githubApi('/api/github/repos/available', { userId })
         : [];
       setAvailableRepositories(available || []);
@@ -147,7 +153,11 @@ export default function RepositoryManagement({ userId }) {
     }
   }
 
-  const syncedCount = workspaceRepositories.filter((repo) => repo.lastSyncedAt).length;
+  const syncedCount = isConnected
+    ? workspaceRepositories.filter((repo) => (
+      repo.lastSyncedAt && !['DISCONNECTED', 'INVALID', 'REVOKED'].includes(String(repo.status || '').toUpperCase())
+    )).length
+    : 0;
 
   return (
     <main className="page">
@@ -162,14 +172,22 @@ export default function RepositoryManagement({ userId }) {
             <section className="sync-connection-panel">
               <div>
                 <strong>GitHub connection</strong>
-                <p>{isConnected ? 'Connected to GitHub.' : 'GitHub is not connected.'}</p>
+                <p>{connectionStatus === 'INVALID'
+                  ? 'GitHub authorization is invalid. Reconnect to continue.'
+                  : connectionStatus === 'REVOKED'
+                    ? 'GitHub authorization was revoked. Reconnect to continue.'
+                    : isConnected ? 'Connected to GitHub.' : 'GitHub is not connected.'}</p>
               </div>
               <span className={`connection-status ${isConnected ? 'connected' : 'disconnected'}`} role="status">
                 <span className="status-dot" aria-hidden="true" />
-                {isConnected ? 'Connected' : 'Disconnected'}
+                {connectionStatus === 'INVALID' ? 'Invalid'
+                  : connectionStatus === 'REVOKED' ? 'Revoked'
+                    : isConnected ? 'Connected' : 'Disconnected'}
               </span>
               {!isConnected && (
-                <button type="button" onClick={connectGitHub}>Connect GitHub</button>
+                <button type="button" onClick={connectGitHub}>
+                  {['INVALID', 'REVOKED'].includes(connectionStatus) ? 'Reconnect GitHub' : 'Connect GitHub'}
+                </button>
               )}
               <button type="button" className="sync-secondary-button" onClick={() => refreshRepositories()}>
                 Refresh
@@ -225,6 +243,23 @@ export default function RepositoryManagement({ userId }) {
                   const inWorkspace = activeTab === 'workspace';
                   const syncing = syncingIds.includes(repo.id);
                   const syncError = syncErrors[repo.id];
+                  const repoStatus = String(repo.status || '').toUpperCase();
+                  const repoConnectionInvalid = ['INVALID', 'REVOKED'].includes(repoStatus);
+                  const syncStatus = !isConnected
+                    ? {
+                      className: 'disconnected',
+                      label: connectionStatus === 'INVALID' ? 'Invalid'
+                        : connectionStatus === 'REVOKED' ? 'Revoked' : 'Disconnected',
+                    }
+                    : repoConnectionInvalid
+                      ? { className: 'disconnected', label: repoStatus === 'INVALID' ? 'Invalid' : 'Revoked' }
+                      : syncing
+                        ? { className: 'syncing', label: 'Syncing…' }
+                        : syncError || repoStatus === 'ERROR'
+                          ? { className: 'failed', label: 'Sync failed' }
+                          : repo.lastSyncedAt && repoStatus !== 'DISCONNECTED'
+                            ? { className: 'synced', label: 'Synced' }
+                            : { className: 'not-synced', label: 'Not synced' };
                   return (
                     <li className="repository-item repository-sync-item" key={repo.id || repo.githubRepoId}>
                       {!inWorkspace && (
@@ -238,8 +273,8 @@ export default function RepositoryManagement({ userId }) {
                           {inWorkspace && <span>Added to workspace</span>}
                         </div>
                         <div className="sync-details">
-                          <span className={`sync-status sync-${syncing ? 'syncing' : syncError ? 'failed' : repo.status === 'ERROR' ? 'failed' : repo.lastSyncedAt ? 'synced' : 'not-synced'}`}>
-                            {syncing ? 'Syncing…' : syncError || repo.status === 'ERROR' ? 'Sync failed' : repo.lastSyncedAt ? 'Synced' : 'Not synced'}
+                          <span className={`sync-status sync-${syncStatus.className}`}>
+                            {syncStatus.label}
                           </span>
                           {repo.lastSyncedAt && <p className="sync-last-time">Last synced: {new Date(repo.lastSyncedAt).toLocaleString()}</p>}
                           {syncError && <p className="sync-error" role="alert">{syncError}</p>}
@@ -247,7 +282,7 @@ export default function RepositoryManagement({ userId }) {
                         <div className="sync-actions">
                           {inWorkspace && (
                             <button type="button" disabled={syncing || !isConnected} onClick={() => syncRepository(repo)}>
-                              {syncing ? 'Syncing…' : syncError ? 'Retry sync' : 'Sync now'}
+                              {syncing ? 'Syncing…' : !isConnected ? 'Reconnect to sync' : syncError ? 'Retry sync' : 'Sync now'}
                             </button>
                           )}
                           {inWorkspace && (
