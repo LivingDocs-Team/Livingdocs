@@ -16,6 +16,17 @@ uvicorn main:app --reload --port 8001
 
 Open http://localhost:8001/docs to try the API.
 
+**Dependencies (DOCKER-03).** `requirements.txt` pins every package (direct and indirect) to an
+exact version, so local, CI and Docker builds use the same libraries. Do not edit it by hand: change
+the direct dependencies in `requirements.in`, then regenerate:
+
+```bash
+pip install uv
+uv pip compile requirements.in --python-version 3.12 --python-platform linux -o requirements.txt
+```
+
+`tests/test_requirements_pinned.py` fails if a line in `requirements.txt` is not pinned with `==`.
+
 Without `ANTHROPIC_API_KEY` the service uses a rule-based offline generator (good for
 development and tests). Set the key to use Claude:
 
