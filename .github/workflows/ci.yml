@@ -24,7 +24,7 @@ jobs:
           pip install pytest httpx fastapi uvicorn pydantic
       - name: Run Backend Unit Tests
         run: |
-          pytest tests/ -m "not live" || pytest app/ -m "not live" || true
+          pytest tests/ -m "not live"
 
   # 2. AI Service Build and Test
   ai-service-test:
@@ -43,7 +43,7 @@ jobs:
           pip install pytest httpx fastapi uvicorn pydantic
       - name: Run AI Service Unit Tests
         run: |
-          pytest tests/ -m "not live" || true
+          pytest tests/ -m "not live"
 
   # 3. Frontend Build and Test
   frontend-test:
@@ -81,7 +81,7 @@ jobs:
       - name: Echo Docker Compose Check
         run: echo "Docker compose structure validated"
 
-  # 7. AI Service Integration Test (Live Pipeline)
+  # 7. AI Service Integration Test (Live Pipeline - Kiểm thử thực tế)
   integration-test:
     name: AI Service Integration Test
     runs-on: ubuntu-latest
@@ -122,4 +122,4 @@ jobs:
           AI: "http://localhost:8001"
           AI_SERVICE_API_KEY: "mock-key-for-ci-integration"
         run: |
-          python -m pytest -m live -v tests/integration || true
+          python -m pytest -m live -v tests/integration
