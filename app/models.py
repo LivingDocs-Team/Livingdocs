@@ -32,11 +32,23 @@ class Function(BaseModel):
     lineno: Optional[int] = None
     end_lineno: Optional[int] = None
 
+class ClassField(BaseModel):
+    """Attribute of a class: pydantic/dataclass field, Java field, record component, enum constant."""
+    name: str
+    type: Optional[str] = None
+    default: Optional[str] = None
+    description: Optional[str] = None
+    lineno: Optional[int] = None
+
 class ClassInfo(BaseModel):
     name: str
+    kind: str = "class"  # class | interface | enum | record | annotation
     bases: List[str] = Field(default_factory=list)
     docstring: Optional[str] = None
     methods: List[Function] = Field(default_factory=list)
+    fields: List[ClassField] = Field(default_factory=list)
+    lineno: Optional[int] = None
+    end_lineno: Optional[int] = None
 
 class Endpoint(BaseModel):
     http_method: str
@@ -45,6 +57,8 @@ class Endpoint(BaseModel):
     parameters: List[Parameter] = Field(default_factory=list)
     request_body: Optional[str] = None
     response: Optional[str] = None
+    lineno: Optional[int] = None
+    end_lineno: Optional[int] = None
 
 class FileAnalysis(BaseModel):
     path: str
@@ -61,3 +75,4 @@ class RepoAnalysisResponse(BaseModel):
     scope: str
     target: str
     files: List[FileAnalysis] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
