@@ -34,9 +34,9 @@ Các endpoint API được mô tả trong OpenAPI; cổng service chỉ bind loo
 
 Cần cài: JDK 21, Docker Desktop, IntelliJ IDEA.
 
-1. Bật database (dịch vụ `github-db` trong `compose.yaml` ở thư mục gốc, cổng `127.0.0.1:5433`):
+1. Bật database:
    ```bash
-   docker compose -f ../../compose.yaml up -d github-db
+   docker compose up -d
    ```
 2. Copy `.env.example` thành `.env` rồi điền Client ID, Client secret của GitHub App, `TOKEN_ENCRYPTION_KEY` và `GITHUB_INTEGRATION_INTERNAL_SECRET`.
    **Không commit file `.env`.**
