@@ -184,3 +184,28 @@ def test_job_end_to_end_with_overloads_and_skips():
     rep = jobs.get_report(job.id)
     ids = [e.evidence[0].id for fr in rep.files for e in fr.entities if e.evidence]
     assert len(ids) == len(set(ids)), "every entity must have its own evidence"
+
+
+# ---------- class kind and fields (analyzer A4 / A8) ----------
+
+def test_class_fields_are_rendered_and_scored():
+    r = _offline({"path": "app/models.py", "language": "python", "classes": [{
+        "name": "Item", "kind": "class", "bases": ["BaseModel"], "lineno": 6, "end_lineno": 9,
+        "docstring": "Item in the shop.\n\nAttributes:\n    name: Display name.",
+        "fields": [{"name": "name", "type": "str", "lineno": 8},
+                   {"name": "price", "type": "float", "default": "0.0", "lineno": 9}]}]})
+    md = r.markdown
+    assert "**Fields**" in md
+    assert "| `name` | str | - | Display name. |" in md
+    assert "| `price` | float | 0.0 | - |" in md
+    item = r.report.entities[0]
+    assert item.evidence[0].line_start == 6
+    assert item.factors["input_quality"] == 1.0      # docstring + typed fields (was 0.5 / 0.0)
+
+
+def test_java_kinds_get_their_label():
+    r = _offline({"path": "S.java", "language": "java", "classes": [
+        {"name": "Status", "kind": "enum", "fields": [{"name": "NEW"}, {"name": "PAID"}]},
+        {"name": "Repo", "kind": "interface"}, {"name": "Dto", "kind": "record"}]})
+    assert "### Enum `Status`" in r.markdown
+    assert "### Interface `Repo`" in r.markdown and "### Record `Dto`" in r.markdown

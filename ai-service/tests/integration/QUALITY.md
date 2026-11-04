@@ -35,25 +35,40 @@ Tài liệu sinh ra có 802 thực thể, tất cả đều có trong Markdown. 
 endpoint) chỉ trỏ được tới tên file vì analyzer không gửi số dòng. 105 lớp hiện câu "Chưa có mô tả"
 khi chạy offline, phần lớn là lớp dữ liệu (pydantic, DTO) mà analyzer không gửi các trường.
 
-## 3. Lỗi của Code Analyzer (LD-328, chuyển Lâm)
+## 3. Lỗi của Code Analyzer (LD-328): đã sửa (04/11/2026, nhánh `QA-Fix-Code-Analyzer`)
 
-Mỗi lỗi có một test `xfail` cùng mã trong `test_output_quality_live.py`. Khi sửa xong, test chuyển
-sang XPASS; lúc đó bỏ dấu `xfail`.
+Mỗi lỗi có test trong `tests/test_analysis.py` (unit, chạy ở job `ai-service-integration`) và
+`test_output_quality_live.py` (2 service thật). Các test này trước là `xfail`, nay pass bình thường.
 
-| Mã | Mức độ | Lỗi | Ảnh hưởng | Gợi ý sửa |
-|---|---|---|---|---|
-| A1 | **Cao** | `javalang` chỉ hiểu Java 8: `record`, text block `"""`... báo `invalid`, thông báo lỗi rỗng (`JavaSyntaxError: `) | 35/96 file Java của repo (DTO, client GitHub, BFF controller) không có tài liệu | Dùng `tree-sitter-java` (có trên PyPI). Trước mắt ghi vị trí lỗi: `f"JavaSyntaxError line {e.at.position.line}: {e.description}"` |
-| A2 | **Cao** | Không lấy endpoint Spring (`@GetMapping`, `@PostMapping`, `@RequestMapping` ở lớp) | 0/30 API Java có trong tài liệu | Đọc `method.annotations`; ghép path của `@RequestMapping` ở lớp với path ở phương thức |
-| A3 | Trung bình | Python: `@app.route("/x")` không có `methods` thì bỏ qua (Flask mặc định GET); `@app.get(path="/x")` bỏ qua; prefix của `APIRouter(prefix=...)` không được ghép | Thiếu hoặc sai đường dẫn API | Mặc định `["GET"]`; đọc keyword `path`; tìm `APIRouter(prefix=...)` gán cho biến router |
-| A4 | Trung bình | Java: interface, enum và constructor không được xuất | Thiếu repository, enum trạng thái, constructor injection | `tree.filter(InterfaceDeclaration / EnumDeclaration)`, `node.constructors` |
-| A5 | Trung bình | Không đọc Javadoc | Java không có mô tả, độ tin cậy thấp | `node.documentation` (javalang) hoặc comment ngay trước khai báo |
-| A6 | Trung bình | Lớp và endpoint không có `lineno`/`end_lineno` | 130 bằng chứng chỉ trỏ tới file | `ClassInfo` thêm `lineno=node.lineno`, `end_lineno=node.end_lineno` |
-| A7 | Thấp | Lớp cha dạng thuộc tính (`models.Model`, `typing.Generic[T]`) bị bỏ | Mất quan hệ kế thừa | `ast.unparse(base)` thay cho chỉ lấy `ast.Name` |
-| A8 | Trung bình | Không lấy trường của lớp (pydantic, dataclass, thành phần record) | Lớp dữ liệu không có nội dung để mô tả, độ tin cậy 0 | Thêm `fields` (tên, kiểu, mặc định) từ `ast.AnnAssign`. Cần thống nhất lại `CONTRACT.md` |
-| A9 | Thấp | `module` luôn `null` | Tài liệu hiện "Module: -" (ai-service đã tự suy ra, xem F2) | Suy ra từ `path` |
-| A10 | Thấp | File có BOM UTF-8 (lưu bằng Notepad trên Windows) báo `invalid` | Mất tài liệu cả file | `content.lstrip("﻿")` trước khi parse |
-| A11 | Thấp | `language` phân biệt hoa thường: `"Python"` → `unsupported` | Phía gọi gửi sai chữ hoa thì mất cả file | `.strip().lower()` trước khi so |
-| A12 | Thấp | Trùng `path` vẫn trả 2 phần tử | ai-service trả 422 cho **cả** request | Bỏ trùng hoặc báo lỗi rõ ở analyzer |
+| Mã | Mức độ | Lỗi | Cách sửa |
+|---|---|---|---|
+| A1 | **Cao** | `javalang` chỉ hiểu Java 8: `record`, text block `"""`... báo `invalid`, thông báo lỗi rỗng | Phân tích Java bằng `tree-sitter-java` (`app/java_extractor.py`), đọc được cú pháp Java 17. Lỗi cú pháp ghi rõ vị trí: `JavaSyntaxError line 3:12: unexpected '...'` |
+| A2 | **Cao** | Không lấy endpoint Spring | Đọc `@GetMapping/@PostMapping/@PutMapping/@DeleteMapping/@PatchMapping/@RequestMapping`, ghép path của `@RequestMapping` ở lớp, kế thừa `method=` của lớp; tham số `@PathVariable/@RequestParam/...`, `@RequestBody` → `request_body`, kiểu trả về → `response` |
+| A3 | Trung bình | Route Flask/FastAPI: `route()` không có `methods`, `path=` dạng keyword, prefix của router | Mặc định GET; đọc `path=`/`rule=`; ghép `APIRouter(prefix=...)` và `Blueprint(url_prefix=...)`; thêm `response` = kiểu trả về |
+| A4 | Trung bình | Thiếu interface, enum, record, constructor | Xuất đủ, có trường `kind` (`class`/`interface`/`enum`/`record`); lớp lồng nhau tên `Ngoai.Trong` |
+| A5 | Trung bình | Không đọc Javadoc | Javadoc ngay trước khai báo → `docstring` (giữ `@param`, `@return` để ai-service đọc) |
+| A6 | Trung bình | Lớp, endpoint không có số dòng | `lineno`/`end_lineno` cho lớp (Python, Java) và endpoint |
+| A7 | Thấp | Lớp cha dạng `models.Model`, `typing.Generic[T]` bị bỏ | `ast.unparse(base)`; Java gồm cả `extends` và `implements` |
+| A8 | Trung bình | Không lấy trường của lớp | `fields` (tên, kiểu, mặc định, dòng) cho pydantic/dataclass/hằng lớp, field Java, thành phần record, hằng enum. ai-service hiển thị bảng "Thuộc tính" và tính vào độ tin cậy |
+| A9 | Thấp | `module` luôn `null` | Python suy ra từ `path`; Java lấy từ `package` |
+| A10 | Thấp | File có BOM UTF-8 báo `invalid` | Bỏ ký tự BOM (`\ufeff`) trước khi phân tích |
+| A11 | Thấp | `"Python"` (chữ hoa) → `unsupported` | So sánh không phân biệt hoa thường |
+| A12 | Thấp | Trùng `path` → ai-service trả 422 cho cả request | Giữ bản đầu, ghi vào `warnings` của kết quả |
+
+Ngoài ra: file rỗng có `error`, file chưa hỗ trợ ghi rõ đuôi file (`Language 'unknown' is not supported (file extension '.js').`).
+
+Kết quả trên cùng mã nguồn sau khi sửa (`quality_report.py`, 43 file Python, 96 file Java):
+
+| Chỉ số | Trước | Sau |
+|---|---|---|
+| File Java phân tích được | 61 / 96 | **96 / 96** |
+| Endpoint Java | 0 | **43** (gồm 16 endpoint của BFF proxy: 4 path × 4 method) |
+| Lớp Java (gồm interface, enum, record) | 57 | 118 |
+| Docstring/Javadoc của phương thức Java | 0 | 51 |
+| Lớp có số dòng | 0 | 179 / 179 |
+| Bằng chứng trỏ được tới dòng | 672 / 802 | **1062 / 1062** |
+| File có `module` | 0 | 138 / 138 |
+| Thực thể độ tin cậy trung bình (offline) | 44 | 204 |
 
 ## 4. Lỗi của AI Service đã sửa trong nhánh này
 
@@ -80,6 +95,8 @@ end-to-end (Q4, Q5, Q6) **fail trên `main`** và pass trên nhánh này.
 ## 5. Chạy lại
 
 ```bash
+# ở thư mục gốc repo: unit test của analyzer
+python -m pytest -q -o addopts="" tests/test_analysis.py
 # trong ai-service/
 python -m pytest -q                       # unit test, gồm tests/test_output_quality.py
 ANALYZER_URL=http://localhost:8000 AI_SERVICE_URL=http://localhost:8001 \
