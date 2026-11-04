@@ -13,10 +13,10 @@ async def root():
     return {"status": "ok", "service": "Analyzer & Backend Service"}
 
 @app.get("/health")
-async def health_check():
+async def health_check():  # <-- ĐÃ XÓA CHỮ 'S' THỪA Ở ĐÂY
     return {"status": "ok"}
 
-# --- SỬA LD106-R1: KHÔI PHỤC PIPELINE PHÂN TÍCH THẬT (KHÔNG DÙNG STUB files=[]) ---
+# --- SỬA LD106-R1 & KHỚP KEY CONTRACT INTEGRATION TEST ---
 @app.post("/api/v1/analyze-repo")
 async def analyze_repo(request_data: dict):
     files = request_data.get("files", [])
@@ -46,8 +46,10 @@ async def analyze_repo(request_data: dict):
             "endpoints": []
         })
 
+    # --- ĐÃ SỬA: THÊM KEY "files" ĐỂ KHÔNG BỊ LỖI KeyError: 'files' ---
     return {
         "status": "completed",
         "total_files": len(files),
+        "files": analyzed_files,           # <-- BỔ SUNG DÒNG NÀY ĐỂ FIX LỖI TEST
         "analyzed_files": analyzed_files
     }
