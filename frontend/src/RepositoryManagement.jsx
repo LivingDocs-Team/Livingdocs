@@ -244,7 +244,22 @@ export default function RepositoryManagement({ userId }) {
                   const syncing = syncingIds.includes(repo.id);
                   const syncError = syncErrors[repo.id];
                   const repoStatus = String(repo.status || '').toUpperCase();
-                  const repoUnavailable = ['DISCONNECTED', 'INVALID', 'REVOKED'].includes(repoStatus);
+                  const repoConnectionInvalid = ['INVALID', 'REVOKED'].includes(repoStatus);
+                  const syncStatus = !isConnected
+                    ? {
+                      className: 'disconnected',
+                      label: connectionStatus === 'INVALID' ? 'Invalid'
+                        : connectionStatus === 'REVOKED' ? 'Revoked' : 'Disconnected',
+                    }
+                    : repoConnectionInvalid
+                      ? { className: 'disconnected', label: repoStatus === 'INVALID' ? 'Invalid' : 'Revoked' }
+                      : syncing
+                        ? { className: 'syncing', label: 'Syncing…' }
+                        : syncError || repoStatus === 'ERROR'
+                          ? { className: 'failed', label: 'Sync failed' }
+                          : repo.lastSyncedAt && repoStatus !== 'DISCONNECTED'
+                            ? { className: 'synced', label: 'Synced' }
+                            : { className: 'not-synced', label: 'Not synced' };
                   return (
                     <li className="repository-item repository-sync-item" key={repo.id || repo.githubRepoId}>
                       {!inWorkspace && (
@@ -258,36 +273,16 @@ export default function RepositoryManagement({ userId }) {
                           {inWorkspace && <span>Added to workspace</span>}
                         </div>
                         <div className="sync-details">
-                          <span
-                            className={`sync-status ${
-                             repoUnavailable || !isConnected
-                              ? 'disconnected'
-                                    : syncing
-                                      ? 'syncing'
-                                      : syncError || repo.status === 'ERROR'
-                                        ? 'failed'
-                                        : repo.lastSyncedAt
-                                          ? 'synced'
-                                          : 'not-synced'
-                                }`}
-                              >
-                                {!isConnected || repoUnavailable
-                                  ? repoStatus === 'INVALID' ? 'Invalid' : repoStatus === 'REVOKED' ? 'Revoked' : 'Disconnected'
-                                  : syncing
-                                    ? 'Syncing…'
-                                    : syncError || repo.status === 'ERROR'
-                                      ? 'Sync failed'
-                                      : repo.lastSyncedAt
-                                       ? 'Synced'
-                                        : 'Not synced'}
-                              </span>
+                          <span className={`sync-status sync-${syncStatus.className}`}>
+                            {syncStatus.label}
+                          </span>
                           {repo.lastSyncedAt && <p className="sync-last-time">Last synced: {new Date(repo.lastSyncedAt).toLocaleString()}</p>}
                           {syncError && <p className="sync-error" role="alert">{syncError}</p>}
                         </div>
                         <div className="sync-actions">
                           {inWorkspace && (
-                            <button type="button" disabled={syncing || !isConnected || repoUnavailable} onClick={() => syncRepository(repo)}>
-                              {syncing ? 'Syncing…' : !isConnected || repoUnavailable ? 'Reconnect to sync' : syncError ? 'Retry sync' : 'Sync now'}
+                            <button type="button" disabled={syncing || !isConnected} onClick={() => syncRepository(repo)}>
+                              {syncing ? 'Syncing…' : !isConnected ? 'Reconnect to sync' : syncError ? 'Retry sync' : 'Sync now'}
                             </button>
                           )}
                           {inWorkspace && (
