@@ -119,6 +119,7 @@ export default function RepositoryManagement({ userId }) {
     try {
       const result = await githubApi(`/api/repositories/${repository.id}/sync`, {
         method: 'POST',
+        body: {},
         userId,
       });
       setWorkspaceRepositories((current) => current.map((repo) => repo.id === repository.id
