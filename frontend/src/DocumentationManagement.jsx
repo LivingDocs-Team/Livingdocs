@@ -270,7 +270,7 @@ export default function DocumentationManagement({ userId }) {
 
         userId,
 
-        body: { templateId: template, outputLanguage: 'en' },
+        body: { templateId: template, outputLanguage: 'vi' },
 
       });
 
