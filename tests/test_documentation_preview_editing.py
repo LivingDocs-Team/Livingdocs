@@ -198,14 +198,26 @@ def test_generation_problem_shows_error_and_no_editor(page: Page, job_status, jo
 
 def test_expired_github_token_keeps_livingdocs_session(page: Page):
     """Token GitHub hết hạn (401 + GITHUB_REAUTH_REQUIRED) chỉ cần kết nối lại GitHub, không được đăng xuất."""
-    message = "Token GitHub không còn hợp lệ. Hãy kết nối lại GitHub."
-    api = FakeApi(generate_error=(401, {"status": 401, "code": "GITHUB_REAUTH_REQUIRED", "message": message}))
+    service_message = "Token GitHub không còn hợp lệ. Hãy kết nối lại GitHub."
+    api = FakeApi(generate_error=(401, {"status": 401, "code": "GITHUB_REAUTH_REQUIRED", "message": service_message}))
     open_documentation_page(page, api)
     generate(page)
 
-    expect(page.get_by_role("alert")).to_contain_text(message, timeout=10_000)
+    expect(page.get_by_role("alert")).to_contain_text("GitHub authorization expired. Reconnect GitHub.", timeout=10_000)
     expect(page.get_by_role("heading", name="Documentation Management")).to_be_visible()
     expect(page.get_by_text("Your LivingDocs session has expired. Please sign in again.")).to_have_count(0)
+    expect(page.get_by_text(service_message)).to_have_count(0)
+
+
+def test_vietnamese_service_message_is_shown_in_english(page: Page):
+    """L15: giao diện tiếng Anh không hiện nguyên văn thông báo tiếng Việt của service."""
+    service_message = "Không tìm thấy repository 11111111-1111-1111-1111-111111111111"
+    api = FakeApi(generate_error=(404, {"status": 404, "code": "NOT_FOUND", "message": service_message}))
+    open_documentation_page(page, api)
+    generate(page)
+
+    expect(page.get_by_role("alert")).to_contain_text("The requested item was not found.", timeout=10_000)
+    expect(page.get_by_text(service_message)).to_have_count(0)
 
 
 def test_expired_livingdocs_session_returns_to_sign_in(page: Page):

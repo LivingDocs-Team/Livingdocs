@@ -8,7 +8,7 @@ Phạm vi: màn hình **Documentation Management** của frontend (`frontend/src
 
 | Hạng mục | Kết quả |
 |---|---|
-| Test tự động (Playwright, backend giả lập) | 16 test: **15 đạt**, 1 xfail (phần còn lại của lỗi F1) |
+| Test tự động (Playwright, backend giả lập) | 17 test: **16 đạt**, 1 xfail (phần còn lại của lỗi F1) |
 | Bảo mật khi xem trước (HTML, script, link `javascript:` trong tài liệu) | Đạt: hiện dạng chữ, không chạy |
 | Lỗi và vấn đề phát hiện | 4 vấn đề của tính năng (F1–F4, F1 đã sửa một phần ở LD-101), 1 test cũ đang lỗi (F5) |
 | CI | Thêm job **Frontend E2E Test** chạy các test này ở mỗi lần push và pull request |
@@ -54,8 +54,9 @@ File: `tests/test_documentation_preview_editing.py`
 | 11 | `test_compare_marks_changed_lines` | Chưa có phiên bản thì hiện hướng dẫn; sửa 1 dòng thì đánh dấu đúng 1 dòng xoá, 1 dòng thêm | Đạt |
 | 12 | `test_export_downloads_current_markdown` | Tải file `livingdocs-documentation.md` đúng nội dung đang sửa, giữ nguyên tiếng Việt (UTF-8) | Đạt |
 | 13 | `test_reset_returns_to_initial_state` | Bấm Reset thì về trạng thái "Ready to generate" (nếu sau này có hộp xác nhận thì test bấm OK) | Đạt |
-| 14 | `test_expired_github_token_keeps_livingdocs_session` | Token GitHub hết hạn (HTTP 401, mã `GITHUB_REAUTH_REQUIRED`): hiện thông báo kết nối lại GitHub, người dùng vẫn ở trang tài liệu, không bị đăng xuất | Đạt (sau khi sửa F6) |
+| 14 | `test_expired_github_token_keeps_livingdocs_session` | Token GitHub hết hạn (HTTP 401, mã `GITHUB_REAUTH_REQUIRED`): hiện "GitHub authorization expired. Reconnect GitHub.", người dùng vẫn ở trang tài liệu, không bị đăng xuất, không hiện nguyên văn thông báo tiếng Việt của service | Đạt (sau khi sửa F6, F7) |
 | 15 | `test_expired_livingdocs_session_returns_to_sign_in` | Phiên LivingDocs hết hạn (HTTP 401 không có mã lỗi): quay về trang đăng nhập, báo phiên đã hết | Đạt |
+| 16 | `test_vietnamese_service_message_is_shown_in_english` | Service trả lỗi kèm thông báo tiếng Việt (HTTP 404, mã `NOT_FOUND`): giao diện hiện "The requested item was not found.", không hiện câu tiếng Việt | Đạt (sau khi sửa F7) |
 
 ## 4. Lỗi và vấn đề phát hiện
 
@@ -67,6 +68,7 @@ File: `tests/test_documentation_preview_editing.py`
 | F4 | Thấp (26/10: vẫn còn) | Compare so theo số thứ tự dòng: chèn 1 dòng ở đầu một tài liệu 19 dòng thì cả 20 dòng bị đánh dấu "thêm" và 19 dòng "xoá" | Create version → thêm 1 dòng ở đầu → Compare | So sánh bằng thuật toán diff theo dòng (ví dụ thư viện `diff`) |
 | F5 | Thấp, ngoài phạm vi (26/10: vẫn còn) | `tests/test_frontend.py::test_frontend_homepage_title` đang lỗi: tiêu đề trang là "frontend" (`frontend/index.html`), test mong "LivingDocs - Automated Documentation Generator" | Chạy test này khi frontend đang chạy | Sửa thẻ `<title>` trong `frontend/index.html` |
 | F6 | Cao (sửa ở LD-75) | Khi token GitHub hết hạn, GitHub Integration trả HTTP 401 kèm mã `GITHUB_REAUTH_REQUIRED` (hoặc `TOKEN_INVALID` khi đồng bộ). `githubApi.js` coi mọi 401 là hết phiên LivingDocs nên đẩy người dùng về trang đăng nhập ("Your LivingDocs session has expired") thay vì báo kết nối lại GitHub | Cho API sinh tài liệu trả 401 + `GITHUB_REAUTH_REQUIRED`, bấm Generate documentation | Chỉ coi là hết phiên khi 401 không có mã lỗi; 401 có mã lỗi thì hiện thông báo của API (test 14, 15) |
+| F7 | Thấp (sửa ở LD-76, lỗi L15) | GitHub Integration trả thông báo lỗi tiếng Việt, giao diện tiếng Anh hiện nguyên văn | Cho API trả lỗi có thông báo tiếng Việt, ví dụ token GitHub hết hạn | `frontend/src/errorMessages.js`: mỗi mã lỗi ổn định có một thông báo tiếng Anh; mã khác chỉ giữ thông báo của service khi là tiếng Anh, nếu không thì dùng thông báo chung theo mã HTTP (test 14, 16) |
 
 ## 5. Ghi chú
 
