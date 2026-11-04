@@ -32,8 +32,12 @@ và có thể được AI trích dẫn làm bằng chứng (mã `D1`, `D2`…).
 | `functions` | list `Function` | Hàm cấp module |
 | `endpoints` | list `Endpoint` | |
 
-**`ClassInfo`**: `name` (bắt buộc), `bases` (list string), `docstring`, `methods` (list `Function`),
-`line_start`, `line_end`.
+**`ClassInfo`**: `name` (bắt buộc; lớp lồng nhau là `Ngoai.Trong`), `kind` (`class` | `interface` |
+`enum` | `record` | `annotation`), `bases` (list string), `docstring` (Javadoc với Java), `methods`
+(list `Function`, gồm cả constructor), `fields` (list `ClassField`), `line_start`, `line_end`.
+
+**`ClassField`**: `name` (bắt buộc), `type`, `default`, `description`, `line_start`. Là trường pydantic /
+dataclass / hằng của lớp Python, field Java, thành phần `record` hoặc hằng `enum`.
 
 **`Function`**: `name` (bắt buộc), `signature`, `parameters` (list `Parameter`), `return_type`,
 `docstring`, `source` (đoạn code, tùy chọn; bị cắt còn 1.500 ký tự khi đưa vào prompt),
@@ -41,8 +45,11 @@ và có thể được AI trích dẫn làm bằng chứng (mã `D1`, `D2`…).
 
 **`Parameter`**: `name` (bắt buộc), `type`, `default`, `description`.
 
-**`Endpoint`**: `http_method` (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS), `path` (bắt buộc),
-`handler`, `parameters`, `request_body`, `response`, `line_start`, `line_end`.
+**`Endpoint`**: `http_method` (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS), `path` (bắt buộc, đã ghép
+prefix của router / `@RequestMapping` ở lớp), `handler`, `parameters`, `request_body`, `response`,
+`line_start`, `line_end`.
+
+Kết quả của analyzer có thêm `warnings` (ví dụ `path` bị trùng chỉ phân tích bản đầu); ai-service bỏ qua trường này.
 
 `line_start` / `line_end`: số dòng (bắt đầu từ 1) của thực thể trong file. Không bắt buộc, nhưng
 thiếu thì bằng chứng chỉ trỏ được tới tên file thay vì `file.py:12-20`. ai-service cũng nhận tên

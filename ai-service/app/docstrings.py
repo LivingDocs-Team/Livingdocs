@@ -38,6 +38,7 @@ class ParsedDoc:
     summary: str = ""
     params: Dict[str, str] = field(default_factory=dict)
     returns: str = ""
+    attributes: Dict[str, str] = field(default_factory=dict)   # "Attributes:" section of a class
 
 
 def _clean(lines: List[str]) -> str:
@@ -156,8 +157,11 @@ def parse_docstring(doc: Optional[str]) -> ParsedDoc:
             sections[current].append(ln)
         i += 1
 
+    attributes: Dict[str, str] = {}
     for head, body in sections.items():
-        if head in _PARAM_HEADS:
+        if head == "attributes":
+            attributes.update(_items(body, kinds[head]))
+        elif head in _PARAM_HEADS:
             params.update(_items(body, kinds[head]))
         elif head in _RETURN_HEADS and not returns:
             returns = _returns(body, kinds[head])
@@ -167,4 +171,4 @@ def parse_docstring(doc: Optional[str]) -> ParsedDoc:
             params[name] = text_
         elif kind == "return" and text_:
             returns = text_
-    return ParsedDoc(summary=_paragraphs(summary), params=params, returns=returns)
+    return ParsedDoc(summary=_paragraphs(summary), params=params, returns=returns, attributes=attributes)
