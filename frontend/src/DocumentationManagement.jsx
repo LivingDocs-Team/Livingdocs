@@ -154,7 +154,7 @@ export default function DocumentationManagement({ userId }) {
   const [status, setStatus] = useState('idle');
 
   const [document, setDocument] = useState('');
-  const [originalDocument, setOriginalDocument] = useState('');
+
   const [evidence, setEvidence] = useState([]);
 
   const [error, setError] = useState('');
@@ -174,7 +174,7 @@ export default function DocumentationManagement({ userId }) {
   const [isLoadingRepositories, setIsLoadingRepositories] = useState(Boolean(userId));
 
   const [jobId, setJobId] = useState('');
-  const [job, setJob] = useState(null);
+
   useEffect(() => {
 
     if (!userId) return undefined;
@@ -226,6 +226,7 @@ export default function DocumentationManagement({ userId }) {
   }, [userId, workspaceId]);
 
   async function handleGenerate(event) {
+
     event.preventDefault();
 
     if (!userId || !repositoryId) {
@@ -242,15 +243,11 @@ export default function DocumentationManagement({ userId }) {
 
     setNotice('');
 
-   setDocument('');
+    setDocument('');
 
-   setOriginalDocument('');
+    setSavedDocument('');
 
-   setSavedDocument('');
-
-   setJob(null);
-
-   setEvidence([]);
+    setEvidence([]);
 
     setVersions([]);
 
@@ -277,7 +274,6 @@ export default function DocumentationManagement({ userId }) {
       if (!createdJob?.id) throw new Error('The documentation service returned an invalid job.');
 
       setJobId(createdJob.id);
-      setJob(createdJob);
 
       const deadline = Date.now() + 120_000;
 
@@ -288,7 +284,7 @@ export default function DocumentationManagement({ userId }) {
         await new Promise((resolve) => window.setTimeout(resolve, 750));
 
         job = await githubApi(`/api/documentation/jobs/${encodeURIComponent(createdJob.id)}`, { userId });
-        setJob(job);
+
       }
 
       if (['pending', 'running'].includes(job.status)) {
@@ -331,13 +327,11 @@ export default function DocumentationManagement({ userId }) {
 
       ));
 
-       setDocument(markdown);
+      setDocument(markdown);
 
-       setOriginalDocument(markdown);
+      setSavedDocument(markdown);
 
-       setSavedDocument(markdown);
-
-       setEvidence(evidenceItems);
+      setEvidence(evidenceItems);
 
       setStatus('completed');
 
@@ -365,11 +359,7 @@ export default function DocumentationManagement({ userId }) {
 
     setDocument('');
 
-    setOriginalDocument('');
-
     setSavedDocument('');
-
-    setJob(null);
 
     setEvidence([]);
 
@@ -544,17 +534,7 @@ export default function DocumentationManagement({ userId }) {
           </span>
 
         </div>
-        {status === 'generating' && (
-  <div className="documentation-progress" aria-live="polite">
-    <p>{job?.message || 'Generating documentation…'}</p>
-    <progress
-      aria-label="Documentation generation progress"
-      value={job?.progress ?? 0}
-      max={1}
-    />
-    <span>{Math.round((job?.progress ?? 0) * 100)}%</span>
-  </div>
-)}
+
         <form className="documentation-form" onSubmit={handleGenerate}>
 
           <label htmlFor="documentation-repository">Repository</label>
@@ -600,25 +580,26 @@ export default function DocumentationManagement({ userId }) {
           />
 
           <div className="documentation-actions">
-            <button
-              type="submit"
-              disabled={
-                status === 'generating'
-                || isLoadingRepositories
-                || repositories.length === 0
-                || !templateList.templates.some((item) => item.id === template)
-              }
-            >
+            <button type="submit" disabled={status === 'generating' || isLoadingRepositories || repositories.length === 0
+              || !templateList.templates.some((item) => item.id === template)}>
               {status === 'generating' ? 'Generating…' : 'Generate documentation'}
+
             </button>
 
             <button
+
               type="button"
+
               className="documentation-secondary-button"
+
               onClick={handleReset}
+
             >
+
               Reset
+
             </button>
+
           </div>
 
         </form>
@@ -749,64 +730,83 @@ export default function DocumentationManagement({ userId }) {
 
             {activeTab === 'edit' && (
 
-<section className="documentation-panel">
-  <label htmlFor="documentation-editor">
-    Markdown content
-  </label>
+              <section className="documentation-panel">
 
-  <textarea
-    id="documentation-editor"
-    className="documentation-editor"
-    value={document}
-    onChange={(event) => {
-      setDocument(event.target.value);
-      setNotice('');
-    }}
-    rows={18}
-  />
+                <label htmlFor="documentation-editor">
 
-  <div className="documentation-actions">
-    <button type="button" onClick={handleSaveDraft}>
-      Save draft
-    </button>
+                  Markdown content
 
-    <button
-      type="button"
-      className="documentation-secondary-button"
-      onClick={handleCreateVersion}
-    >
-      Create version
-    </button>
+                </label>
 
-    <button
-      type="button"
-      className="documentation-secondary-button"
-      disabled={!originalDocument}
-      onClick={() => {
-        setDocument(originalDocument);
-        setSavedDocument(originalDocument);
-        setError('');
-        setNotice('Restored the original generated document.');
-      }}
-    >
-      Restore original
-    </button>
+                <textarea
 
-    <button
-      type="button"
-      className="documentation-secondary-button"
-      onClick={handleExport}
-    >
-      Export Markdown
-    </button>
-  </div>
+                  id="documentation-editor"
 
-  <p className="documentation-hint">
-    {document === savedDocument
-      ? 'All changes saved in the current page session.'
-      : 'You have unsaved edits.'}
-  </p>
-</section>
+                  className="documentation-editor"
+
+                  value={document}
+
+                  onChange={(event) => {
+
+                    setDocument(event.target.value);
+
+                    setNotice('');
+
+                  }}
+
+                  rows={18}
+
+                />
+
+                <div className="documentation-actions">
+
+                  <button type="button" onClick={handleSaveDraft}>
+
+                    Save draft
+
+                  </button>
+
+                  <button
+
+                    type="button"
+
+                    className="documentation-secondary-button"
+
+                    onClick={handleCreateVersion}
+
+                  >
+
+                    Create version
+
+                  </button>
+
+                  <button
+
+                    type="button"
+
+                    className="documentation-secondary-button"
+
+                    onClick={handleExport}
+
+                  >
+
+                    Export Markdown
+
+                  </button>
+
+                </div>
+
+                <p className="documentation-hint">
+
+                  {document === savedDocument
+
+                    ? 'All changes saved in the current page session.'
+
+                    : 'You have unsaved edits.'}
+
+                </p>
+
+              </section>
 
             )}
 
