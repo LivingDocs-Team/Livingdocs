@@ -13,18 +13,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.12"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pytest httpx fastapi uvicorn pydantic
+          pip install pytest httpx fastapi uvicorn pydantic pytest-asyncio
+
       - name: Run Backend Unit Tests
         run: |
-          pytest tests/ -m "not live"
+          python -m pytest tests/ -m "not live" --ignore=tests/integration
 
   # 2. AI Service Build and Test
   ai-service-test:
@@ -32,18 +35,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.12"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pytest httpx fastapi uvicorn pydantic
+          pip install pytest httpx fastapi uvicorn pydantic pytest-asyncio
+
       - name: Run AI Service Unit Tests
         run: |
-          pytest tests/ -m "not live"
+          python -m pytest tests/ -m "not live" --ignore=tests/integration
 
   # 3. Frontend Build and Test
   frontend-test:
@@ -81,45 +87,58 @@ jobs:
       - name: Echo Docker Compose Check
         run: echo "Docker compose structure validated"
 
-  # 7. AI Service Integration Test (Live Pipeline - Kiểm thử thực tế)
+  # 7. AI Service Integration Test (Kiểm thử thực tế)
   integration-test:
     name: AI Service Integration Test
     runs-on: ubuntu-latest
     needs: [backend-test, ai-service-test]
     steps:
       - uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.12"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pytest httpx fastapi uvicorn pydantic
+          pip install pytest httpx fastapi uvicorn pydantic pytest-asyncio
+
       - name: Start Backend Service on port 8000
         run: |
-          python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &
-          sleep 2
-      - name: Start AI Service on port 8001
+          nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > backend.log 2>&1 &
+          sleep 3
+
+      - name: Start AI Service Mock on port 8001
         run: |
-          if [ -f ai_service_mock.py ]; then python ai_service_mock.py & else python -m uvicorn app.main:app --host 0.0.0.0 --port 8001 & fi
-          sleep 2
+          if [ -f ai_service_mock.py ]; then
+            nohup python ai_service_mock.py > ai_mock.log 2>&1 &
+          else
+            nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 8001 > ai_mock.log 2>&1 &
+          fi
+          sleep 3
+
       - name: Wait for both services
         run: |
           python -c "
           import httpx, time
-          for i in range(10):
+          for i in range(15):
               try:
                   r = httpx.get('http://localhost:8000/health')
-                  if r.status_code == 200: break
-              except: pass
+                  if r.status_code == 200:
+                      print('Backend is UP!')
+                      break
+              except Exception:
+                  pass
               time.sleep(1)
           "
+
       - name: Run integration tests across services
         env:
           ANALYZER: "http://localhost:8000"
           AI: "http://localhost:8001"
           AI_SERVICE_API_KEY: "mock-key-for-ci-integration"
         run: |
-          python -m pytest -m live -v tests/integration
+          python -m pytest tests/integration -v
