@@ -1,13 +1,49 @@
+from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field
+
+# --- ERR-BE-02: Khai báo trường của Class ---
+class FieldInfo(BaseModel):
+    name: str
+    type: Optional[str] = None
+    default: Optional[str] = None
+    description: Optional[str] = None
+
+# --- ERR-BE-01 & ERR-BE-02: Bổ sung fields, lineno, end_lineno ---
+class ClassInfo(BaseModel):
+    name: str
+    bases: List[str] = Field(default_factory=list)
+    docstring: Optional[str] = None
+    methods: List[Dict[str, Any]] = Field(default_factory=list)
+    fields: List[FieldInfo] = Field(default_factory=list)  # ERR-BE-02
+    lineno: Optional[int] = None                          # ERR-BE-01
+    end_lineno: Optional[int] = None                      # ERR-BE-01
+
+class Endpoint(BaseModel):
+    http_method: str
+    path: str
+    handler: Optional[str] = None
+    parameters: List[Dict[str, Any]] = Field(default_factory=list)
+    request_body: Optional[str] = None
+    response: Optional[str] = None
+    lineno: Optional[int] = None                          # ERR-BE-01
+    end_lineno: Optional[int] = None                      # ERR-BE-01
+
+# --- ERR-BE-03: Workflow Evidence & Submission (LD-106) ---
 class GroundingEvidence(BaseModel):
-    """LD-107: Bằng chứng nguồn gốc mã nguồn dùng để sinh tài liệu"""
-    file_path: str = Field(..., description="Đường dẫn tệp mã nguồn")
-    start_line: int = Field(..., description="Dòng bắt đầu trong code")
-    end_line: int = Field(..., description="Dòng kết thúc trong code")
-    code_snippet: str = Field(..., description="Đoạn mã nguồn đối chiếu")
+    file_path: str
+    start_line: int
+    end_line: int
+    code_snippet: str
+
+class SubmissionRequest(BaseModel):
+    doc_id: str
+    job_id: Optional[str] = None
+    submitted_by: Optional[str] = "Lâm Gia Huy"
+    evidences: List[GroundingEvidence] = Field(default_factory=list)
 
 class DocumentationSubmission(BaseModel):
-    """LD-110: Yêu cầu gửi phê duyệt tài liệu"""
-    doc_id: str = Field(..., description="Mã tài liệu")
-    status: str = Field("submitted", description="Trạng thái: draft | submitted | approved | rejected")
-    submitted_by: Optional[str] = Field("LH", description="Người gửi")
+    doc_id: str
+    job_id: Optional[str] = None
+    status: str = "submitted"  # draft | submitted | approved | rejected
+    submitted_by: str = "Lâm Gia Huy"
     evidences: List[GroundingEvidence] = Field(default_factory=list)
