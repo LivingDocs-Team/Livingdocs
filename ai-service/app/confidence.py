@@ -55,7 +55,13 @@ def input_quality(obj) -> float:
     if isinstance(obj, Function):
         signals = [1.0 if obj.source else 0.0, 1.0 if obj.docstring else 0.0, _typed_ratio(obj)]
     elif isinstance(obj, ClassInfo):
-        src = (sum(1 for m in obj.methods if m.source) / len(obj.methods)) if obj.methods else 0.0
+        members = []
+        if obj.methods:
+            members.append(sum(1 for m in obj.methods if m.source) / len(obj.methods))
+        if obj.fields:   # data classes (pydantic, DTO, record, enum) are described by their fields
+            members.append(sum(1 for x in obj.fields if x.type or x.description or obj.kind == "enum")
+                           / len(obj.fields))
+        src = sum(members) / len(members) if members else 0.0
         signals = [1.0 if obj.docstring else 0.0, src]
     elif isinstance(obj, Endpoint):
         typed = (sum(1 for p in obj.parameters if p.type) / len(obj.parameters)) if obj.parameters else 1.0

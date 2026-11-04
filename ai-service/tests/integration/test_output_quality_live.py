@@ -4,9 +4,8 @@ Runs in CI job `ai-service-integration` (both services started) or locally:
     ANALYZER_URL=http://localhost:8000 AI_SERVICE_URL=http://localhost:8001 \
         python -m pytest -m live -v tests/integration/test_output_quality_live.py
 
-Tests marked `xfail` record analyzer gaps found during the check (ids A1..A11 in
-`tests/integration/QUALITY.md`). They do not fail the build; when the analyzer is fixed they
-start passing (shown as XPASS) and the marker can be removed.
+Tests A1..A12 cover the analyzer gaps found during the check (`tests/integration/QUALITY.md`);
+they were `xfail` until the analyzer was fixed and now guard against regressions.
 """
 import ast
 import pathlib
@@ -83,35 +82,33 @@ def test_java_methods_and_lines_match_source(analysis):
     assert f["status"] == "ok"
     lines = src("OrderApi.java").splitlines()
     api = next(c for c in f["classes"] if c["name"] == "OrderApi")
-    assert [m["name"] for m in api["methods"]] == ["get", "get", "create"]
+    assert [m["name"] for m in api["methods"]] == ["OrderApi", "get", "get", "create"]
     for m in api["methods"]:
         assert f" {m['name']}(" in lines[m["lineno"] - 1]
 
 
-# ---------- analyzer gaps (LD-328, see QUALITY.md) ----------
-
-gap = lambda code, why: pytest.mark.xfail(reason=f"{code}: {why}", strict=False)  # noqa: E731
+# ---------- analyzer gaps A1..A12 (fixed, see QUALITY.md) ----------
 
 
-@gap("A1", "javalang only parses Java 8: records / text blocks are 'invalid' with an empty message")
 def test_java_record_is_parsed(analysis):
+    """A1 (regression) - was: javalang only parses Java 8: records / text blocks are 'invalid' with an empty message."""
     f = file_of(analysis, "OrderDto.java")
     assert f["status"] == "ok" and f["classes"][0]["name"] == "OrderDto"
 
 
-@gap("A2", "Spring @GetMapping/@PostMapping/@RequestMapping are not extracted as endpoints")
 def test_spring_endpoints(analysis):
+    """A2 (regression) - was: Spring @GetMapping/@PostMapping/@RequestMapping are not extracted as endpoints."""
     assert endpoints(file_of(analysis, "OrderApi.java")) == {("GET", "/orders/{id}"), ("POST", "/orders")}
 
 
-@gap("A3", "Flask @app.route without methods (default GET), path= keyword and APIRouter prefix")
 def test_python_route_variants(analysis):
+    """A3 (regression) - was: Flask @app.route without methods (default GET), path= keyword and APIRouter prefix."""
     assert endpoints(file_of(analysis, "shop_api.py")) == {
         ("GET", "/ping"), ("GET", "/api/v1/items/{name}"), ("POST", "/api/v1/items")}
 
 
-@gap("A4", "interfaces, enums and constructors are not extracted")
 def test_java_interface_enum_constructor(analysis):
+    """A4 (regression) - was: interfaces, enums and constructors are not extracted."""
     f = file_of(analysis, "OrderApi.java")
     names = {c["name"] for c in f["classes"]}
     assert {"OrderService", "OrderStatus"} <= names
@@ -119,52 +116,65 @@ def test_java_interface_enum_constructor(analysis):
     assert "OrderApi" in [m["name"] for m in api["methods"]]
 
 
-@gap("A5", "Javadoc is not read into docstring")
 def test_javadoc(analysis):
+    """A5 (regression) - was: Javadoc is not read into docstring."""
     f = file_of(analysis, "OrderApi.java")
     api = next(c for c in f["classes"] if c["name"] == "OrderApi")
     assert api["docstring"] and api["methods"][0]["docstring"]
 
 
-@gap("A6", "class line_start/line_end (lineno/end_lineno) not sent -> evidence points only to the file")
 def test_class_lines(analysis):
-    for c in file_of(analysis, "shop_api.py")["classes"]:
-        assert c.get("lineno") or c.get("line_start")
+    """A6 (regression) - was: class line_start/line_end (lineno/end_lineno) not sent -> evidence points only to the file."""
+    for name in ("shop_api.py", "OrderApi.java"):
+        lines = src(name).splitlines()
+        for c in file_of(analysis, name)["classes"]:
+            short = c["name"].split(".")[-1]
+            assert short in lines[c["lineno"] - 1], (name, c["name"], c["lineno"])
+            assert c["end_lineno"] >= c["lineno"]
+        for e in file_of(analysis, name)["endpoints"]:
+            assert e["lineno"] and e["handler"] in lines[e["lineno"] - 1]
 
 
-@gap("A7", "bases written as attributes (models.Model, typing.Generic[T]) are dropped")
 def test_attribute_bases(analysis):
+    """A7 (regression) - was: bases written as attributes (models.Model, typing.Generic[T]) are dropped."""
     classes = {c["name"]: c["bases"] for c in file_of(analysis, "models_ext.py")["classes"]}
     assert classes == {"Order": ["models.Model"], "Box": ["typing.Generic[T]"]}
 
 
-@gap("A8", "class fields (pydantic / dataclass / record components) are not extracted")
 def test_class_fields(analysis):
+    """A8 (regression) - was: class fields (pydantic / dataclass / record components) are not extracted."""
     item = next(c for c in file_of(analysis, "shop_api.py")["classes"] if c["name"] == "Item")
-    assert [x["name"] for x in item.get("fields", [])] == ["name", "price"]
+    assert [(x["name"], x["type"], x["default"]) for x in item["fields"]] == [
+        ("name", "str", None), ("price", "float", "0.0")]
+    dto = file_of(analysis, "OrderDto.java")["classes"][0]
+    assert dto["kind"] == "record" and [x["name"] for x in dto["fields"]] == ["id", "code"]
+    status = next(c for c in file_of(analysis, "OrderApi.java")["classes"] if c["name"] == "OrderStatus")
+    assert status["kind"] == "enum" and [x["name"] for x in status["fields"]] == ["NEW", "PAID"]
 
 
-@gap("A9", "module is never filled in")
 def test_module(analysis):
+    """A9 (regression) - was: module is never filled in."""
     assert file_of(analysis, "shop_api.py")["module"] == "quality.shop_api"
+    assert file_of(analysis, "OrderApi.java")["module"] == "com.acme.shop.web"     # package declaration
 
 
-@gap("A10", "a UTF-8 BOM (files saved on Windows) makes the file 'invalid'")
 def test_bom(analysis):
+    """A10 (regression) - was: a UTF-8 BOM (files saved on Windows) makes the file 'invalid'."""
     f = file_of(analysis, "bom.py")
     assert f["status"] == "ok" and f["functions"][0]["name"] == "saved_on_windows"
 
 
-@gap("A11", "language is case sensitive: 'Python' -> unsupported")
 def test_language_case():
+    """A11 (regression) - was: language is case sensitive: 'Python' -> unsupported."""
     f = analyze([("shop_api.py", src("shop_api.py"))], lang_override="Python")["files"][0]
     assert f["status"] == "ok"
 
 
-@gap("A12", "duplicate paths are passed through; ai-service then rejects the whole request (422)")
 def test_duplicate_paths():
-    files = analyze([("bom.py", "x = 1\n"), ("bom.py", "y = 2\n")])["files"]
-    assert len(files) == 1 or files[1].get("status") == "invalid"
+    """A12 (regression) - was: duplicate paths are passed through; ai-service then rejects the whole request (422)."""
+    out = analyze([("bom.py", "x = 1\n"), ("bom.py", "y = 2\n")])
+    assert [f["path"] for f in out["files"]] == ["quality/bom.py"]
+    assert any("duplicate path" in w for w in out["warnings"])
 
 
 # ---------- end to end: analyzer output -> documentation ----------

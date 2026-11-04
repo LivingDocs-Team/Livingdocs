@@ -18,6 +18,8 @@ LABELS = {
         "Functions": "Các hàm",
         "API Endpoints": "API Endpoints",
         "class": "Lớp",
+        "kinds": {"interface": "Interface", "enum": "Enum", "record": "Record", "annotation": "Annotation"},
+        "fields": "Thuộc tính",
         "inherits": "kế thừa",
         "params": "Tham số",
         "returns": "Giá trị trả về",
@@ -95,7 +97,9 @@ LABELS = {
     "en": {
         "Overview": "Overview", "Classes": "Classes", "Functions": "Functions",
         "API Endpoints": "API Endpoints",
-        "class": "Class", "inherits": "inherits", "params": "Parameters", "returns": "Returns",
+        "class": "Class", "inherits": "inherits",
+        "kinds": {"interface": "Interface", "enum": "Enum", "record": "Record", "annotation": "Annotation"},
+        "fields": "Fields", "params": "Parameters", "returns": "Returns",
         "no_params": "No parameters.", "unknown": "Not specified", "no_desc": "No description.",
         "name": "Name", "type": "Type", "default": "Default", "desc": "Description",
         "handler": "Handler", "request": "Request body", "response": "Response",
@@ -277,7 +281,15 @@ def _class_md(c: ClassInfo, doc: Optional[ClassDoc], L: dict,
     summary = ((doc.summary if doc else "") or parse_docstring(c.docstring).summary
                or L["class_fallback"].format(name=c.name))
     mdocs = _by_name(doc.methods) if doc else {}
-    out = [f"### {L['class']} `{c.name}`{bases}", "", summary, "", _annotation(reps.get(c.name), L)]
+    label = L["kinds"].get(c.kind or "class", L["class"])
+    out = [f"### {label} `{c.name}`{bases}", "", summary, ""]
+    if c.fields:
+        attrs = parse_docstring(c.docstring).attributes
+        rows = [f"| {L['name']} | {L['type']} | {L['default']} | {L['desc']} |", "|---|---|---|---|"]
+        rows += [f"| `{x.name}` | {_cell(x.type)} | {_cell(x.default)} | "
+                 f"{_cell(x.description or attrs.get(x.name))} |" for x in c.fields]
+        out += [f"**{L['fields']}**", "", "\n".join(rows), ""]
+    out.append(_annotation(reps.get(c.name), L))
     for m in c.methods:
         out.append(_function_md(m, mdocs.get(m.name), "####", L, reps.get(f"{c.name}.{m.name}")))
     return "\n".join(out)
