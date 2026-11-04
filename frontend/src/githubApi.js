@@ -1,4 +1,5 @@
 import { csrfHeaders } from './csrf';
+import { apiErrorMessage } from './errorMessages';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
@@ -34,10 +35,8 @@ async function request(path, { method = 'GET', body, text = false } = {}) {
     if (response.status === 401 && !code) {
       window.dispatchEvent(new Event('livingdocs:unauthenticated'));
     }
-    const message = !text && data && typeof data.message === 'string'
-      ? data.message
-      : `Request failed (HTTP ${response.status}).`;
-    const error = new Error(message);
+    const serviceMessage = !text && data && typeof data.message === 'string' ? data.message : undefined;
+    const error = new Error(apiErrorMessage(code, response.status, serviceMessage));
     error.status = response.status;
     error.code = code;
     error.retryAfter = response.headers.get('Retry-After');
