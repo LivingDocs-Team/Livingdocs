@@ -6,7 +6,6 @@ Every file is rendered with the same layout regardless of what the AI returned.
 from typing import Dict, List, Optional, Tuple
 
 from .doc_schema import ClassDoc, EndpointDoc, FileDoc, FunctionDoc
-from .docstrings import parse_docstring
 from .evidence import location
 from .models import (SECTION_NAMES, ClassInfo, Endpoint, EntityReport, Evidence, FileAnalysis, Function,
                      Parameter, Template)
@@ -248,7 +247,7 @@ def _params_table(params: List[Parameter], descs: Dict[str, str], L: dict) -> st
         return f"_{L['no_params']}_\n"
     rows = [f"| {L['name']} | {L['type']} | {L['default']} | {L['desc']} |", "|---|---|---|---|"]
     for p in params:
-        desc = descs.get(p.name) or p.description or descs.get(p.name.lstrip("*"))
+        desc = descs.get(p.name) or p.description
         rows.append(f"| `{p.name}` | {_cell(p.type)} | {_cell(p.default)} | {_cell(desc)} |")
     return "\n".join(rows) + "\n"
 
@@ -256,12 +255,13 @@ def _params_table(params: List[Parameter], descs: Dict[str, str], L: dict) -> st
 def _function_md(fn: Function, doc: Optional[FunctionDoc], level: str, L: dict,
                  rep: Optional[EntityReport] = None) -> str:
     sig = fn.signature or f"{fn.name}({', '.join(p.name for p in fn.parameters)})"
-    parsed = parse_docstring(fn.docstring)   # Args/Returns sections fill gaps the AI left
-    summary = (doc.summary if doc else "") or parsed.summary or _fallback_function_summary(fn, L)
-    pdescs = {p.name: p.description for p in doc.parameters if p.description} if doc else {}
-    for name, text in parsed.params.items():
-        pdescs.setdefault(name, text)
-    returns = (doc.returns if doc else "") or parsed.returns
+    summary = (
+    (doc.summary if doc else "")
+    or (fn.docstring or "").strip()
+    or _fallback_function_summary(fn, L)
+)
+    pdescs = {p.name: p.description for p in doc.parameters} if doc else {}
+    returns = (doc.returns if doc else "") or ""
     rtype = f"`{fn.return_type}`" if fn.return_type else L["unknown"]
     ret_line = f"{rtype} — {returns}" if returns else rtype
     return "\n".join([
@@ -274,8 +274,11 @@ def _function_md(fn: Function, doc: Optional[FunctionDoc], level: str, L: dict,
 def _class_md(c: ClassInfo, doc: Optional[ClassDoc], L: dict,
               reps: Dict[str, EntityReport]) -> str:
     bases = f" ({L['inherits']} {', '.join(c.bases)})" if c.bases else ""
-    summary = ((doc.summary if doc else "") or parse_docstring(c.docstring).summary
-               or L["class_fallback"].format(name=c.name))
+    summary = (
+    (doc.summary if doc else "")
+    or (c.docstring or "").strip()
+    or L["class_fallback"].format(name=c.name)
+)
     mdocs = _by_name(doc.methods) if doc else {}
     out = [f"### {L['class']} `{c.name}`{bases}", "", summary, "", _annotation(reps.get(c.name), L)]
     for m in c.methods:
@@ -283,43 +286,22 @@ def _class_md(c: ClassInfo, doc: Optional[ClassDoc], L: dict,
     return "\n".join(out)
 
 
-def _endpoint_md(e: Endpoint, summary: str, L: dict, rep: Optional[EntityReport] = None,
-                 handler: Optional[Function] = None) -> str:
-    """`handler` is the analyzed function behind the route: its docstring and return type
-    describe the endpoint when the AI did not."""
-    hdoc = parse_docstring(handler.docstring) if handler else None
+def _endpoint_md(e: Endpoint, summary: str, L: dict, rep: Optional[EntityReport] = None) -> str:
     if summary:
         endpoint_summary = summary
-    elif hdoc and hdoc.summary:
-        endpoint_summary = hdoc.summary
     elif e.handler:
         endpoint_summary = L["endpoint_fallback"].format(handler=e.handler)
     else:
         endpoint_summary = L["no_desc"]
-    pdescs = dict(hdoc.params) if hdoc else {}
-    response = e.response or (f"`{handler.return_type}`" if handler and handler.return_type else "")
-    if response and hdoc and hdoc.returns:
-        response += f" — {hdoc.returns}"
 
     out = [f"### `{e.http_method} {e.path}`", "", endpoint_summary, ""]
     if e.handler:
         out += [f"{L['handler']}: `{e.handler}`", ""]
-    out += [f"**{L['params']}**", "", _params_table(e.parameters, pdescs, L)]
+    out += [f"**{L['params']}**", "", _params_table(e.parameters, {}, L)]
     if e.request_body:
         out += [f"**{L['request']}:** {e.request_body}", ""]
-    out += [f"**{L['response']}:** {response or L['unknown']}", "", _annotation(rep, L)]
+    out += [f"**{L['response']}:** {e.response or L['unknown']}", "", _annotation(rep, L)]
     return "\n".join(out)
-
-
-def _handlers(f: FileAnalysis) -> Dict[str, Function]:
-    """Handler name -> analyzed function (top-level functions win over methods)."""
-    out: Dict[str, Function] = {}
-    for c in f.classes:
-        for m in c.methods:
-            out.setdefault(m.name.split("(")[0].split("#")[0], m)
-    for fn in f.functions:
-        out[fn.name.split("#")[0]] = fn
-    return out
 
 
 def render_file(f: FileAnalysis, doc: FileDoc, tpl: Template, lang: str,
@@ -352,11 +334,9 @@ def render_file(f: FileAnalysis, doc: FileDoc, tpl: Template, lang: str,
             body = "\n".join(_function_md(fn, fdocs.get(fn.name), "###", L, reps.get(fn.name))
                              for fn in f.functions)
         elif key == "API Endpoints" and f.endpoints:
-            handlers = _handlers(f)
             body = "\n".join(
                 _endpoint_md(e, edocs.get((e.http_method, e.path), ""), L,
-                             reps.get(f"{e.http_method} {e.path}"),
-                             handlers.get(e.handler or ""))
+                             reps.get(f"{e.http_method} {e.path}"))
                 for e in f.endpoints
             )
         if body:
