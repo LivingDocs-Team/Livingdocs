@@ -5,3 +5,4 @@ secrets/
 .idea/
 *.iml
 .vscode/
+secrets/
