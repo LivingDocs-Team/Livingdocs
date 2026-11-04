@@ -11,10 +11,9 @@ import RepositoryManagement from './RepositoryManagement';
 import DocumentationManagement from './DocumentationManagement';
 
 function App() {
-  const [page, setPage] = useState(() => (
-    new URLSearchParams(window.location.search).has('github') ? 'github' : 'login'
-  ));
-  const [userId, setUserId] = useState(() => sessionStorage.getItem('livingdocs.userId'));
+  const [page, setPage] = useState('login');
+  const [userId, setUserId] = useState(null);
+  const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -22,6 +21,56 @@ function App() {
   const [loginSuccess, setLoginSuccess] = useState('');
   const [logoutError, setLogoutError] = useState('');
 
+  useEffect(() => {
+  let cancelled = false;
+
+  async function restoreSession() {
+    try {
+      const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+
+      const response = await fetch(apiBaseUrl + '/api/auth/me', {
+        method: 'GET',
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        sessionStorage.removeItem('livingdocs.userId');
+        if (!cancelled) {
+          setUserId(null);
+          setPage('login');
+        }
+        return;
+      }
+
+      const user = await response.json();
+
+      if (!user || user.id == null) {
+        throw new Error('Invalid current-user response');
+      }
+
+      if (!cancelled) {
+        setUserId(String(user.id));
+        sessionStorage.setItem('livingdocs.userId', String(user.id));
+        setPage('github');
+      }
+    } catch {
+      if (!cancelled) {
+        setUserId(null);
+        setPage('login');
+      }
+    } finally {
+      if (!cancelled) {
+        setIsCheckingSession(false);
+      }
+    }
+  }
+
+  restoreSession();
+
+  return () => {
+    cancelled = true;
+  };
+}, []);
   useEffect(() => {
     const handleSessionExpired = () => {
       sessionStorage.removeItem('livingdocs.userId');
@@ -225,7 +274,7 @@ function App() {
               <button
                 className="github-button"
                 type="button"
-                onClick={() => setPage('github')}
+                onClick={() => window.location.assign('/oauth2/authorization/github')}
               >
                 Continue with GitHub
               </button>
@@ -325,7 +374,9 @@ function App() {
         );
     }
   };
-
+  if (isCheckingSession) {
+  return <div className="app-content">Checking session...</div>;
+}
   return (
     <div className="app">
       {page !== 'login' && (
