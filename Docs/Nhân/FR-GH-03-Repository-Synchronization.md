@@ -3,7 +3,7 @@
 | Mục | Nội dung |
 |---|---|
 | Story / Task Jira | LD-24; LD-63 — Repository Synchronization |
-| Người thực hiện | Nhân (phối hợp với Đăng và các thành viên liên quan) |
+| Người thực hiện | Nhân phối hợp với Đăng và các thành viên liên quan |
 | Thành phần | GitHub Integration Service: `sync/`, `client/GitHubClient`, `service/RepositorySyncService`, `controller/RepositorySyncController`; Backend BFF là caller nội bộ |
 | Tác nhân | Người dùng đã đăng nhập, thông qua Backend BFF |
 | Phụ thuộc | GitHub Account Connection; Repository Management; GitHub App/token; RepositorySnapshot |
@@ -13,13 +13,13 @@
 
 Người dùng yêu cầu đồng bộ một repository đã được thêm vào workspace của chính họ. Hệ thống xác thực quyền sở hữu, đọc repository và commit từ GitHub, lấy cây file tại đúng commit đó, chọn file theo giới hạn cấu hình, tải nội dung file được hỗ trợ, thu thập thống kê/ngôn ngữ/commit gần đây và trả kết quả đồng bộ.
 
-Kết quả snapshot gần nhất được giữ trong bộ nhớ theo implementation hiện tại; không được giả định dữ liệu này tồn tại sau khi service khởi động lại.
+Snapshot gần nhất được giữ trong bộ nhớ theo implementation hiện tại. Không được giả định dữ liệu này tồn tại sau khi service khởi động lại. Luồng documentation generation có cơ chế tự sync lại khi cache snapshot bị thiếu; chi tiết nằm trong FR-INT-01.
 
 ## 2. Yêu cầu chức năng
 
 | ID | Yêu cầu |
 |---|---|
-| FR-GH-03.1 | Chỉ xử lý request nội bộ đã được Backend BFF xác thực. Mọi API đồng bộ phải nhận danh tính người dùng do Backend truyền qua `X-User-Id`; không tin `userId` do browser tự gửi. |
+| FR-GH-03.1 | Chỉ xử lý request nội bộ đã được Backend BFF xác thực. API đồng bộ nhận danh tính người dùng do Backend truyền qua `X-User-Id`; không tin `userId` do browser tự gửi. |
 | FR-GH-03.2 | Chỉ chủ sở hữu repository được xem hoặc đồng bộ repo đó. Nếu repository không thuộc GitHub connection của user hiện tại, trả `403 FORBIDDEN`; không trả snapshot hoặc nội dung file. |
 | FR-GH-03.3 | `POST /api/repositories/{id}/sync` nhận body tùy chọn. Body vắng mặt hoặc `{}` dùng nhánh mặc định, `includeContent=true`, `maxFiles=200`; giới hạn kích thước file mặc định 200.000 byte và 20 commit gần đây. |
 | FR-GH-03.4 | Cho phép chọn `branch`, `includeContent`, `maxFiles`, `maxFileSizeBytes`, `recentCommitLimit`, `languages`. Chuẩn hóa branch toàn khoảng trắng thành `null`; chuẩn hóa ngôn ngữ thành chữ thường; danh sách ngôn ngữ rỗng dùng mặc định `java`, `python`. |
@@ -30,7 +30,7 @@ Kết quả snapshot gần nhất được giữ trong bộ nhớ theo implement
 | FR-GH-03.9 | `RepositorySnapshot` chứa repository metadata, branch, head commit, thống kê ngôn ngữ, file đã chọn theo path, commit gần đây, thống kê đồng bộ, cảnh báo và thời điểm UTC. Dữ liệu snapshot không bị sửa ngoài ý muốn sau khi tạo. |
 | FR-GH-03.10 | Trạng thái chuyển sang `SYNCING` khi bắt đầu. Thành công chuyển sang `CONNECTED` và cập nhật `lastSyncedAt`, `defaultBranch`, `fullName` nếu đổi tên. Với `REPOSITORY_NOT_FOUND`, `ACCESS_DENIED`, `INVALID_REPOSITORY`, chuyển sang `ERROR`; với lỗi khác giữ trạng thái trước đó trừ khi contract hiện tại quy định khác. |
 | FR-GH-03.11 | `POST /sync` và `GET /sync/latest` chỉ trả metadata, thống kê, warnings và cờ `analyzable`; không trả nội dung source code. Nội dung chỉ được gửi qua endpoint `analysis-input` có kiểm tra quyền. |
-| FR-GH-03.12 | `GET /api/repositories/{id}/sync/latest` trả snapshot gần nhất. Nếu chưa đồng bộ hoặc snapshot không còn sau restart, trả `404` yêu cầu đồng bộ trước. |
+| FR-GH-03.12 | `GET /api/repositories/{id}/sync/latest` trả snapshot gần nhất. Nếu chưa đồng bộ hoặc snapshot không còn sau restart, endpoint này trả `404` yêu cầu đồng bộ trước. |
 | FR-GH-03.13 | Nếu tree bị `truncated`, đạt giới hạn file hoặc thiếu một phần metadata/nội dung, trả kết quả kèm cảnh báo; không báo dữ liệu đầy đủ khi có phần bị thiếu. |
 | FR-GH-03.14 | Ánh xạ lỗi GitHub: `INVALID_REQUEST` 400; `INVALID_REPOSITORY` 400; `TOKEN_INVALID` 401; `ACCESS_DENIED` 403; `REPOSITORY_NOT_FOUND` 404; `BRANCH_NOT_FOUND` 404; `EMPTY_REPOSITORY` 409; `RATE_LIMITED` 429; `GITHUB_UNAVAILABLE` 503; `UNEXPECTED_GITHUB_RESPONSE` 502. Chỉ `RATE_LIMITED` và `GITHUB_UNAVAILABLE` được đánh dấu có thể thử lại. |
 | FR-GH-03.15 | Với `RATE_LIMITED`, nếu GitHub cung cấp thời điểm thử lại thì trả retry metadata và header `Retry-After` theo contract. Không retry vô hạn. |
@@ -42,7 +42,7 @@ Kết quả snapshot gần nhất được giữ trong bộ nhớ theo implement
 |---|---|---|
 | POST | `/api/repositories/{id}/sync` | Đồng bộ repository, trả metadata |
 | GET | `/api/repositories/{id}/sync/latest` | Lấy kết quả đồng bộ gần nhất |
-| GET | `/api/repositories/{id}/sync/latest/analysis-input` | Lấy nội dung file cho phân tích, sau khi kiểm tra quyền |
+| GET | `/api/repositories/{id}/sync/latest/analysis-input` | Lấy nội dung file cho phân tích sau khi kiểm tra quyền |
 
 Lỗi API dùng cấu trúc chung, ví dụ:
 
@@ -80,6 +80,7 @@ Lỗi API dùng cấu trúc chung, ví dụ:
 ## 6. Quy tắc nghiệp vụ
 
 - Snapshot hiện được lưu trong bộ nhớ; không giả định tồn tại qua restart.
+- Tự sync lại khi cache miss trong luồng generate được mô tả ở FR-INT-01; endpoint `/sync/latest` không tự biến thành persistent storage.
 - File gửi sang Code Analyzer phải có `content`; không dùng đường dẫn máy chạy service thay cho nội dung file.
 - Không expose source code trong endpoint snapshot thông thường.
 - Không bỏ qua kiểm tra ownership chỉ để test chạy được.

@@ -1,11 +1,10 @@
 package com.livingdocs.github.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.livingdocs.github.dto.DocumentationGenerationRequest;
-import com.livingdocs.github.exception.ApiException;
-import com.livingdocs.github.sync.AnalysisInput;
-import com.livingdocs.github.sync.RepositorySnapshot;
+import java.util.Objects;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -15,10 +14,12 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
-import java.util.UUID;
-import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.livingdocs.github.dto.DocumentationGenerationRequest;
+import com.livingdocs.github.exception.ApiException;
+import com.livingdocs.github.sync.AnalysisInput;
+import com.livingdocs.github.sync.RepositorySnapshot;
 
 @Service
 public class DocumentationGenerationService {
@@ -40,7 +41,7 @@ public class DocumentationGenerationService {
     /** Analyze the latest authorized repository snapshot and start an AI documentation job. */
     public JsonNode generate(String userId, UUID repositoryId,
             DocumentationGenerationRequest request) {
-        RepositorySnapshot snapshot = repositorySyncService.latest(userId, repositoryId);
+        RepositorySnapshot snapshot = repositorySyncService.latestOrSync(userId, repositoryId);
         AnalysisInput input = AnalysisInput.from(snapshot);
         if (input.files().isEmpty()) {
             throw ApiException.badRequest("The latest repository sync contains no source files with content.");
