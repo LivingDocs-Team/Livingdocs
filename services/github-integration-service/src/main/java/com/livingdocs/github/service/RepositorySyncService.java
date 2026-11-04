@@ -1,5 +1,13 @@
 package com.livingdocs.github.service;
 
+import java.util.EnumSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
+import org.springframework.stereotype.Service;
+
 import com.livingdocs.github.entity.ConnectedRepository;
 import com.livingdocs.github.entity.GitHubConnection;
 import com.livingdocs.github.entity.RepositoryStatus;
@@ -10,13 +18,6 @@ import com.livingdocs.github.sync.RepositorySnapshot;
 import com.livingdocs.github.sync.RepositorySyncException;
 import com.livingdocs.github.sync.SyncErrorCode;
 import com.livingdocs.github.sync.SyncOptions;
-import org.springframework.stereotype.Service;
-
-import java.util.EnumSet;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * LD-63 - đồng bộ repository với GitHub: lấy dữ liệu bằng {@link GitHubRepositoryFetcher},
@@ -94,6 +95,18 @@ public class RepositorySyncService {
                     + "Hãy gọi POST /api/repositories/" + repositoryId + "/sync trước.");
         }
         return snapshot;
+    }
+        /**
+     * Lấy snapshot gần nhất; nếu service vừa khởi động lại và snapshot
+     * không còn trong RAM thì tự động đồng bộ lại repository.
+     */
+    public RepositorySnapshot latestOrSync(String userId, UUID repositoryId) {
+        findOwned(userId, repositoryId);
+
+        RepositorySnapshot snapshot = latestResults.get(repositoryId);
+        return snapshot != null
+                ? snapshot
+                : sync(userId, repositoryId, SyncOptions.defaults());
     }
 
     /** Repo phải tồn tại và thuộc kết nối GitHub của người dùng (kết quả đồng bộ có cả nội dung code). */
