@@ -165,6 +165,13 @@
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      # nginx is up AND serves the built app (index.html contains the React root element)
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:80/ | grep -q 'id=\"root\"'"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
     networks:
       - backend-network
 
