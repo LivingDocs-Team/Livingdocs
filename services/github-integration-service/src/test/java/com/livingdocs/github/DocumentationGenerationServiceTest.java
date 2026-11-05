@@ -1,21 +1,5 @@
 package com.livingdocs.github;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.livingdocs.github.dto.DocumentationGenerationRequest;
-import com.livingdocs.github.exception.ApiException;
-import com.livingdocs.github.service.DocumentationGenerationService;
-import com.livingdocs.github.service.RepositorySyncService;
-import com.livingdocs.github.sync.RepositorySnapshot;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.http.MediaType;
-import org.springframework.http.HttpStatus;
-import org.springframework.test.web.client.MockRestServiceServer;
-import org.springframework.web.client.RestClient;
-
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -23,15 +7,31 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
 import static org.mockito.Mockito.when;
+import org.mockito.junit.jupiter.MockitoExtension;
+import static org.springframework.http.HttpMethod.GET;
+import static org.springframework.http.HttpMethod.POST;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.client.MockRestServiceServer;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
-import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
-import static org.springframework.http.HttpMethod.POST;
-import static org.springframework.http.HttpMethod.GET;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+import org.springframework.web.client.RestClient;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.livingdocs.github.dto.DocumentationGenerationRequest;
+import com.livingdocs.github.exception.ApiException;
+import com.livingdocs.github.service.DocumentationGenerationService;
+import com.livingdocs.github.service.RepositorySyncService;
+import com.livingdocs.github.sync.RepositorySnapshot;
 
 @ExtendWith(MockitoExtension.class)
 class DocumentationGenerationServiceTest {
