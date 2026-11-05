@@ -1,5 +1,7 @@
 import ast
-import javalang
+
+from app.java_extractor import java_imports
+
 
 class DependencyAnalyzer:
     @staticmethod
@@ -16,4 +18,5 @@ class DependencyAnalyzer:
 
     @staticmethod
     def get_java_imports(tree):
-        return list(set([imp.path for imp in tree.imports]))
+        """`tree` is a tree-sitter tree (ASTAnalyzer.parse_code)."""
+        return java_imports(tree)

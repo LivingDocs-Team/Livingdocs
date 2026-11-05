@@ -1,13 +1,15 @@
-FROM maven:3.10-eclipse-temurin-27 AS build
+FROM maven:3.9-eclipse-temurin-21 AS build
 
 WORKDIR /app
 
 COPY pom.xml .
+RUN mvn -B -Dmaven.wagon.http.retryHandler.count=5 -Daether.transport.http.retryHandler.count=5 -DskipTests dependency:go-offline
+
 COPY src ./src
 
-RUN mvn -B -DskipTests package
+RUN mvn -B -Dmaven.wagon.http.retryHandler.count=5 -Daether.transport.http.retryHandler.count=5 -DskipTests package
 
-FROM eclipse-temurin:27-jdk
+FROM eclipse-temurin:21-jre
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \

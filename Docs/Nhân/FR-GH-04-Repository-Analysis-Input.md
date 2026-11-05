@@ -20,7 +20,7 @@ Hệ thống chuyển snapshot đồng bộ gần nhất thành `AnalysisInput`.
 | FR-GH-04.1 | `AnalysisInput` có đúng ba trường cấp cao: `scope`, `target`, `files`. `scope` luôn là `"repository"`; `target` là tên đầy đủ `owner/repo`; `files` là danh sách `FileInput`. |
 | FR-GH-04.2 | Mỗi `FileInput` chỉ có `path`, `language`, `content`. `language` viết thường, ví dụ `java` hoặc `python`; `content` là nội dung file thực lấy từ GitHub. |
 | FR-GH-04.3 | Chỉ lấy `SourceFile` có nội dung. Bỏ qua file `NOT_REQUESTED`, `TOO_LARGE`, `BINARY`, `UNAVAILABLE` và giữ thứ tự file theo snapshot. |
-| FR-GH-04.4 | Nếu không có snapshot gần nhất, trả 404 và yêu cầu sync trước. Nếu repo không thuộc user hoặc không tồn tại, trả 403/404 tương ứng. |
+| FR-GH-04.4 | Nếu không có snapshot gần nhất, endpoint analysis-input trả 404 theo contract hiện hành. Nếu repo không thuộc user hoặc không tồn tại, trả 403/404 tương ứng. |
 | FR-GH-04.5 | JSON phải tương thích với Code Analyzer: không đổi `target` thành `repo_name`, không đổi `files[].path/language/content`, không tự thêm field chưa được contract chấp nhận. |
 | FR-GH-04.6 | Payload không chứa access token, client secret, service secret, email tác giả commit hoặc thông tin người dùng không cần thiết. |
 
@@ -53,10 +53,12 @@ Ví dụ response:
 
 ## 5. Luồng lỗi
 
-- Không có snapshot: `404`, yêu cầu sync trước.
+- Không có snapshot: `404`, yêu cầu sync trước theo endpoint này.
 - User không sở hữu repository: `403`.
 - Repository không tồn tại: `404`.
 - File bị skip hoặc không có nội dung: loại khỏi `files`, không tạo content giả.
+
+Lưu ý: luồng documentation generation có thể chủ động gọi lại sync trước khi tạo AnalysisInput khi snapshot cache bị thiếu; xem FR-INT-01. Điều này không thay đổi contract của endpoint analysis-input độc lập.
 
 ## 6. Tiêu chí chấp nhận
 

@@ -35,7 +35,9 @@ def _excerpt(obj) -> Optional[str]:
     if isinstance(obj, Function):
         text = obj.source or obj.signature or obj.name
     elif isinstance(obj, ClassInfo):
-        text = f"class {obj.name}" + (f"({', '.join(obj.bases)})" if obj.bases else "")
+        text = f"{obj.kind or 'class'} {obj.name}" + (f"({', '.join(obj.bases)})" if obj.bases else "")
+        if obj.fields:
+            text += "\n" + ", ".join(f"{x.name}: {x.type}" if x.type else x.name for x in obj.fields)
         if obj.docstring:
             text += "\n" + obj.docstring.strip()
     elif isinstance(obj, Endpoint):
