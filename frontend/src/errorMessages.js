@@ -23,6 +23,15 @@ const MESSAGES_BY_CODE = {
   RATE_LIMITED: 'GitHub rate limit reached. Please try again later.',
   GITHUB_UNAVAILABLE: 'GitHub is unavailable right now. Please try again later.',
   UNEXPECTED_GITHUB_RESPONSE: 'GitHub returned an unexpected response. Please try again later.',
+  // Documentation templates and generation (messages from LD-101, PR #69)
+  TEMPLATE_NOT_FOUND: 'The selected documentation template was not found. Choose another template and try again.',
+  TEMPLATE_READ_ONLY: 'Built-in documentation templates cannot be edited.',
+  TEMPLATE_NAME_TAKEN: 'A documentation template with that name already exists.',
+  TEMPLATE_INVALID: 'The documentation template is invalid. Review its name, instructions, and sections.',
+  GENERATION_REQUEST_INVALID: 'The documentation generation request is invalid. Check the selected repository and template.',
+  DOCUMENTATION_NOT_READY: 'Documentation is not ready yet. Wait for generation to finish and try again.',
+  AI_SERVICE_FAILED: 'The documentation service is temporarily unavailable. Try again later.',
+  AI_SERVICE_INVALID_RESPONSE: 'The documentation service returned an invalid response. Try again later.',
 };
 
 const MESSAGES_BY_STATUS = {
@@ -34,12 +43,18 @@ const MESSAGES_BY_STATUS = {
 
 // Characters outside plain ASCII mean the text is not English (for example Vietnamese).
 const NON_ENGLISH = /[^\t\n\r\x20-\x7E]/;
+// Vietnamese written without accents (check kept from LD-101, PR #69).
+const UNACCENTED_VIETNAMESE = /\b(khong|loi|that bai|ket noi|yeu cau|vui long|xac thuc|khong the)\b/i;
+
+function isEnglish(message) {
+  return !NON_ENGLISH.test(message) && !UNACCENTED_VIETNAMESE.test(message);
+}
 
 export function apiErrorMessage(code, status, serviceMessage) {
   if (code && MESSAGES_BY_CODE[code]) {
     return MESSAGES_BY_CODE[code];
   }
-  if (typeof serviceMessage === 'string' && serviceMessage.trim() && !NON_ENGLISH.test(serviceMessage)) {
+  if (typeof serviceMessage === 'string' && serviceMessage.trim() && isEnglish(serviceMessage)) {
     return serviceMessage;
   }
   return MESSAGES_BY_STATUS[status] || `Request failed (HTTP ${status}).`;
