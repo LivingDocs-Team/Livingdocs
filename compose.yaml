@@ -134,6 +134,7 @@
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-livingdocs-dev-hai}
       GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-http://localhost:8082/api/github/callback}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       CODE_ANALYZER_BASE_URL: http://code-analyzer:8000
       AI_SERVICE_BASE_URL: http://ai-service:8001

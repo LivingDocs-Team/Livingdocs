@@ -968,6 +968,47 @@ button:disabled {
   line-height: 1.5;
 }
 
+/* LD-68: PR & Commit List */
+.repository-activity {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.repository-activity h3 {
+  margin: 12px 0 6px;
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.activity-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.activity-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.activity-list a {
+  color: #1d4ed8;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.activity-meta,
+.activity-empty {
+  color: #64748b;
+  font-size: 12px;
+}
+
 .sync-error {
   margin: 10px 0 0;
   padding: 10px 12px;

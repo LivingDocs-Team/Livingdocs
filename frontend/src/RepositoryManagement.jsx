@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import './App.css';
 import { githubApi } from './githubApi';
+import RepositoryActivity from './RepositoryActivity';
 
 export default function RepositoryManagement({ userId }) {
   const workspaceId = userId ? `ws-${userId}` : '';
@@ -18,6 +19,7 @@ export default function RepositoryManagement({ userId }) {
   const [connectionStatus, setConnectionStatus] = useState('DISCONNECTED');
   const [isLoading, setIsLoading] = useState(Boolean(userId));
   const [isAdding, setIsAdding] = useState(false);
+  const [activityRepoId, setActivityRepoId] = useState(null);
 
   const refreshRepositories = useCallback(async (active = true) => {
     if (!userId) {
@@ -286,11 +288,21 @@ export default function RepositoryManagement({ userId }) {
                             </button>
                           )}
                           {inWorkspace && (
+                            <button type="button" className="sync-secondary-button" aria-expanded={activityRepoId === repo.id}
+                              onClick={() => setActivityRepoId((current) => (current === repo.id ? null : repo.id))}>
+                              {activityRepoId === repo.id ? 'Hide PRs & commits' : 'PRs & commits'}
+                            </button>
+                          )}
+                          {inWorkspace && (
                             <button type="button" className="sync-secondary-button" onClick={() => removeFromWorkspace(repo)}>
                               Remove
                             </button>
                           )}
                         </div>
+                        {inWorkspace && activityRepoId === repo.id && (
+                          // key: reload after each sync, which also backfills pull requests and commits
+                          <RepositoryActivity key={`${repo.id}-${repo.lastSyncedAt}`} repository={repo} userId={userId} />
+                        )}
                       </div>
                     </li>
                   );

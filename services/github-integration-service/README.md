@@ -23,6 +23,9 @@ Công nghệ: Java 21, Spring Boot 3.5, PostgreSQL, Flyway, Swagger (springdoc).
 | GET | `/api/repositories/{id}/sync/latest` | Kết quả lần đồng bộ gần nhất |
 | GET | `/api/repositories/{id}/sync/latest/analysis-input` | Dữ liệu gửi sang service phân tích code (`POST /api/v1/analyze-repo`, LD-395) |
 | DELETE | `/api/repositories/{id}` | Gỡ repo khỏi workspace |
+| GET | `/api/repositories/{id}/pull-requests` | Pull Request đã nhận của repo (LD-68), cập nhật gần nhất trước |
+| GET | `/api/repositories/{id}/commits` | Commit đã nhận của repo (LD-68), mới nhất trước |
+| POST | `/api/github/webhook` | GitHub gọi khi có `push` / `pull_request` (LD-68). Không qua Backend, xác thực bằng chữ ký `X-Hub-Signature-256` |
 
 > Browser không gọi service này trực tiếp. Backend BFF xác minh session, lấy user ID từ principal phía server và gửi request kèm `GITHUB_INTEGRATION_INTERNAL_SECRET`. GitHub Integration từ chối request thiếu/sai credential. Chi tiết: [Backend BFF authentication contract](docs/backend-bff-authentication.md).
 
@@ -74,10 +77,29 @@ Dữ liệu mẫu (cho frontend, test, service phân tích) và hướng dẫn c
 
 Chạy thử với GitHub thật (repo public, không cần token): chạy `GitHubRepositoryFetcherLiveTest` với biến môi trường `GITHUB_LIVE_TEST=true` (tuỳ chọn thêm `GITHUB_LIVE_REPO=owner/repo`).
 
+## Nhận Pull Request và commit (LD-68)
+
+Hai nguồn, cùng ghi vào bảng `github_pull_requests` và `github_commits` (migration `V2`):
+
+- **Webhook** `POST /api/github/webhook`: kiểm chữ ký bằng `GITHUB_WEBHOOK_SECRET`, chỉ nhận event `push` và `pull_request` của repo đã thêm vào workspace. GitHub gửi lại cùng `X-GitHub-Delivery` thì trả `DUPLICATE`, không ghi lần hai. Push tag hoặc xoá nhánh không tạo commit.
+- **Lấy bù khi đồng bộ**: mỗi lần `POST /api/repositories/{id}/sync` thành công thì lưu các commit gần nhất của nhánh và 30 Pull Request cập nhật gần nhất, để không mất dữ liệu khi webhook bị lỡ (service tắt, mạng lỗi). Không lấy được danh sách PR thì chỉ ghi log, lần đồng bộ vẫn thành công.
+
+Mỗi commit (theo SHA) và mỗi Pull Request (theo số) chỉ có một dòng cho mỗi repo. Event Pull Request cũ đến muộn không ghi đè dữ liệu mới hơn. Gỡ repo khỏi workspace thì xoá luôn PR và commit của repo đó.
+
+**Cấu hình webhook cho GitHub App** (người quản lý app `livingdocs-dev-hai`):
+
+1. Tạo một chuỗi ngẫu nhiên làm secret và điền vào `GITHUB_WEBHOOK_SECRET` trong `.env` (không commit).
+2. Khi chạy trên máy, GitHub không gọi được `localhost`, nên dùng kênh chuyển tiếp: mở https://smee.io/new, lấy URL rồi chạy
+   ```bash
+   npx smee-client --url https://smee.io/<kenh-cua-ban> --target http://localhost:8082/api/github/webhook
+   ```
+3. Trong trang cài đặt GitHub App: bật **Webhook → Active**, điền **Webhook URL** (URL smee ở bước 2) và **Webhook secret** (giống bước 1).
+4. Mục **Permissions & events → Subscribe to events**: chọn **Push** và **Pull request**. App đã có quyền đọc Contents và Pull requests nên không cần thêm quyền.
+5. Mục **Advanced** của app hiện lần gửi `ping`; service trả `{"status":"PONG"}` là cấu hình đúng.
+
 ## Chưa làm (để sprint sau)
 
-- Webhook (`push`, `pull_request`) và kiểm tra chữ ký HMAC
-- Kéo Pull Request và commit về database, gửi event Kafka cho TV3 và TV4
+- Phát hiện file và code entity thay đổi từ commit / Pull Request đã nhận (LD-116), gửi event cho TV3 và TV4
 - Thông báo cho người dùng khi token hỏng (hiện tại mới đánh dấu trạng thái `INVALID`)
 - Duy trì credential service-to-service trong secret manager phù hợp với môi trường triển khai
 - Lưu kết quả đồng bộ vào database (hiện chỉ giữ lần gần nhất trong bộ nhớ) và chạy đồng bộ ở nền cho repo lớn
