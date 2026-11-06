@@ -171,8 +171,8 @@ public class SourceChangeService {
             }
         }
 
-        Map<String, List<CodeEntity>> afterEntities = analyzerClient.analyze(repo.getFullName(), afterFiles);
-        Map<String, List<CodeEntity>> beforeEntities = analyzerClient.analyze(repo.getFullName(), beforeFiles);
+        Map<String, List<CodeEntity>> afterEntities = analyze(repo.getFullName(), afterFiles);
+        Map<String, List<CodeEntity>> beforeEntities = analyze(repo.getFullName(), beforeFiles);
         for (SourceChangeFile row : rows) {
             UnifiedDiff diff = diffs.get(row.getPath());
             if (diff == null) {
@@ -189,6 +189,11 @@ public class SourceChangeService {
             }
         }
         return rows;
+    }
+
+    /** Không gọi Code Analyzer khi không có file nào để phân tích (vd. commit chỉ sửa README, hoặc chỉ thêm file mới). */
+    private Map<String, List<CodeEntity>> analyze(String target, List<AnalysisInput.FileInput> files) {
+        return files.isEmpty() ? Map.of() : analyzerClient.analyze(target, files);
     }
 
     private String accessToken(ConnectedRepository repo) {
