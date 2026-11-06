@@ -1,34 +1,45 @@
 import json
 import sys
+import os
+
+# Thêm ai-service và code-analyzer vào PYTHONPATH
+sys.path.append(os.path.abspath("ai-service"))
+sys.path.append(os.path.abspath("code-analyzer"))
+
 from app.extractor import analyze_code_diff
-from app.retrieval import scan_markdown_docs, match_affected_docs
-from app.evidence import generate_drift_evidence
+from app.retrieval import DocRetriever
+from app.evidence import build_drift_evidences
 
-def run_drift_detection(sample_code_path: str, docs_dir: str = "Docs"):
-    print("=== [LD-146] Analyzing PR Code Changes ===")
-    with open(sample_code_path, "r", encoding="utf-8") as f:
+def run_drift_check(code_file_path: str, docs_dir: str = "Docs"):
+    print(f"=== [LD-146] Analyzing PR Changes: {code_file_path} ===")
+    if not os.path.exists(code_file_path):
+        print(f"File {code_file_path} không tồn tại.")
+        return
+
+    with open(code_file_path, "r", encoding="utf-8") as f:
         code_content = f.read()
-    
-    analysis_result = analyze_code_diff(sample_code_path, code_content)
-    print(f"Detected Functions: {[f['name'] for f in analysis_result.get('functions', [])]}")
 
-    print("\n=== [LD-147 & LD-148] Scanning Docs & Matching Affected Files ===")
-    docs = scan_markdown_docs(docs_dir)
-    affected_docs = match_affected_docs(analysis_result.get("functions", []), docs)
-    print(f"Found {len(affected_docs)} documentation matches.")
+    analysis_res = analyze_code_diff(code_file_path, code_content)
+    changed_functions = analysis_res.get("functions", [])
+    print(f"-> Tìm thấy {len(changed_functions)} hàm bị thay đổi.")
+
+    print("\n=== [LD-147 & LD-148] Matching Affected Docs ===")
+    retriever = DocRetriever(docs_dir=docs_dir)
+    affected_docs = retriever.find_affected_docs(changed_functions)
+    print(f"-> Tìm thấy {len(affected_docs)} tài liệu liên quan bị ảnh hưởng.")
 
     print("\n=== [LD-149] Generating Drift Evidence ===")
-    evidences = generate_drift_evidence(analysis_result, affected_docs)
+    evidences = build_drift_evidences(affected_docs)
     
     report = {
         "status": "SUCCESS",
-        "total_drifts": len([e for e in evidences if e["drift_detected"]]),
-        "evidences": evidences
+        "total_drifts": len([e for e in evidences if e.drift_detected]),
+        "evidences": [e.__dict__ if hasattr(e, '__dict__') else e for e in evidences]
     }
-    
+
     print(json.dumps(report, indent=2, ensure_ascii=False))
     return report
 
 if __name__ == "__main__":
     target_code = sys.argv[1] if len(sys.argv) > 1 else "code-analyzer/app/extractor.py"
-    run_drift_detection(target_code)
+    run_drift_check(target_code)
