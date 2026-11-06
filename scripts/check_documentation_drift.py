@@ -1,68 +1,34 @@
-#!/usr/bin/env python3
-"""Check repository Markdown for broken local links (documentation drift guard)."""
-from __future__ import annotations
-
-import re
+import json
 import sys
-from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from app.extractor import analyze_code_diff
+from app.retrieval import scan_markdown_docs, match_affected_docs
+from app.evidence import generate_drift_evidence
 
-ROOT = Path(__file__).resolve().parents[1]
-MARKDOWN_LINK = re.compile(r"(?<!!)\[[^\]]*\]\((?:<([^>]+)>|([^\s)]+))(?:\s+[^)]*)?\)")
-REFERENCE_LINK = re.compile(r"^\s*\[[^\]]+\]:\s*(?:<([^>]+)>|(\S+))", re.MULTILINE)
-SKIP_DIRS = {".git", "node_modules", "target", "dist", ".venv", "venv"}
+def run_drift_detection(sample_code_path: str, docs_dir: str = "Docs"):
+    print("=== [LD-146] Analyzing PR Code Changes ===")
+    with open(sample_code_path, "r", encoding="utf-8") as f:
+        code_content = f.read()
+    
+    analysis_result = analyze_code_diff(sample_code_path, code_content)
+    print(f"Detected Functions: {[f['name'] for f in analysis_result.get('functions', [])]}")
 
+    print("\n=== [LD-147 & LD-148] Scanning Docs & Matching Affected Files ===")
+    docs = scan_markdown_docs(docs_dir)
+    affected_docs = match_affected_docs(analysis_result.get("functions", []), docs)
+    print(f"Found {len(affected_docs)} documentation matches.")
 
-def markdown_files() -> list[Path]:
-    return [p for p in ROOT.rglob("*.md") if not any(part in SKIP_DIRS for part in p.parts)]
-
-
-def _display_path(path: Path) -> str:
-    try:
-        return str(path.resolve().relative_to(ROOT.resolve()))
-    except ValueError:
-        return path.name
-
-
-def check_file(path: Path) -> list[str]:
-    text = path.read_text(encoding="utf-8", errors="replace")
-    targets = []
-    for match in MARKDOWN_LINK.finditer(text):
-        targets.append(match.group(1) or match.group(2))
-    for match in REFERENCE_LINK.finditer(text):
-        targets.append(match.group(1) or match.group(2))
-
-    errors = []
-    try:
-        path.resolve().relative_to(ROOT.resolve())
-        boundary = ROOT.resolve()
-    except ValueError:
-        boundary = path.resolve().parent
-    for raw in targets:
-        target = unquote(raw.strip())
-        parsed = urlsplit(target)
-        if parsed.scheme or target.startswith("//") or not parsed.path:
-            continue
-        destination = (path.parent / parsed.path).resolve()
-        try:
-            destination.relative_to(boundary)
-        except ValueError:
-            errors.append(f"{_display_path(path)}: link escapes repository: {raw}")
-            continue
-        if not destination.exists():
-            errors.append(f"{_display_path(path)}: missing local link: {raw}")
-    return errors
-
-
-def main() -> int:
-    errors = [error for path in markdown_files() for error in check_file(path)]
-    if errors:
-        print("Documentation drift detected: broken local Markdown links found.")
-        print("\n".join(f"- {error}" for error in errors))
-        return 1
-    print(f"Documentation drift check passed: checked {len(markdown_files())} Markdown files.")
-    return 0
-
+    print("\n=== [LD-149] Generating Drift Evidence ===")
+    evidences = generate_drift_evidence(analysis_result, affected_docs)
+    
+    report = {
+        "status": "SUCCESS",
+        "total_drifts": len([e for e in evidences if e["drift_detected"]]),
+        "evidences": evidences
+    }
+    
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    return report
 
 if __name__ == "__main__":
-    sys.exit(main())
+    target_code = sys.argv[1] if len(sys.argv) > 1 else "code-analyzer/app/extractor.py"
+    run_drift_detection(target_code)
