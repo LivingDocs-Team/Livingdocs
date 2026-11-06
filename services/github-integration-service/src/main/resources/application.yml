@@ -23,6 +23,8 @@ github:
   client-secret: ${GITHUB_CLIENT_SECRET:}
   app-slug: ${GITHUB_APP_SLUG:livingdocs-dev-hai}
   redirect-uri: ${GITHUB_REDIRECT_URI:http://localhost:8082/api/github/callback}
+  # LD-68: secret khai báo ở mục Webhook của GitHub App, dùng để kiểm chữ ký X-Hub-Signature-256
+  webhook-secret: ${GITHUB_WEBHOOK_SECRET:}
   oauth-base-url: https://github.com
   api-base-url: https://api.github.com
 
