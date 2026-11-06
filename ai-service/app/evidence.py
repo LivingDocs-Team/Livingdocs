@@ -1,32 +1,38 @@
-from typing import Dict, Any, List
-from app.confidence import calculate_confidence_score  # Module đánh giá điểm tin cậy
+from typing import List, Dict, Any
+from app.doc_schema import DriftEvidence
+from app.confidence import calculate_confidence_score
 
-def generate_drift_evidence(
-    changed_code_info: Dict[str, Any],
-    affected_docs: List[Dict[str, Any]]
-) -> List[Dict[str, Any]]:
+def build_drift_evidences(affected_docs: List[Dict[str, Any]]) -> List[DriftEvidence]:
     """
-    Tổng hợp bằng chứng Drift bao gồm Code diff, Doc snippet và điểm tin cậy
+    [LD-149] Tổng hợp bằng chứng Drift và tính điểm tin cậy (Confidence Score)
     """
-    evidence_list = []
-    
-    for doc in affected_docs:
-        fn_name = doc["function_name"]
-        # Lấy chi tiết hàm bị thay đổi
-        code_detail = next((f for f in changed_code_info.get("functions", []) if f["name"] == fn_name), {})
-        
-        # Đánh giá mức độ sai lệch (Drift Score)
-        confidence_score = calculate_confidence_score(code_detail, doc["matched_snippet"])
-        
-        evidence = {
-            "function_name": fn_name,
-            "doc_path": doc["doc_path"],
-            "code_details": code_detail,
-            "doc_snippet": doc["matched_snippet"],
-            "drift_detected": confidence_score > 0.6,
-            "confidence_score": confidence_score,
-            "explanation": f"Hàm `{fn_name}` có thay đổi về tham số hoặc logic nhưng tài liệu tại `{doc['doc_path']}` chưa cập nhật tương ứng."
-        }
-        evidence_list.append(evidence)
-        
-    return evidence_list
+    evidences = []
+
+    for item in affected_docs:
+        elem_details = item.get("element_details", {})
+        snippet = item.get("snippet", "")
+        elem_name = item.get("element_name", "")
+        doc_path = item.get("doc_path", "")
+
+        # Tính điểm tin cậy từ confidence.py
+        score = calculate_confidence_score(elem_details, snippet)
+        is_drift = score > 0.6
+
+        explanation = (
+            f"Phát hiện sự lệch pha giữa code và tài liệu tại '{doc_path}'. "
+            f"Thành phần '{elem_name}' có thay đổi thông số/logic nhưng tài liệu chưa cập nhật đầy đủ."
+            if is_drift else "Tài liệu đồng bộ với thay đổi trong mã nguồn."
+        )
+
+        evidence = DriftEvidence(
+            element_name=elem_name,
+            doc_path=doc_path,
+            code_summary=str(elem_details),
+            doc_snippet=snippet,
+            confidence_score=score,
+            drift_detected=is_drift,
+            explanation=explanation
+        )
+        evidences.append(evidence)
+
+    return evidences
