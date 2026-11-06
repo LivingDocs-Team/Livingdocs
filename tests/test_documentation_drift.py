@@ -1,19 +1,35 @@
-from pathlib import Path
+import pytest
+from app.extractor import analyze_code_diff
+from app.retrieval import match_affected_docs
+from app.evidence import generate_drift_evidence
 
-from scripts.check_documentation_drift import ROOT, check_file
+def test_code_change_analysis():
+    sample_code = """
+def update_user_profile(user_id: str, email: str, age: int):
+    '''Update user information.'''
+    pass
+"""
+    result = analyze_code_diff("test.py", sample_code)
+    assert result["status"] == "SUCCESS"
+    assert len(result["functions"]) == 1
+    assert result["functions"][0]["name"] == "update_user_profile"
+    assert "age" in result["functions"][0]["args"]
 
-
-def test_existing_local_markdown_link_passes(tmp_path: Path):
-    target = tmp_path / "target.md"
-    target.write_text("# target", encoding="utf-8")
-    source = tmp_path / "README.md"
-    source.write_text("[target](target.md)\n", encoding="utf-8")
-    assert check_file(source) == []
-
-
-def test_missing_local_markdown_link_is_reported(tmp_path: Path):
-    source = tmp_path / "README.md"
-    source.write_text("[missing](missing.md)\n", encoding="utf-8")
-    errors = check_file(source)
-    assert len(errors) == 1
-    assert "missing local link" in errors[0]
+def test_drift_evidence_generation():
+    changed_code_info = {
+        "functions": [
+            {"name": "update_user_profile", "args": ["user_id", "email", "age"]}
+        ]
+    }
+    affected_docs = [
+        {
+            "function_name": "update_user_profile",
+            "doc_path": "Docs/API.md",
+            "matched_snippet": "update_user_profile(user_id, email) - Updates user info."
+        }
+    ]
+    
+    evidences = generate_drift_evidence(changed_code_info, affected_docs)
+    assert len(evidences) == 1
+    assert evidences[0]["drift_detected"] is True
+    assert evidences[0]["confidence_score"] > 0.6
