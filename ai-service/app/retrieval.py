@@ -1,48 +1,54 @@
 import os
 import re
 from typing import List, Dict, Any
+from app.doc_schema import DocSchema
 
-def scan_markdown_docs(docs_dir: str = "Docs") -> List[Dict[str, str]]:
-    """
-    Quét toàn bộ tài liệu Markdown trong thư mục Docs/
-    """
-    documents = []
-    if not os.path.exists(docs_dir):
+class DocRetriever:
+    def __init__(self, docs_dir: str = "Docs"):
+        self.docs_dir = docs_dir
+
+    def scan_docs(self) -> List[DocSchema]:
+        """
+        Quét toàn bộ tài liệu Markdown trong thư mục Docs/
+        """
+        documents = []
+        if not os.path.exists(self.docs_dir):
+            return documents
+
+        for root, _, files in os.walk(self.docs_dir):
+            for file in files:
+                if file.endswith(".md"):
+                    full_path = os.path.join(root, file)
+                    with open(full_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    documents.append(DocSchema(path=full_path, content=content))
         return documents
 
-    for root, _, files in os.walk(docs_dir):
-        for file in files:
-            if file.endswith(".md"):
-                full_path = os.path.join(root, file)
-                with open(full_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                documents.append({
-                    "path": full_path,
-                    "content": content
-                })
-    return documents
+    def find_affected_docs(self, changed_elements: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        [LD-148] Tìm các file và đoạn tài liệu bị ảnh hưởng bởi code thay đổi
+        """
+        all_docs = self.scan_docs()
+        affected = []
 
-def match_affected_docs(changed_functions: List[Dict[str, Any]], docs: List[Dict[str, str]]) -> List[Dict[str, Any]]:
-    """
-    Xác định tài liệu nào bị ảnh hưởng dựa trên tên hàm/API/tham số
-    """
-    affected_docs = []
-    for fn in changed_functions:
-        fn_name = fn["name"]
-        for doc in docs:
-            # Tìm kiếm tên hàm hoặc từ khóa liên quan trong file Markdown
-            if re.search(r'\b' + re.escape(fn_name) + r'\b', doc["content"]):
-                affected_docs.append({
-                    "function_name": fn_name,
-                    "doc_path": doc["path"],
-                    "matched_snippet": extract_snippet(doc["content"], fn_name)
-                })
-    return affected_docs
+        for elem in changed_elements:
+            elem_name = elem.get("name", "")
+            if not elem_name:
+                continue
 
-def extract_snippet(text: str, keyword: str, window: int = 200) -> str:
-    match = re.search(r'\b' + re.escape(keyword) + r'\b', text)
-    if not match:
-        return ""
-    start = max(0, match.start() - window)
-    end = min(len(text), match.end() + window)
-    return text[start:end]
+            for doc in all_docs:
+                pattern = r'\b' + re.escape(elem_name) + r'\b'
+                match = re.search(pattern, doc.content)
+                if match:
+                    # Trích xuất đoạn text xung quanh keyword (window 200 ký tự)
+                    start = max(0, match.start() - 200)
+                    end = min(len(doc.content), match.end() + 200)
+                    snippet = doc.content[start:end]
+
+                    affected.append({
+                        "element_name": elem_name,
+                        "doc_path": doc.path,
+                        "snippet": snippet,
+                        "element_details": elem
+                    })
+        return affected
