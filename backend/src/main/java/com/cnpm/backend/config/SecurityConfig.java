@@ -127,11 +127,12 @@ public class SecurityConfig {
             )
 
             .oauth2Login(oauth -> oauth
-    .userInfoEndpoint(userInfo -> userInfo
-        .userService(gitHubOAuth2UserService)
-    )
-    .defaultSuccessUrl("/api/auth/oauth2/success", true)
-);
+                .userInfoEndpoint(userInfo -> userInfo
+                    .userService(gitHubOAuth2UserService)
+                )
+                .defaultSuccessUrl("/api/auth/oauth2/success", true)
+                .failureUrl("/?oauth=error")
+            );
 
         return http.build();
     }
