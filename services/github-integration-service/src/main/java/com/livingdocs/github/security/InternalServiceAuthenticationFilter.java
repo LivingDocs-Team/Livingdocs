@@ -19,6 +19,8 @@ import jakarta.servlet.http.HttpServletResponse;
 public class InternalServiceAuthenticationFilter extends OncePerRequestFilter {
 
     private static final String CALLBACK_PATH = "/api/github/callback";
+    /** LD-68: GitHub gọi thẳng, webhook tự kiểm chữ ký X-Hub-Signature-256. */
+    private static final String WEBHOOK_PATH = "/api/github/webhook";
     private static final String HEALTH_PATH = "/actuator/health";
     private final String expectedCredential;
 
@@ -35,6 +37,7 @@ public class InternalServiceAuthenticationFilter extends OncePerRequestFilter {
 
         return HEALTH_PATH.equals(path)
                 || (CALLBACK_PATH.equals(path) && isGet)
+                || (WEBHOOK_PATH.equals(path) && "POST".equals(request.getMethod()))
                 || (isGet && (
                         "/v3/api-docs".equals(path)
                         || path.startsWith("/v3/api-docs/")

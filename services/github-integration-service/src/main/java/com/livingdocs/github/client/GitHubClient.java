@@ -185,6 +185,21 @@ public class GitHubClient {
         return result == null ? List.of() : result;
     }
 
+    // ------------------------------------------------------------------ Pull Request (LD-68)
+
+    /** Các Pull Request (mọi trạng thái) cập nhật gần nhất trước. limit tối đa 100. */
+    public List<GitHubPullRequest> listPullRequests(String accessToken, String owner, String repo, int limit) {
+        int perPage = Math.max(1, Math.min(limit, PER_PAGE));
+        List<GitHubPullRequest> result = call(() -> apiClient.get()
+                .uri("/repos/{owner}/{repo}/pulls?state=all&sort=updated&direction=desc&per_page={pp}",
+                        owner, repo, perPage)
+                .headers(auth(accessToken))
+                .retrieve()
+                .body(new ParameterizedTypeReference<List<GitHubPullRequest>>() {
+                }));
+        return result == null ? List.of() : result;
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private List<Installation> listInstallations(String accessToken) {
