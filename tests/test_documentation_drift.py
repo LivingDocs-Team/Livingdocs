@@ -1,35 +1,38 @@
 import pytest
-from app.extractor import analyze_code_diff
-from app.retrieval import match_affected_docs
-from app.evidence import generate_drift_evidence
+import sys
+import os
 
-def test_code_change_analysis():
+sys.path.append(os.path.abspath("ai-service"))
+sys.path.append(os.path.abspath("code-analyzer"))
+
+from app.extractor import analyze_code_diff
+from app.confidence import calculate_confidence_score
+from app.evidence import build_drift_evidences
+
+def test_analyze_code_diff_ld146():
     sample_code = """
-def update_user_profile(user_id: str, email: str, age: int):
-    '''Update user information.'''
+def sample_api_call(param1: str, param2: int):
+    '''Sample docstring.'''
     pass
 """
-    result = analyze_code_diff("test.py", sample_code)
+    result = analyze_code_diff("sample.py", sample_code)
     assert result["status"] == "SUCCESS"
     assert len(result["functions"]) == 1
-    assert result["functions"][0]["name"] == "update_user_profile"
-    assert "age" in result["functions"][0]["args"]
+    assert result["functions"][0]["name"] == "sample_api_call"
 
-def test_drift_evidence_generation():
-    changed_code_info = {
-        "functions": [
-            {"name": "update_user_profile", "args": ["user_id", "email", "age"]}
-        ]
-    }
-    affected_docs = [
-        {
-            "function_name": "update_user_profile",
-            "doc_path": "Docs/API.md",
-            "matched_snippet": "update_user_profile(user_id, email) - Updates user info."
-        }
-    ]
-    
-    evidences = generate_drift_evidence(changed_code_info, affected_docs)
+def test_confidence_score_ld149():
+    code_details = {"name": "sample_api_call", "args": ["param1", "param2_new"]}
+    doc_snippet = "Function sample_api_call accepts param1 only."
+    score = calculate_confidence_score(code_details, doc_snippet)
+    assert score > 0.6
+
+def test_drift_evidence_ld149():
+    affected_docs = [{
+        "element_name": "sample_api_call",
+        "doc_path": "Docs/API.md",
+        "snippet": "sample_api_call(param1)",
+        "element_details": {"name": "sample_api_call", "args": ["param1", "param2_new"]}
+    }]
+    evidences = build_drift_evidences(affected_docs)
     assert len(evidences) == 1
-    assert evidences[0]["drift_detected"] is True
-    assert evidences[0]["confidence_score"] > 0.6
+    assert evidences[0].drift_detected is True
