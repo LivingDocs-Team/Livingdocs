@@ -9,6 +9,7 @@ import NotificationPreferences from './NotificationPreferences';
 import GitHubConnection from './GitHubConnection';
 import RepositoryManagement from './RepositoryManagement';
 import DocumentationManagement from './DocumentationManagement';
+import DocumentationSearch from './DocumentationSearch';
 
 function App() {
   const [page, setPage] = useState('login');
@@ -17,7 +18,11 @@ function App() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [loginError, setLoginError] = useState('');
+  const [loginError, setLoginError] = useState(() => (
+    new URLSearchParams(window.location.search).get('oauth') === 'error'
+      ? 'Could not sign in with GitHub. If your LivingDocs account already uses this email, sign in with your password and connect GitHub from GitHub Connection.'
+      : ''
+  ));
   const [loginSuccess, setLoginSuccess] = useState('');
   const [logoutError, setLogoutError] = useState('');
 
@@ -110,8 +115,8 @@ function App() {
         const errorMessage = response.status === 401
           ? 'Invalid email or password.'
           : response.status === 400
-            ? 'Please enter a valid email and password.'
-            : 'Login failed. Please try again.';
+            ? (result?.message || 'Please enter a valid email and password.')
+            : (result?.message || result?.detail || `Login failed (HTTP ${response.status}). Please try again.`);
         setLoginError(errorMessage);
         return;
       }
@@ -230,6 +235,18 @@ function App() {
             <p className="switch-page">
               <button type="button" onClick={() => setPage('login')}>
                 Back to login
+              </button>
+            </p>
+          </>
+        );
+
+      case 'search':
+        return (
+          <>
+            <DocumentationSearch userId={userId} />
+            <p className="switch-page">
+              <button type="button" onClick={() => setPage('documentation')}>
+                Back to Documentation Management
               </button>
             </p>
           </>
@@ -368,6 +385,18 @@ function App() {
                   </span>
                   <span className="quick-access-link">Open feature →</span>
                 </button>
+                <button
+                  className="quick-access-card"
+                  type="button"
+                  onClick={() => setPage('search')}
+                >
+                  <span className="quick-access-icon" aria-hidden="true">⌕</span>
+                  <span className="quick-access-title">Documentation Search</span>
+                  <span className="quick-access-description">
+                    Find documentation and linked code in your repositories.
+                  </span>
+                  <span className="quick-access-link">Open feature ↗</span>
+                </button>
               </div>
             </section>
           </main>
@@ -394,6 +423,10 @@ function App() {
 
             <button type="button" onClick={() => setPage('documentation')}>
               Documentation Management
+            </button>
+
+            <button type="button" onClick={() => setPage('search')}>
+              Documentation Search
             </button>
 
             <button type="button" onClick={() => setPage('profile')}>
