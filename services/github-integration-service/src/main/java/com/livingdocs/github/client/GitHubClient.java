@@ -200,6 +200,40 @@ public class GitHubClient {
         return result == null ? List.of() : result;
     }
 
+    // ------------------------------------------------------------------ File thay đổi (LD-116)
+
+    /** File thay đổi của một commit (GitHub trả tối đa 300 file đầu tiên). */
+    public List<GitHubChangedFile> getCommitFiles(String accessToken, String owner, String repo, String sha) {
+        CommitFiles commit = call(() -> apiClient.get().uri("/repos/{owner}/{repo}/commits/{sha}", owner, repo, sha)
+                .headers(auth(accessToken))
+                .retrieve()
+                .body(CommitFiles.class));
+        return commit == null || commit.files() == null ? List.of() : commit.files();
+    }
+
+    /** File thay đổi của một Pull Request so với nhánh đích, tối đa 1000 file. */
+    public List<GitHubChangedFile> listPullRequestFiles(String accessToken, String owner, String repo, int number) {
+        List<GitHubChangedFile> result = new ArrayList<>();
+        for (int page = 1; page <= MAX_PAGES; page++) {
+            final int p = page;
+            List<GitHubChangedFile> files = call(() -> apiClient.get()
+                    .uri("/repos/{owner}/{repo}/pulls/{number}/files?per_page={pp}&page={p}",
+                            owner, repo, number, PER_PAGE, p)
+                    .headers(auth(accessToken))
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<List<GitHubChangedFile>>() {
+                    }));
+            if (files == null || files.isEmpty()) {
+                break;
+            }
+            result.addAll(files);
+            if (files.size() < PER_PAGE) {
+                break;
+            }
+        }
+        return result;
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private List<Installation> listInstallations(String accessToken) {
@@ -267,5 +301,9 @@ public class GitHubClient {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record InstallationRepos(@JsonProperty("total_count") Integer totalCount, List<GitHubRepo> repositories) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record CommitFiles(String sha, List<GitHubChangedFile> files) {
     }
 }
