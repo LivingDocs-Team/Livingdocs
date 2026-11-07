@@ -129,6 +129,7 @@ public class DocumentationCodeRelationshipService {
             throw ApiException.badRequest("One or more code entities are missing, inactive, or belong to another repository.");
         }
         relationshipRepository.deleteByDocumentationId(documentId);
+        relationshipRepository.flush();
         for (CodeEntity target : targets) {
             DocumentationCodeRelationship relation = new DocumentationCodeRelationship();
             relation.setDocumentationId(documentId);
