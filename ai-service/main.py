@@ -1,12 +1,12 @@
 """LivingDocs AI service - AI-assisted documentation generation (LD-90, LD-340) and versioned
-documentation (LD-195).
+documentation (LD-195, LD-128).
 
 Run:  uvicorn main:app --reload --port 8001
 Docs: http://localhost:8001/docs
 """
 from typing import List, Optional
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Response
 from fastapi.responses import PlainTextResponse
 
 from app.generator import get_generator
@@ -14,8 +14,8 @@ from app.jobs import jobs, run_job
 from app.models import (SECTION_KINDS, SECTION_NAMES, GenerateRequest, Job, JobReport, JobStatus,
                         Template, TemplateIn, TemplateSections)
 from app.templates import TemplateNameTaken, templates
-from app.version_models import (Document, DocumentCreate, DocumentVersion, HistoryEvent,
-                                VersionSummary)
+from app.version_models import (Document, DocumentCreate, DocumentUpdateRequest, DocumentVersion,
+                                HistoryEvent, UpdateResult, VersionSummary)
 from app.versions import VersionError, documents
 
 app = FastAPI(title="LivingDocs AI Service", version="0.1.0")
@@ -131,7 +131,7 @@ def delete_template(template_id: str):
         raise HTTPException(403, str(e))
 
 
-# ---------- Versioned documentation (LD-195) ----------
+# ---------- Versioned documentation (LD-195, LD-128) ----------
 
 def _call(fn, *args, **kwargs):
     try:
@@ -186,3 +186,13 @@ def get_version(doc_id: str, number: int):
 def get_history(doc_id: str):
     """LD-195: who did what and when (created, proposed, accepted, edited, dismissed, ...)."""
     return _call(documents.history, doc_id)
+
+
+@app.post("/documents/{doc_id}/updates", response_model=UpdateResult)
+def update_document(doc_id: str, req: DocumentUpdateRequest, response: Response):
+    """LD-128: regenerate the documentation of the files changed by a source change (LD-116).
+    201 with a proposal to review, or 200 when nothing documented was affected (or the source
+    change is already in the pending proposal)."""
+    result, created = _call(documents.update, doc_id, req)
+    response.status_code = 201 if created else 200
+    return result
