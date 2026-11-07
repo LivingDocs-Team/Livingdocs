@@ -1,5 +1,5 @@
-"""LivingDocs AI service - AI-assisted documentation generation (LD-90, LD-340) and versioned
-documentation (LD-195).
+"""LivingDocs AI service - AI-assisted documentation generation (LD-90, LD-340), versioned
+documentation (LD-195) and documentation drift detection (LD-145).
 
 Run:  uvicorn main:app --reload --port 8001
 Docs: http://localhost:8001/docs
@@ -9,6 +9,11 @@ from typing import List, Optional
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 
+from app.drift import analyze as analyze_drift
+from app.drift import drift_reports
+from app.drift_changes import analyze_pull_request
+from app.drift_models import (DriftAnalyzeRequest, DriftReport, DriftReportSummary,
+                              PullRequestAnalysis)
 from app.generator import get_generator
 from app.jobs import jobs, run_job
 from app.models import (SECTION_KINDS, SECTION_NAMES, GenerateRequest, Job, JobReport, JobStatus,
@@ -186,3 +191,36 @@ def get_version(doc_id: str, number: int):
 def get_history(doc_id: str):
     """LD-195: who did what and when (created, proposed, accepted, edited, dismissed, ...)."""
     return _call(documents.history, doc_id)
+
+
+# ---------- Documentation drift detection (LD-145) ----------
+
+@app.post("/drift/changes", response_model=PullRequestAnalysis)
+def drift_changes(req: DriftAnalyzeRequest):
+    """LD-146: changed code entities of a Pull Request (no documentation is checked, nothing
+    is stored). Same body as /drift/analyze; `docs` and `document_ids` are ignored."""
+    return analyze_pull_request(req.pull_request, req.files, req.repository)
+
+
+@app.post("/drift/analyze", response_model=DriftReport, status_code=201)
+def drift_analyze(req: DriftAnalyzeRequest):
+    """LD-147/148/149: findings (Referential / Signature / Semantic, severity, confidence) for
+    every saved document section and repository Markdown file that describes changed code,
+    each with its evidence (code diff, documentation passage, commit, ticket). The report is
+    kept and can be read again from /drift/reports/{id}."""
+    return drift_reports.add(analyze_drift(req, documents))
+
+
+@app.get("/drift/reports", response_model=List[DriftReportSummary])
+def list_drift_reports(repository: Optional[str] = Query(None, max_length=300),
+                       pull_request: Optional[int] = Query(None, ge=1)):
+    """Drift reports, newest first; filter by `repository` ("owner/name") and Pull Request number."""
+    return drift_reports.list(repository, pull_request)
+
+
+@app.get("/drift/reports/{report_id}", response_model=DriftReport)
+def get_drift_report(report_id: str):
+    report = drift_reports.get(report_id)
+    if report is None:
+        raise HTTPException(404, "Drift report not found")
+    return report

@@ -1,4 +1,4 @@
-# LivingDocs AI Service (LD-90, LD-340, LD-195)
+# LivingDocs AI Service (LD-90, LD-340, LD-195, LD-145)
 
 AI-assisted documentation generation. Takes source code that has already been analyzed
 (classes, methods, endpoints, parameters, return values) and produces Markdown docs
@@ -52,6 +52,10 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | GET | `/documents/{id}/content?version=N` | Markdown of the current (or given) version |
 | GET | `/documents/{id}/versions`, `/versions/{n}` | Version history (newest first) / one version |
 | GET | `/documents/{id}/history` | Audit trail: created, proposed, accepted, edited, dismissed, ... |
+| POST | `/drift/changes` | Changed code entities of a Pull Request (LD-146); nothing is stored |
+| POST | `/drift/analyze` | Drift report of a Pull Request: findings, affected docs, evidence (LD-147/148/149) |
+| GET | `/drift/reports?repository=&pull_request=` | Drift reports, newest first |
+| GET | `/drift/reports/{id}` | One drift report |
 
 Built-in templates: `default`, `api-reference`, `brief`.
 
@@ -79,6 +83,43 @@ for the AI) and an ordered list of `sections` taken from `Overview`, `Classes`, 
   change adds a new, immutable version; nothing is edited in place or deleted (LD-195).
 - Saved to `DOCUMENTS_FILE` (default `data/documents.json`, atomic writes; empty = memory only).
 - Details: `Docs/Linh/` FR6.md.
+
+### Documentation drift detection (LD-145)
+
+Checks whether a Pull Request makes existing documentation outdated.
+
+```
+PR files (patch + analyzer result at base/head)
+  -> LD-146 app/drift_changes.py   changed entities: added / removed / renamed /
+                                   signature_changed / behavior_changed
+  -> LD-148 app/drift_affected.py  saved document sections + repository Markdown that name them
+  -> LD-147 app/drift.py           findings: type, severity, confidence
+  -> LD-149 app/drift_evidence.py  code diff, documentation passage, commit, Jira ticket
+```
+
+- **Input** (`DriftAnalyzeRequest`): `pull_request` (number, title, branch, `head_sha`, url, ...),
+  `files[]` with `path`, `status` (GitHub values), `previous_path`, `patch` (unified diff) and
+  optionally `before` / `after` (analyzer `FileAnalysis`, see [CONTRACT.md](CONTRACT.md)). With
+  `before`/`after` the comparison is exact; with only `patch`, Python and Java declarations are read
+  from the diff (confidence x0.8). `docs[]`: Markdown files of the repository; `document_ids`:
+  saved documents to check (omit = all).
+- **Types** (BR-49): *Referential* (removed / renamed code, moved endpoint, deleted or moved file
+  still named), *Signature* (parameters, return type, fields, endpoint contract changed), *Semantic*
+  (body or docstring changed, or a new entity is not described in its file's section).
+- **Severity** Low < Medium < High < Critical: removed/renamed entity High (endpoint Critical);
+  signature Medium (endpoint +1, the docs still name a removed parameter +1); behaviour Low
+  (docstring changed +1, >= 15 changed lines +1); private `_name` -1. Rules: `app/drift.py`.
+- **Confidence** 0-1 = match x method x location x certainty; levels as LD-340 (high >= 0.75,
+  medium >= 0.50). Every finding has `factors` explaining the score.
+- **Evidence** (BR-50): `X1` code diff of the entity (without a diff: signature and docstring
+  before -> after), `D1..` documentation lines, `C1` commit / PR link, `T1..` Jira keys from the PR
+  title, branch and description.
+- Matching avoids false positives: whole identifiers only, common words (`add`, `run`) only in
+  code / headings, bare method names only in the section of their own file, endpoint paths match
+  any placeholder style (`{id}`, `:id`, `<id>`).
+- Reports are kept in memory (last 500); history and resolution of drift are LD-167.
+- Tests (LD-150): `tests/test_drift.py`, `tests/test_drift_api.py`,
+  `tests/integration/test_drift_integration.py`, live: `test_live_pipeline.py`.
 
 ### Example request
 
@@ -160,6 +201,6 @@ Environment variables: `TEMPLATES_FILE` (default `data/templates.json`), `ANTHRO
 
 ## Notes / next steps
 
-- Jobs are stored in memory and reset on restart. Custom templates are saved to
+- Jobs and drift reports are stored in memory and reset on restart. Custom templates are saved to
   `TEMPLATES_FILE`; templates are shared by all users (the AI service has no user accounts).
 - The `files` input format should match what the LivingDocs code analyzer outputs.
