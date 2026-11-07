@@ -11,6 +11,7 @@ Các chức năng do Nguyễn Thị Phương Linh thực hiện, mỗi chức n�
 | [FR-AI-05](FR5.md) | Mẫu tài liệu (documentation templates) | LD-96 (LD-97 – LD-100) |
 | [FR-AI-06](FR6.md) | Quản lý phiên bản tài liệu (lưu tài liệu, phiên bản, lịch sử) | LD-195 |
 | [FR-AI-07](FR7.md) | Cập nhật tài liệu tự động từ thay đổi mã nguồn | LD-128 (story LD-114) |
+| [FR-AI-08](FR8.md) | Duyệt bản cập nhật: so sánh, accept / edit / dismiss / regenerate | LD-134 (story LD-115) |
 
 Mỗi file gồm: mô tả, danh sách yêu cầu (FR-AI-xx.y), API, dữ liệu, luồng chính, luồng lỗi, quy tắc nghiệp vụ, tiêu chí chấp nhận và test liên quan. Các con số (trọng số, giới hạn, ngưỡng) trong file là giá trị đang dùng trong code, để có thể dựng lại đúng hành vi.
 
@@ -23,6 +24,7 @@ Mỗi file gồm: mô tả, danh sách yêu cầu (FR-AI-xx.y), API, dữ liệu
 
     Commit / Pull Request → LD-116 phát hiện source change → Code Analyzer phân tích file thay đổi
       → FR-AI-07 sinh lại tài liệu file bị ảnh hưởng, tạo đề xuất
+      → FR-AI-08 so sánh với phiên bản hiện hành, chấp nhận / sửa / bỏ qua / sinh lại
 
 ## Quy ước chung
 
