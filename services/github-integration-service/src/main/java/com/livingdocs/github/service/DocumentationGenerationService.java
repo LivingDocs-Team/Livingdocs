@@ -38,7 +38,10 @@ public class DocumentationGenerationService {
         this.aiServiceClient = aiServiceClient;
     }
 
-    /** Analyze the latest authorized repository snapshot and start an AI documentation job. */
+    /**
+     * Analyze the latest authorized repository snapshot and start an AI documentation job.
+     * The snapshot is kept in memory only: after a restart the repository is synchronized again (LD-77).
+     */
     public JsonNode generate(String userId, UUID repositoryId,
             DocumentationGenerationRequest request) {
         RepositorySnapshot snapshot = repositorySyncService.latestOrSync(userId, repositoryId);
