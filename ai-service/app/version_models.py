@@ -1,4 +1,4 @@
-"""Data models for versioned documentation (LD-195, LD-128).
+"""Data models for versioned documentation (LD-195, LD-128, LD-134).
 
 A *document* is the saved result of a generation job. Every change to it is a new, immutable
 *version* (LD-195): the first one comes from the job, later ones from source changes (LD-128),
@@ -111,6 +111,16 @@ class DocumentUpdateRequest(_Actor):
         if dupes:
             raise ValueError(f"duplicate file paths: {', '.join(dupes)}")
         return files
+
+
+class ReviewRequest(_Actor):
+    """Accept, dismiss or regenerate a proposed version (LD-134)."""
+
+
+class EditRequest(_Actor):
+    """Replace the content of a proposed or the current version (LD-134)."""
+    content: str = Field(min_length=1, max_length=2_000_000)
+    accept: bool = True            # True: the edited text becomes the current version at once
 
 
 # ---------- Stored data ----------
@@ -228,3 +238,23 @@ class UpdateResult(BaseModel):
     proposal: Optional[DocumentVersion] = None
     message: str
     warnings: List[str] = Field(default_factory=list)
+
+
+# ---------- Comparison (LD-134) ----------
+
+class FileDiff(BaseModel):
+    path: str
+    change: str                  # added | removed | modified | unchanged
+    added_lines: int = 0
+    removed_lines: int = 0
+
+
+class CompareResult(BaseModel):
+    document_id: str
+    from_version: int
+    to_version: int
+    files: List[FileDiff] = Field(default_factory=list)
+    added_lines: int = 0
+    removed_lines: int = 0
+    identical: bool = False
+    unified_diff: str = ""
