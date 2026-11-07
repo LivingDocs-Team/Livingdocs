@@ -288,5 +288,11 @@ jobs:
       - name: Validate Docker Compose configuration
         run: docker compose -f compose.yaml config --quiet
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build application images
+        run: docker compose -f compose.yaml build github-integration backend ai-service code-analyzer frontend
+        
       - name: Build application images
         run: docker compose -f compose.yaml build backend ai-service code-analyzer github-integration frontend
