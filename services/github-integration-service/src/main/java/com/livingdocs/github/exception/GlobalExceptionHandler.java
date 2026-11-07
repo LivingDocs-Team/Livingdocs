@@ -55,7 +55,9 @@ public class GlobalExceptionHandler {
                                 ? "The requested GitHub resource was not found."
                                 : e.isNetworkError()
                                         ? "Unable to contact GitHub. Please retry later."
-                                        : "GitHub request failed (HTTP " + e.getStatusCode() + ").";
+                                        : e.getStatusCode() > 0
+                                                ? "GitHub request failed (HTTP " + e.getStatusCode() + ")."
+                                                : "GitHub request failed. Please retry later.";
         return build(HttpStatus.BAD_GATEWAY, "GITHUB_API_ERROR", message);
     }
 
@@ -85,6 +87,24 @@ public class GlobalExceptionHandler {
                 .findFirst()
                 .orElse("Dữ liệu không hợp lệ");
         return build(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", message);
+    }
+
+    /**
+     * Lỗi không lường trước (LD-76): trả JSON cùng định dạng với các lỗi khác thay vì trang lỗi mặc định,
+     * không đưa chi tiết bên trong ra ngoài. Lỗi của Spring đã có mã 4xx riêng (sai đường dẫn, sai method...)
+     * thì giữ nguyên mã đó.
+     */
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ErrorResponse> handleUnexpected(Exception e) {
+        if (e instanceof org.springframework.web.ErrorResponse springError) {
+            HttpStatus status = HttpStatus.resolve(springError.getStatusCode().value());
+            if (status != null && status.is4xxClientError()) {
+                return build(status, status.name(), "Request failed (HTTP " + status.value() + ").");
+            }
+        }
+        log.error("Unexpected error in GitHub Integration Service", e);
+        return build(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR",
+                "Unexpected error in the GitHub Integration Service. Please retry later.");
     }
 
     private ResponseEntity<ErrorResponse> build(HttpStatus status, String code, String message) {
