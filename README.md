@@ -7,3 +7,5 @@ link tl SRS: https://ut-team-lvdocs.atlassian.net/wiki/spaces/L/pages/458757/Liv
 
 
 link jira: https://ut-team-lvdocs.atlassian.net/jira/software/projects/LD/boards/1/backlog
+
+Documentation drift detection (LD-145): xem [drift/README.md](drift/README.md) — `python -m drift --base origin/main`.
