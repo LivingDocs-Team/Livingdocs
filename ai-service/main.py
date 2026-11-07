@@ -1,11 +1,12 @@
-"""LivingDocs AI service - AI-assisted documentation generation (LD-90, LD-340).
+"""LivingDocs AI service - AI-assisted documentation generation (LD-90, LD-340) and versioned
+documentation (LD-195).
 
 Run:  uvicorn main:app --reload --port 8001
 Docs: http://localhost:8001/docs
 """
-from typing import List
+from typing import List, Optional
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 
 from app.generator import get_generator
@@ -13,6 +14,9 @@ from app.jobs import jobs, run_job
 from app.models import (SECTION_KINDS, SECTION_NAMES, GenerateRequest, Job, JobReport, JobStatus,
                         Template, TemplateIn, TemplateSections)
 from app.templates import TemplateNameTaken, templates
+from app.version_models import (Document, DocumentCreate, DocumentVersion, HistoryEvent,
+                                VersionSummary)
+from app.versions import VersionError, documents
 
 app = FastAPI(title="LivingDocs AI Service", version="0.1.0")
 
@@ -125,3 +129,60 @@ def delete_template(template_id: str):
         raise HTTPException(404, "Template not found")
     except PermissionError as e:
         raise HTTPException(403, str(e))
+
+
+# ---------- Versioned documentation (LD-195) ----------
+
+def _call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except VersionError as e:
+        raise HTTPException(e.status, e.message)
+
+
+@app.post("/documents", response_model=Document, status_code=201)
+def create_document(data: DocumentCreate):
+    """Save a completed job's result as version 1 of a new document."""
+    job = jobs.get(data.job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found")
+    if job.status != JobStatus.completed:
+        raise HTTPException(409, f"Job is {job.status.value}")
+    output = jobs.get_output(data.job_id)
+    if output is None:
+        raise HTTPException(409, "Job result is no longer available")
+    return documents.create_from_job(data.job_id, output, data.title, data.actor, data.note)
+
+
+@app.get("/documents", response_model=List[Document])
+def list_documents():
+    return documents.list()
+
+
+@app.get("/documents/{doc_id}", response_model=Document)
+def get_document(doc_id: str):
+    return _call(documents.get, doc_id)
+
+
+@app.get("/documents/{doc_id}/content", response_class=PlainTextResponse)
+def get_document_content(doc_id: str, version: Optional[int] = Query(None, ge=1)):
+    """Markdown of the current version, or of `?version=N`."""
+    v = _call(documents.version, doc_id, version)
+    return PlainTextResponse(v.content, media_type="text/markdown")
+
+
+@app.get("/documents/{doc_id}/versions", response_model=List[VersionSummary])
+def list_versions(doc_id: str):
+    """LD-195: version history, newest first."""
+    return _call(documents.versions, doc_id)
+
+
+@app.get("/documents/{doc_id}/versions/{number}", response_model=DocumentVersion)
+def get_version(doc_id: str, number: int):
+    return _call(documents.version, doc_id, number)
+
+
+@app.get("/documents/{doc_id}/history", response_model=List[HistoryEvent])
+def get_history(doc_id: str):
+    """LD-195: who did what and when (created, proposed, accepted, edited, dismissed, ...)."""
+    return _call(documents.history, doc_id)
