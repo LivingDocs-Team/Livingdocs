@@ -30,6 +30,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.livingdocs.github.dto.DocumentationGenerationRequest;
 import com.livingdocs.github.exception.ApiException;
 import com.livingdocs.github.service.DocumentationGenerationService;
+import com.livingdocs.github.service.DocumentationCodeRelationshipService;
 import com.livingdocs.github.service.RepositorySyncService;
 import com.livingdocs.github.sync.RepositorySnapshot;
 
@@ -52,6 +53,9 @@ class DocumentationGenerationServiceTest {
     @Mock
     private RepositorySyncService repositorySyncService;
 
+    @Mock
+    private DocumentationCodeRelationshipService relationshipService;
+
     private MockRestServiceServer analyzerServer;
     private MockRestServiceServer aiServiceServer;
     private DocumentationGenerationService generationService;
@@ -67,8 +71,12 @@ class DocumentationGenerationServiceTest {
         RestClient aiClient = aiBuilder.baseUrl("http://ai.test").build();
 
         generationService = new DocumentationGenerationService(
-                repositorySyncService, analyzerClient, aiClient);
+                repositorySyncService, analyzerClient, aiClient, relationshipService);
         when(repositorySyncService.latestOrSync(USER_ID, REPOSITORY_ID)).thenReturn(snapshot());
+        org.mockito.Mockito.lenient().when(relationshipService.recordGeneration(org.mockito.ArgumentMatchers.eq(USER_ID),
+                org.mockito.ArgumentMatchers.eq(REPOSITORY_ID), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(UUID.fromString("22222222-2222-2222-2222-222222222222"));
     }
 
     @Test
@@ -92,6 +100,7 @@ class DocumentationGenerationServiceTest {
 
         assertEquals("job-123", job.path("id").asText());
         assertEquals("pending", job.path("status").asText());
+        assertEquals("22222222-2222-2222-2222-222222222222", job.path("documentId").asText());
         analyzerServer.verify();
         aiServiceServer.verify();
     }

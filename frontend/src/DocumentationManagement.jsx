@@ -175,6 +175,137 @@ export default function DocumentationManagement({ userId }) {
 
   const [jobId, setJobId] = useState('');
   const [job, setJob] = useState(null);
+  const [documentId, setDocumentId] = useState('');
+  const [documents, setDocuments] = useState([]);
+  const [isLoadingDocuments, setIsLoadingDocuments] = useState(false);
+  const [documentsError, setDocumentsError] = useState('');
+  const [codeEntities, setCodeEntities] = useState([]);
+  const [linkedCodeEntityIds, setLinkedCodeEntityIds] = useState([]);
+  const [isLoadingRelationships, setIsLoadingRelationships] = useState(false);
+  const [relationshipError, setRelationshipError] = useState('');
+  const [selectedCodeEntityId, setSelectedCodeEntityId] = useState('');
+  const [relatedDocuments, setRelatedDocuments] = useState([]);
+  const [isLoadingRelatedDocuments, setIsLoadingRelatedDocuments] = useState(false);
+  const [isSavingRelationships, setIsSavingRelationships] = useState(false);
+
+  async function loadRelationshipData(activeDocumentId, activeRepositoryId) {
+    if (!activeDocumentId || !activeRepositoryId) return;
+    setIsLoadingRelationships(true);
+    setRelationshipError('');
+    try {
+      const [entities, linked] = await Promise.all([
+        githubApi(`/api/repositories/${encodeURIComponent(activeRepositoryId)}/code-entities`, { userId }),
+        githubApi(`/api/documentation/${encodeURIComponent(activeDocumentId)}/code-entities`, { userId }),
+      ]);
+      setCodeEntities(entities || []);
+      setLinkedCodeEntityIds((linked || []).map((item) => item.id));
+      setSelectedCodeEntityId('');
+      setRelatedDocuments([]);
+    } catch (requestError) {
+      setRelationshipError(requestError.message || 'Could not load source code relationships.');
+      throw requestError;
+    } finally {
+      setIsLoadingRelationships(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!userId || !repositoryId) return undefined;
+
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => {
+        if (!cancelled) {
+          setIsLoadingDocuments(true);
+          setDocumentsError('');
+        }
+        return githubApi(`/api/repositories/${encodeURIComponent(repositoryId)}/documentation`, { userId });
+      })
+      .then((items) => {
+        if (!cancelled) setDocuments(items || []);
+      })
+      .catch((requestError) => {
+        if (!cancelled) {
+          setDocuments([]);
+          setDocumentsError(requestError.message || 'Could not load repository documentation.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingDocuments(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [repositoryId, userId]);
+
+  async function saveCodeRelationships() {
+    if (!documentId) return;
+    setIsSavingRelationships(true);
+    try {
+      const linked = await githubApi(`/api/documentation/${encodeURIComponent(documentId)}/code-entities`, {
+        method: 'PUT',
+        userId,
+        body: { codeEntityIds: linkedCodeEntityIds },
+      });
+      setLinkedCodeEntityIds((linked || []).map((item) => item.id));
+      setNotice('Related source code saved.');
+      setError('');
+    } catch (requestError) {
+      setError(requestError.message || 'Could not save related source code.');
+    } finally {
+      setIsSavingRelationships(false);
+    }
+  }
+
+  async function showDocumentsForCodeEntity(entityId) {
+    setSelectedCodeEntityId(entityId);
+    setIsLoadingRelatedDocuments(true);
+    try {
+      const docs = await githubApi(`/api/documentation/code-entities/${encodeURIComponent(entityId)}/documents`, { userId });
+      setRelatedDocuments(docs || []);
+      setError('');
+    } catch (requestError) {
+      setRelatedDocuments([]);
+      setError(requestError.message || 'Could not load related documentation.');
+    } finally {
+      setIsLoadingRelatedDocuments(false);
+    }
+  }
+
+  async function openDocumentationArtifact(document) {
+    let detail;
+    try {
+      detail = await githubApi(`/api/documentation/${encodeURIComponent(document.id)}`, { userId });
+    } catch (requestError) {
+      setError(requestError.message || 'Could not open this documentation. It may have been removed.');
+      return;
+    }
+
+    setError('');
+    setNotice('');
+    setDocumentId(detail.id);
+    setRepositoryId(detail.repositoryId);
+    setJobId(detail.generationJobId || '');
+    setMarkdown(detail.markdown || '');
+    setOriginalDocument(detail.markdown || '');
+    setSavedDocument(detail.markdown || '');
+    setJob(detail.generationJobId ? { id: detail.generationJobId, status: 'completed' } : null);
+    setStatus('completed');
+    setActiveTab('preview');
+    setEvidence([]);
+    setVersions([]);
+    setSelectedVersionId('');
+    setCompareVersionId('');
+    setRelatedDocuments([]);
+    try {
+      await loadRelationshipData(detail.id, detail.repositoryId);
+    } catch (requestError) {
+      setError(`Document opened, but its code relationships could not be loaded: ${requestError.message}`);
+    }
+  }
+
+  function openRelatedDocument(document) {
+    openDocumentationArtifact(document);
+  }
   useEffect(() => {
 
     if (!userId) return undefined;
@@ -250,6 +381,13 @@ export default function DocumentationManagement({ userId }) {
 
    setJob(null);
 
+      setDocumentId('');
+      setCodeEntities([]);
+      setLinkedCodeEntityIds([]);
+      setRelationshipError('');
+      setSelectedCodeEntityId('');
+      setRelatedDocuments([]);
+
    setEvidence([]);
 
     setVersions([]);
@@ -278,6 +416,7 @@ export default function DocumentationManagement({ userId }) {
 
       setJobId(createdJob.id);
       setJob(createdJob);
+      setDocumentId(createdJob.documentId || '');
 
       const deadline = Date.now() + 120_000;
 
@@ -339,13 +478,36 @@ export default function DocumentationManagement({ userId }) {
 
        setEvidence(evidenceItems);
 
+      if (createdJob.documentId) {
+        setDocuments((current) => [
+          {
+            id: createdJob.documentId,
+            repositoryId,
+            generationJobId: createdJob.id,
+            markdown,
+            createdAt: new Date().toISOString(),
+          },
+          ...current.filter((item) => item.id !== createdJob.documentId),
+        ]);
+      }
+
+      let relationshipLoadError = '';
+      if (createdJob.documentId) {
+        try {
+          await loadRelationshipData(createdJob.documentId, repositoryId);
+        } catch (relationshipError) {
+          relationshipLoadError = relationshipError.message || 'Please try loading the relationships again.';
+        }
+      }
+
       setStatus('completed');
 
       const repoName = repositories.find((repo) => String(repo.id) === String(repositoryId))?.fullName;
       const templateName = currentJob.template_name
         || templateList.templates.find((item) => item.id === template)?.name;
       setNotice(`Documentation generated from ${repoName || 'the selected repository'}`
-        + (templateName ? ` using the "${templateName}" template.` : '.'));
+        + (templateName ? ` using the "${templateName}" template.` : '.')
+        + (relationshipLoadError ? ` Related source code could not be loaded: ${relationshipLoadError}` : ''));
     } catch (requestError) {
 
       setStatus('failed');
@@ -370,6 +532,13 @@ export default function DocumentationManagement({ userId }) {
     setSavedDocument('');
 
     setJob(null);
+
+    setDocumentId('');
+    setCodeEntities([]);
+    setLinkedCodeEntityIds([]);
+    setRelationshipError('');
+    setSelectedCodeEntityId('');
+    setRelatedDocuments([]);
 
     setEvidence([]);
 
@@ -569,7 +738,12 @@ export default function DocumentationManagement({ userId }) {
 
             value={repositoryId}
 
-            onChange={(event) => setRepositoryId(event.target.value)}
+            onChange={(event) => {
+              setDocuments([]);
+              setDocumentsError('');
+              setRepositoryId(event.target.value);
+              handleReset();
+            }}
 
             required
 
@@ -627,6 +801,39 @@ export default function DocumentationManagement({ userId }) {
 
         </form>
 
+        <section className="documentation-library" aria-labelledby="documentation-library-heading">
+          <h2 id="documentation-library-heading">Saved documentation</h2>
+          {isLoadingDocuments && <p role="status">Loading saved documentation…</p>}
+          {documentsError && <p className="documentation-error" role="alert">{documentsError}</p>}
+          {!isLoadingDocuments && !documentsError && documents.length === 0 && (
+            <p className="documentation-hint">No saved documentation for this repository yet.</p>
+          )}
+          {documents.length > 0 && (
+            <div className="documentation-library-list">
+              {documents.map((document) => {
+                const title = document.markdown?.split(/\r?\n/).find((line) => line.startsWith('# '))
+                  ?.replace(/^#\s+/, '') || 'Generated documentation';
+                return (
+                  <article className="documentation-library-item" key={document.id}>
+                    <div>
+                      <h3>{title}</h3>
+                      <p>{document.createdAt ? new Date(document.createdAt).toLocaleString() : 'Saved document'}</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="documentation-secondary-button"
+                      aria-current={document.id === documentId ? 'page' : undefined}
+                      onClick={() => openDocumentationArtifact(document)}
+                    >
+                      {document.id === documentId ? 'Open current document' : 'Open document'}
+                    </button>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
         {isManagingTemplates && (
           <TemplateManager
             templates={templateList.templates}
@@ -664,6 +871,59 @@ export default function DocumentationManagement({ userId }) {
           <div className="documentation-result">
 
             <h2>Generated Documentation</h2>
+
+            {documentId && (
+              <section className="documentation-relationships" aria-labelledby="documentation-relationships-heading">
+                <h3 id="documentation-relationships-heading">Related source code</h3>
+                {isLoadingRelationships ? (
+                  <p role="status">Loading source code relationships…</p>
+                ) : relationshipError ? (
+                  <p className="documentation-error" role="alert">{relationshipError}</p>
+                ) : codeEntities.length === 0 ? (
+                  <p className="documentation-hint">No analyzed code entities are available for this repository yet.</p>
+                ) : (
+                  <div className="documentation-related-code-list">
+                    {codeEntities.map((entity) => (
+                      <div key={entity.id} className="documentation-related-code-item">
+                        <label className="documentation-related-code-label">
+                        <input
+                          type="checkbox"
+                          checked={linkedCodeEntityIds.includes(entity.id)}
+                          onChange={(event) => setLinkedCodeEntityIds((current) => event.target.checked
+                            ? [...new Set([...current, entity.id])]
+                            : current.filter((id) => id !== entity.id))}
+                        />
+                        <span>
+                          <strong>{entity.name}</strong> <small>{entity.entityType} · {entity.path}{entity.lineStart ? `:${entity.lineStart}` : ''}</small>
+                        </span>
+                        </label>
+                        <a href={entity.sourceUrl} target="_blank" rel="noopener noreferrer">Open source</a>
+                        <button type="button" className="documentation-secondary-button"
+                          onClick={() => showDocumentsForCodeEntity(entity.id)}>
+                          Related documents
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button type="button" onClick={saveCodeRelationships} disabled={isSavingRelationships}>
+                  {isSavingRelationships ? 'Saving links…' : 'Save code links'}
+                </button>
+                {selectedCodeEntityId && (
+                  <div className="documentation-related-documents" aria-live="polite">
+                    <h4>Documentation linked to this code entity</h4>
+                    {isLoadingRelatedDocuments ? (
+                      <p role="status">Loading related documentation…</p>
+                    ) : relatedDocuments.length ? relatedDocuments.map((document) => (
+                      <button type="button" key={document.id} className="documentation-link-button"
+                        onClick={() => openRelatedDocument(document)}>
+                        Open generated document ({document.createdAt ? new Date(document.createdAt).toLocaleString() : 'saved'})
+                      </button>
+                    )) : <p className="documentation-hint">No documentation is linked to this code entity.</p>}
+                  </div>
+                )}
+              </section>
+            )}
 
             <div className="documentation-tabs" role="tablist" aria-label="Documentation views">
 
