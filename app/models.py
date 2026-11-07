@@ -11,6 +11,7 @@ class FieldInfo(BaseModel):
 # ERR-BE-01 & ERR-BE-02: Thêm fields, lineno, end_lineno cho ClassInfo
 class ClassInfo(BaseModel):
     name: str
+    kind: str = "class"  # class | interface | enum | record | annotation
     bases: List[str] = Field(default_factory=list)
     docstring: Optional[str] = None
     methods: List[Dict[str, Any]] = Field(default_factory=list)

@@ -38,11 +38,22 @@ class Function(BaseModel):
     line_end: Optional[int] = _line("line_end", "end_lineno")
 
 
+class ClassField(BaseModel):
+    """Attribute of a class: pydantic/dataclass field, Java field, record component, enum constant."""
+    name: str = Field(min_length=1)
+    type: Optional[str] = None
+    default: Optional[str] = None
+    description: Optional[str] = None
+    line_start: Optional[int] = _line("line_start", "lineno")
+
+
 class ClassInfo(BaseModel):
     name: str = Field(min_length=1)
+    kind: Optional[str] = None        # class | interface | enum | record | annotation
     bases: List[str] = Field(default_factory=list)
     docstring: Optional[str] = None
     methods: List[Function] = Field(default_factory=list)
+    fields: List[ClassField] = Field(default_factory=list)
     line_start: Optional[int] = _line("line_start", "lineno")
     line_end: Optional[int] = _line("line_end", "end_lineno")
 

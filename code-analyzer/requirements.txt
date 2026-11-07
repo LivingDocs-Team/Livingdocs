@@ -1,4 +1,5 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
 pydantic>=2.6
-javalang>=0.13.0
+tree-sitter>=0.23,<0.27
+tree-sitter-java>=0.23,<0.24

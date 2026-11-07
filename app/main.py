@@ -24,6 +24,8 @@ async def analyze_repo(request_data: dict):
     scope = request_data.get("scope", "repo")
     files = request_data.get("files", [])
     analyzed_files = []
+    warnings = []
+    seen_paths = set()
 
     for file_info in files:
         raw_path = file_info.get("path", "")

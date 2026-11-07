@@ -153,7 +153,7 @@ export default function DocumentationManagement({ userId }) {
   const templateList = useTemplates(userId);
   const [status, setStatus] = useState('idle');
 
-  const [document, setDocument] = useState('');
+  const [markdown, setMarkdown] = useState('');
   const [originalDocument, setOriginalDocument] = useState('');
   const [evidence, setEvidence] = useState([]);
 
@@ -242,7 +242,7 @@ export default function DocumentationManagement({ userId }) {
 
     setNotice('');
 
-   setDocument('');
+   setMarkdown('');
 
    setOriginalDocument('');
 
@@ -281,25 +281,25 @@ export default function DocumentationManagement({ userId }) {
 
       const deadline = Date.now() + 120_000;
 
-      let job = createdJob;
+      let currentJob = createdJob;
 
-      while (['pending', 'running'].includes(job.status) && Date.now() < deadline) {
+      while (['pending', 'running'].includes(currentJob.status) && Date.now() < deadline) {
 
         await new Promise((resolve) => window.setTimeout(resolve, 750));
 
-        job = await githubApi(`/api/documentation/jobs/${encodeURIComponent(createdJob.id)}`, { userId });
-        setJob(job);
+        currentJob = await githubApi(`/api/documentation/jobs/${encodeURIComponent(createdJob.id)}`, { userId });
+        setJob(currentJob);
       }
 
-      if (['pending', 'running'].includes(job.status)) {
+      if (['pending', 'running'].includes(currentJob.status)) {
 
         throw new Error('Documentation generation timed out. You can retry from this page.');
 
       }
 
-      if (job.status !== 'completed') {
+      if (currentJob.status !== 'completed') {
 
-        throw new Error(job.error || job.message || 'Documentation generation failed.');
+        throw new Error(currentJob.error || currentJob.message || 'Documentation generation failed.');
 
       }
 
@@ -331,7 +331,7 @@ export default function DocumentationManagement({ userId }) {
 
       ));
 
-       setDocument(markdown);
+       setMarkdown(markdown);
 
        setOriginalDocument(markdown);
 
@@ -342,7 +342,7 @@ export default function DocumentationManagement({ userId }) {
       setStatus('completed');
 
       const repoName = repositories.find((repo) => String(repo.id) === String(repositoryId))?.fullName;
-      const templateName = job.template_name
+      const templateName = currentJob.template_name
         || templateList.templates.find((item) => item.id === template)?.name;
       setNotice(`Documentation generated from ${repoName || 'the selected repository'}`
         + (templateName ? ` using the "${templateName}" template.` : '.'));
@@ -363,7 +363,7 @@ export default function DocumentationManagement({ userId }) {
 
     setStatus('idle');
 
-    setDocument('');
+    setMarkdown('');
 
     setOriginalDocument('');
 
@@ -391,7 +391,7 @@ export default function DocumentationManagement({ userId }) {
 
   function handleSaveDraft() {
 
-    if (!document.trim()) {
+    if (!markdown.trim()) {
 
       setError('Document content cannot be empty.');
 
@@ -399,7 +399,7 @@ export default function DocumentationManagement({ userId }) {
 
     }
 
-    setSavedDocument(document);
+    setSavedDocument(markdown);
 
     setError('');
 
@@ -409,7 +409,7 @@ export default function DocumentationManagement({ userId }) {
 
   function handleCreateVersion() {
 
-    if (!document.trim()) {
+    if (!markdown.trim()) {
 
       setError('Generate or enter document content before creating a version.');
 
@@ -423,7 +423,7 @@ export default function DocumentationManagement({ userId }) {
 
       number: versions.length + 1,
 
-      content: document,
+      content: markdown,
 
       createdAt: new Date().toLocaleString(),
 
@@ -461,7 +461,7 @@ export default function DocumentationManagement({ userId }) {
 
     if (!confirmed) return;
 
-    setDocument(version.content);
+    setMarkdown(version.content);
 
     setSavedDocument(version.content);
 
@@ -475,7 +475,7 @@ export default function DocumentationManagement({ userId }) {
 
   function handleExport() {
 
-    const blob = new Blob([document], {
+    const blob = new Blob([markdown], {
 
       type: 'text/markdown;charset=utf-8',
 
@@ -507,7 +507,11 @@ export default function DocumentationManagement({ userId }) {
 
   );
 
-  const currentLines = document.split('\n');
+  const currentLines = markdown.split('\n');
+  const rawProgress = Number(job?.progress ?? 0);
+  const progressFraction = Number.isFinite(rawProgress)
+    ? Math.min(1, Math.max(0, rawProgress > 1 ? rawProgress / 100 : rawProgress))
+    : 0;
 
   const comparisonLines = compareVersion
 
@@ -549,10 +553,10 @@ export default function DocumentationManagement({ userId }) {
     <p>{job?.message || 'Generating documentation…'}</p>
     <progress
       aria-label="Documentation generation progress"
-      value={job?.progress ?? 0}
+      value={progressFraction}
       max={1}
     />
-    <span>{Math.round((job?.progress ?? 0) * 100)}%</span>
+    <span>{Math.round(progressFraction * 100)}%</span>
   </div>
 )}
         <form className="documentation-form" onSubmit={handleGenerate}>
@@ -655,16 +659,6 @@ export default function DocumentationManagement({ userId }) {
 
         )}
 
-        {status === 'generating' && (
-
-          <p className="documentation-hint">
-
-            Sending synchronized source files through code analysis and documentation generation…
-
-          </p>
-
-        )}
-
         {status === 'completed' && (
 
           <div className="documentation-result">
@@ -757,9 +751,9 @@ export default function DocumentationManagement({ userId }) {
   <textarea
     id="documentation-editor"
     className="documentation-editor"
-    value={document}
+    value={markdown}
     onChange={(event) => {
-      setDocument(event.target.value);
+      setMarkdown(event.target.value);
       setNotice('');
     }}
     rows={18}
@@ -783,7 +777,7 @@ export default function DocumentationManagement({ userId }) {
       className="documentation-secondary-button"
       disabled={!originalDocument}
       onClick={() => {
-        setDocument(originalDocument);
+        setMarkdown(originalDocument);
         setSavedDocument(originalDocument);
         setError('');
         setNotice('Restored the original generated document.');
@@ -802,7 +796,7 @@ export default function DocumentationManagement({ userId }) {
   </div>
 
   <p className="documentation-hint">
-    {document === savedDocument
+    {markdown === savedDocument
       ? 'All changes saved in the current page session.'
       : 'You have unsaved edits.'}
   </p>
@@ -822,7 +816,7 @@ export default function DocumentationManagement({ userId }) {
 
                 </div>
 
-                {document.trim() ? (
+                {markdown.trim() ? (
 
                   <article
 
@@ -830,7 +824,7 @@ export default function DocumentationManagement({ userId }) {
 
                     dangerouslySetInnerHTML={{
 
-                      __html: renderMarkdown(document),
+                      __html: renderMarkdown(markdown),
 
                     }}
 
