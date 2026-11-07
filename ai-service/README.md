@@ -1,4 +1,4 @@
-# LivingDocs AI Service (LD-90, LD-340, LD-195, LD-128, LD-134)
+# LivingDocs AI Service (LD-90, LD-340, LD-195, LD-128, LD-134, LD-189)
 
 AI-assisted documentation generation. Takes source code that has already been analyzed
 (classes, methods, endpoints, parameters, return values) and produces Markdown docs
@@ -55,6 +55,7 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | POST | `/documents/{id}/updates` | Update from an LD-116 source change → proposal (LD-128) |
 | GET | `/documents/{id}/compare?from=&to=` | Per-file changes and unified diff of two versions (LD-134) |
 | POST | `/documents/{id}/versions/{n}/accept`, `/dismiss`, `/regenerate`, `/edit` | Review a proposal (LD-134) |
+| POST | `/documents/{id}/rollback` | Restore an earlier accepted version (LD-189) |
 
 Built-in templates: `default`, `api-reference`, `brief`.
 
@@ -76,7 +77,7 @@ for the AI) and an ordered list of `sections` taken from `Overview`, `Classes`, 
   the built-in templates.
 - Errors: `422` invalid template, `409` duplicate name, `403` built-in template, `404` unknown id.
 
-### Versioned documentation (LD-195, LD-128, LD-134)
+### Versioned documentation (LD-195, LD-128, LD-134, LD-189)
 
 - `POST /documents {"job_id": ...}` stores a completed job as **version 1** (accepted). Every later
   change adds a new, immutable version; nothing is edited in place or deleted (LD-195).
@@ -91,7 +92,9 @@ for the AI) and an ordered list of `sections` taken from `Overview`, `Classes`, 
   `regenerate` (same source changes, current template), `edit` (`{"content": ..., "accept": true}`;
   the text is split back per file on `---` + `# <path>` so hand edits survive later updates of other
   files). A change already accepted is `409`.
-- Details: `Docs/Linh/` FR6.md, FR7.md, FR8.md.
+- `rollback {"version": N}` (LD-189) copies an accepted version into a new current version; a
+  pending proposal is rebuilt on top of it.
+- Details: `Docs/Linh/` FR6.md, FR7.md, FR8.md, FR9.md.
 
 ### Example request
 

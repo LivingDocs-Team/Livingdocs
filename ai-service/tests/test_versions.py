@@ -1,4 +1,4 @@
-"""Versioned documentation tests: LD-195, LD-128, LD-134."""
+"""Versioned documentation tests: LD-195, LD-128, LD-134, LD-189."""
 import copy
 import os
 
@@ -384,6 +384,58 @@ def test_change_already_accepted_is_rejected():
     client.post(f"/documents/{doc['id']}/versions/2/accept", json={"actor": "khoi"})
     r = update(doc["id"], change("c1"), [cart_v2()])
     assert r.status_code == 409 and "already applied in version 2" in r.json()["detail"]
+
+
+# ---------- LD-189: rollback ----------
+
+def test_rollback_restores_and_keeps_history():
+    doc = new_document()
+    v1 = client.get(f"/documents/{doc['id']}/versions/1").json()
+    update(doc["id"], change(), [cart_v2()])
+    client.post(f"/documents/{doc['id']}/versions/2/accept")
+    r = client.post(f"/documents/{doc['id']}/rollback", json={"version": 1, "actor": "khoi"})
+    assert r.status_code == 201, r.text
+    v = r.json()
+    assert v["number"] == 3 and v["origin"] == "rollback" and v["restored_from"] == 1
+    assert v["base_version"] == 2 and v["content"] == v1["content"]
+    d = client.get(f"/documents/{doc['id']}").json()
+    assert d["current_version"] == 3 and d["versions_total"] == 3
+    # nothing was deleted: version 2 is still there and can be restored again
+    assert client.get(f"/documents/{doc['id']}/versions/2").json()["status"] == "accepted"
+    assert client.post(f"/documents/{doc['id']}/rollback", json={"version": 2}).status_code == 201
+    events = [(e["action"], e["version"], e["related_version"])
+              for e in client.get(f"/documents/{doc['id']}/history").json()]
+    assert ("rolled_back", 3, 1) in events and ("rolled_back", 4, 2) in events
+    versions = client.get(f"/documents/{doc['id']}/versions").json()
+    assert [x["number"] for x in versions] == [4, 3, 2, 1] and "content" not in versions[0]
+
+
+def test_rollback_errors():
+    doc = new_document()
+    assert client.post(f"/documents/{doc['id']}/rollback", json={"version": 1}).status_code == 409
+    update(doc["id"], change(), [cart_v2()])
+    r = client.post(f"/documents/{doc['id']}/rollback", json={"version": 2})
+    assert r.status_code == 409 and "never accepted" in r.json()["detail"]
+    assert client.post(f"/documents/{doc['id']}/rollback", json={"version": 8}).status_code == 404
+    assert client.post(f"/documents/{doc['id']}/rollback", json={"version": 0}).status_code == 422
+
+
+def test_pending_proposal_is_rebased_after_rollback():
+    doc = new_document()
+    users2 = copy.deepcopy(USERS)
+    users2["classes"][0]["methods"].append({"name": "delete_user", "parameters": []})
+    update(doc["id"], change("c1"), [cart_v2()])
+    client.post(f"/documents/{doc['id']}/versions/2/accept")             # v2: cart updated
+    update(doc["id"], change("c2", [{"path": "shop/users.py", "change": "MODIFIED"}]), [users2])  # v3
+    client.post(f"/documents/{doc['id']}/rollback", json={"version": 1})  # v4 = v1
+    d = client.get(f"/documents/{doc['id']}").json()
+    assert d["current_version"] == 4 and d["pending_version"] == 5
+    v3 = client.get(f"/documents/{doc['id']}/versions/3").json()
+    v5 = client.get(f"/documents/{doc['id']}/versions/5").json()
+    assert v3["status"] == "superseded" and v3["superseded_by"] == 5
+    assert v5["base_version"] == 4 and "Rebased on version 4" in v5["note"]
+    # accepting the rebased proposal does not bring back the rolled-back cart change
+    assert "delete_user" in v5["content"] and "apply_discount" not in v5["content"]
 
 
 # ---------- persistence ----------
