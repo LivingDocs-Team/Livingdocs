@@ -37,7 +37,7 @@ import uuid
 from collections import Counter, OrderedDict
 from typing import List, Optional, Tuple
 
-from . import drift_referential, drift_semantic, drift_signature
+from . import drift_referential, drift_semantic, drift_severity, drift_signature
 from .confidence import level_of
 from .drift_affected import DocText, Hit, collect_docs, find_affected
 from .drift_changes import analyze_pull_request
@@ -123,19 +123,38 @@ def detect(analysis: PullRequestAnalysis, hits: List[Hit]) -> List[DriftFinding]
     for hit, cl in ((h, x) for h in hits for x in classify(h)):
         score, factors = _confidence(hit, cl)
         c = hit.target.change
+        evidence = build_evidence(hit, analysis, cl.details)
+        # LD-156: the severity comes only from the rule table, with the evidence of each rule
+        assessment = drift_severity.assess(cl.type, cl.base, cl.adjust, score, evidence)
+        cl.severity = assessment.level
+        part = _part(hit, cl)
+        part.severity, part.findings = assessment.level, 1
         findings.append(DriftFinding(
-            id="", type=cl.type, kind=cl.kind, breaking=cl.breaking, rules=cl.rules,
-            severity=cl.severity, confidence=score,
+            id="", type=cl.type, kind=cl.kind, breaking=cl.breaking,
+            rules=drift_severity.rule_strings(assessment), severity_assessment=assessment,
+            severity=assessment.level, confidence=score,
             confidence_level=level_of(score).value,
             entity=c.name if c else None, entity_kind=c.kind if c else None,
-            change=cl.change, file=hit.target.file.path, document=_part(hit, cl),
+            change=cl.change, file=hit.target.file.path, document=part,
             message=cl.message, before=cl.before, after=cl.after, suggestion=cl.suggestion,
-            evidence=build_evidence(hit, analysis, cl.details), factors=factors))
-    findings.sort(key=lambda x: (-SEVERITY_ORDER.index(x.severity), not x.breaking, -x.confidence,
+            evidence=evidence, factors=factors))
+    findings.sort(key=lambda x: (-x.severity_assessment.score, not x.breaking, -x.confidence,
                                  x.document.document_id or "", x.document.path, x.entity or ""))
     for n, x in enumerate(findings, start=1):
         x.id = f"F{n}"
     return findings
+
+
+def _rate_documents(affected: List[AffectedDocument], findings: List[DriftFinding]) -> None:
+    """LD-158: each affected document part takes the level of its most severe finding;
+    parts are listed most severe first."""
+    for a in affected:
+        mine = [f for f in findings if (f.document.source, f.document.document_id, f.document.path)
+                == (a.source, a.document_id, a.path)]
+        a.findings = len(mine)
+        a.severity = drift_severity.highest([f.severity for f in mine])
+    affected.sort(key=lambda a: (-(SEVERITY_ORDER.index(a.severity) if a.severity else -1),
+                                 a.source.value, a.document_id or "", a.path))
 
 
 def summarize(analysis: PullRequestAnalysis, findings: List[DriftFinding],
@@ -151,6 +170,9 @@ def summarize(analysis: PullRequestAnalysis, findings: List[DriftFinding],
                         by_kind={k: by_kind[k] for k in order if by_kind.get(k)},
                         breaking=sum(1 for x in findings if x.breaking),
                         highest_severity=highest, affected_documents=len(affected),
+                        severity_score=max((x.severity_assessment.score for x in findings), default=0),
+                        recommendation=drift_severity.SEVERITY_LEVELS[highest.value]["action"]
+                        if highest else None,
                         changed_files=len(analysis.files), entity_changes=analysis.entity_changes)
 
 
@@ -161,6 +183,7 @@ def analyze(req: DriftAnalyzeRequest, store) -> DriftReport:
     docs, warnings = collect_docs(store, req.document_ids, req.docs)
     affected, hits = find_affected(analysis, docs)
     findings = detect(analysis, hits)
+    _rate_documents(affected, findings)
     for f in analysis.files:
         warnings.extend(f.warnings)
     if not docs:

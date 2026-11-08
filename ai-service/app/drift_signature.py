@@ -29,13 +29,14 @@ drift is a change of that contract while the documented name stays the same.
        a parameter with its old type               (same line, e.g. a table row `| discount | float |`)
        a parameter with its old default            (same line)
 
-Severity: breaking Medium (endpoint High), not breaking Low (endpoint Medium);
-+1 when the documentation still shows a stale parameter, type or default; private name -1.
+Severity (rules in app/drift_severity.py, LD-157): base `breaking_signature` (Medium) or
+`compatible_signature` (Low); +1 `public_endpoint`; +1 `doc_states_old_detail` when the documentation
+still shows a stale parameter, type or default; -1 `private_name`.
 """
 import re
 from typing import List, Optional, Sequence, Tuple
 
-from .drift_models import DRIFT_KINDS, DocMatch, ParameterChange, ParameterChangeKind, Severity
+from .drift_models import DRIFT_KINDS, DocMatch, ParameterChange, ParameterChangeKind
 
 Param = Tuple[str, Optional[str], Optional[str]]    # name, type, default
 
@@ -172,12 +173,6 @@ def finding_kind(entity_kind: str, aspects: Sequence[str], changes: Sequence[Par
     return "signature_changed"
 
 
-def base_severity(endpoint: bool, breaking: bool) -> Severity:
-    if breaking:
-        return Severity.high if endpoint else Severity.medium
-    return Severity.medium if endpoint else Severity.low
-
-
 def stale_details(doc, near: List[DocMatch], changes: Sequence[ParameterChange],
                   window: int) -> List[DocMatch]:
     """What the documentation still shows after the entity is mentioned: removed / renamed
@@ -236,7 +231,7 @@ def describe(c: ParameterChange) -> str:
 def classify(hit):
     """LD-153: a hit on an entity whose signature changed (EntityChangeType.signature_changed)."""
     from .drift_models import DriftType
-    from .drift_rules import PARAM_WINDOW, Classified, bump, code, private
+    from .drift_rules import PARAM_WINDOW, Classified, code, private
 
     c = hit.target.change
     endpoint = c.kind == "endpoint"
@@ -247,15 +242,13 @@ def classify(hit):
                if (m.line, m.term) not in seen]
     stale = hit.param_matches + details
 
-    rules = ["breaking change" if breaking else "not breaking"]
-    sev = base_severity(endpoint, breaking)
-    rules[0] += f": {sev.value}" + (" (endpoint)" if endpoint else "")
+    adjust = []
+    if endpoint:
+        adjust.append(("public_endpoint", []))
     if stale:
-        sev = bump(sev, 1)
-        rules.append("documentation still shows the old signature: +1")
+        adjust.append(("doc_states_old_detail", stale))
     if private(c.name):
-        sev = bump(sev, -1)
-        rules.append("private name: -1")
+        adjust.append(("private_name", []))
 
     renamed = "; ".join(describe(p) for p in c.parameter_changes if p.change == ParameterChangeKind.renamed)
     named = f" Parameter {renamed}." if renamed else ""
@@ -265,8 +258,9 @@ def classify(hit):
     if details:
         named += " It still shows " + ", ".join(f"{code(m.term)} ({m.note})" for m in details) + "."
     name = c.old_name if "http_method" in c.aspects and c.old_name else c.name
-    return Classified(DriftType.signature, kind, sev, "signature_changed",
+    return Classified(DriftType.signature, kind,
+                      "breaking_signature" if breaking else "compatible_signature", "signature_changed",
                       f"Signature of {c.kind} {code(name)} changed ({'; '.join(c.details)})." + named,
                       f"Update the documented signature to {code(c.new_signature)}.",
-                      before=c.old_signature, after=c.new_signature, breaking=breaking, rules=rules,
-                      details=details)
+                      before=c.old_signature, after=c.new_signature, breaking=breaking,
+                      adjust=adjust, details=details)

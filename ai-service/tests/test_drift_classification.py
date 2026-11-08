@@ -200,7 +200,7 @@ def test_documented_old_type_and_default_raise_severity():
     assert (f.kind, f.breaking, f.severity.value) == ("parameter_type_changed", True, "high")
     shown = {(m.kind, m.term, m.line) for m in f.document.matches if m.kind != "name"}
     assert shown == {("type", "order_id int", 5), ("default", "verbose False", 6)}
-    assert "documentation still shows the old signature: +1" in f.rules
+    assert "documentation still states the old detail: +1" in f.rules
     assert {e.line_start for e in f.evidence if e.kind.value == "documentation"} >= {5, 6}
 
 

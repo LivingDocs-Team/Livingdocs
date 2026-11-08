@@ -25,8 +25,8 @@ from typing import Dict, List, Optional, Tuple
 
 from .drift_affected import FILE_REMOVED, FILE_RENAMED, LINE_REFS, Hit, Term, excerpt
 from .drift_changes import numbered
-from .drift_models import DiffHunk, DocMatch, DriftType, EntityChangeType, Severity
-from .drift_rules import Classified, bump, code, private
+from .drift_models import DiffHunk, DocMatch, DriftType, EntityChangeType
+from .drift_rules import Classified, code, private
 
 MAX_LISTED_REFS = 5
 
@@ -149,72 +149,64 @@ def classify(hit: Hit) -> Optional[Classified]:
         more = len(hit.matches) - MAX_LISTED_REFS
         return Classified(
             DriftType.referential, "line_reference_stale",
-            Severity.medium if changed else Severity.low, "line_reference_stale",
+            "line_reference_changed" if changed else "line_reference_shifted", "line_reference_stale",
             f"{where.capitalize()} has {len(hit.matches)} line reference(s) to {code(f.path)} that no "
             f"longer point to the same code: {listed}" + (f" and {more} more." if more > 0 else "."),
             "Update the line numbers" + (" and check the changed lines" if changed else "")
             + " (regenerating the section does both).",
-            certainty=1.0,
-            rules=["line reference into changed lines: Medium" if changed
-                   else "line reference shifted by the diff: Low"])
+            certainty=1.0)
 
     if t.file_event == FILE_REMOVED:
         kind = _file_kind(hit, removed=True)
         if hit.documents_file:
-            return Classified(DriftType.referential, "file_removed", Severity.high, FILE_REMOVED,
+            return Classified(DriftType.referential, "file_removed", "file_section_removed", FILE_REMOVED,
                               f"{where} documents {code(f.path)}, which the Pull Request deletes.",
                               "Remove the section or move its content to the code that replaces it.",
-                              before=f.path, breaking=True, rules=["section of a deleted file: High"])
+                              before=f.path, breaking=True)
         named = ", ".join(sorted({code(m.term) for m in hit.matches}))
-        return Classified(DriftType.referential, kind, Severity.medium, FILE_REMOVED,
+        return Classified(DriftType.referential, kind, "file_reference_removed", FILE_REMOVED,
                           f"The documentation names {named} of {code(f.path)}, "
                           "which the Pull Request deletes.",
                           f"Remove or replace the reference to {code(f.path)}.", before=f.path,
-                          breaking=True, rules=["mention of a deleted file: Medium"])
+                          breaking=True)
 
     if t.file_event == FILE_RENAMED:
         if not hit.matches:
             return None
         kind = _file_kind(hit, removed=False)
-        sev = Severity.low if hit.documents_file else Severity.medium
-        rules = ["the moved file's own section: Low" if hit.documents_file
-                 else "old path of a moved file: Medium"]
+        base = "own_section_moved" if hit.documents_file else "file_reference_moved"
         if kind == "module_moved":
             old_mod, new_mod = module_of(f.previous_path or ""), module_of(f.path)
-            return Classified(DriftType.referential, kind, sev, FILE_RENAMED,
+            return Classified(DriftType.referential, kind, base, FILE_RENAMED,
                               f"{where.capitalize()} still names module {code(old_mod)}; "
                               f"{code(f.previous_path)} moved to {code(f.path)}.",
                               f"Replace {code(old_mod)} with {code(new_mod or f.path)}.",
-                              before=old_mod, after=new_mod or f.path, breaking=True, rules=rules)
-        return Classified(DriftType.referential, kind, sev, FILE_RENAMED,
+                              before=old_mod, after=new_mod or f.path, breaking=True)
+        return Classified(DriftType.referential, kind, base, FILE_RENAMED,
                           f"{where.capitalize()} still names {code(f.previous_path)}, "
                           f"moved to {code(f.path)}.",
                           f"Replace {code(f.previous_path)} with {code(f.path)}.",
-                          before=f.previous_path, after=f.path, breaking=True, rules=rules)
+                          before=f.previous_path, after=f.path, breaking=True)
 
     if c is None or not hit.matches:
         return None
     endpoint = c.kind == "endpoint"
-    priv = -1 if private(c.name) else 0
-    rules = ["endpoint: Critical" if endpoint else "class / function / method: High"]
-    if priv:
-        rules.append("private name: -1")
+    base = "endpoint_gone" if endpoint else "entity_gone"
+    adjust = [("private_name", [])] if private(c.name) else []
 
     if c.change == EntityChangeType.removed:
         if f.status.value == "removed" and hit.documents_file:
             return None  # covered by the file-level finding of the deleted file
-        sev = bump(Severity.critical if endpoint else Severity.high, priv)
         return Classified(DriftType.referential, "endpoint_removed" if endpoint else "entity_removed",
-                          sev, "removed",
+                          base, "removed",
                           f"{where.capitalize()} describes {c.kind} {code(c.name)}, "
                           "which the Pull Request removes.",
                           f"Remove the description of {code(c.name)} or point to its replacement.",
-                          before=c.old_signature or c.name, breaking=True, rules=rules)
+                          before=c.old_signature or c.name, breaking=True, adjust=adjust)
     if c.change == EntityChangeType.renamed:
-        sev = bump(Severity.critical if endpoint else Severity.high, priv)
         return Classified(DriftType.referential, "endpoint_moved" if endpoint else "entity_renamed",
-                          sev, "renamed",
+                          base, "renamed",
                           f"{where.capitalize()} names {code(c.old_name)}, renamed to {code(c.name)}.",
                           f"Replace {code(c.old_name)} with {code(c.name)}.",
-                          before=c.old_name, after=c.name, breaking=True, rules=rules)
+                          before=c.old_name, after=c.name, breaking=True, adjust=adjust)
     return None
