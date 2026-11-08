@@ -77,14 +77,10 @@ public class AdminUserController {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                         "Username must contain 1 to 50 characters");
             }
-            userRepository.findAll().stream()
-                    .filter(other -> !other.getId().equals(id)
-                            && username.equalsIgnoreCase(other.getUsername()))
-                    .findAny()
-                    .ifPresent(other -> {
-                        throw new ResponseStatusException(HttpStatus.CONFLICT,
-                                "Username is already in use");
-                    });
+            if (userRepository.existsByUsernameIgnoreCaseAndIdNot(username, id)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Username is already in use");
+            }
             user.setUsername(username);
         }
 
