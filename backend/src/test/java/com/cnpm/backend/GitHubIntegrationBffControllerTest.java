@@ -3,6 +3,9 @@ package com.cnpm.backend;
 import com.cnpm.backend.controller.GitHubIntegrationBffController;
 import com.cnpm.backend.entity.User;
 import com.cnpm.backend.repository.UserRepository;
+import com.cnpm.backend.repository.RoleRepository;
+import com.cnpm.backend.entity.Role;
+import com.cnpm.backend.entity.Permission;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
@@ -72,6 +75,121 @@ class GitHubIntegrationBffControllerTest {
         assertThatThrownBy(() -> controller.proxy(incoming, null, null))
                 .isInstanceOfSatisfying(ResponseStatusException.class,
                         exception -> assertThat(exception.getStatusCode().value()).isEqualTo(401));
+    }
+
+    @Test
+    void workflowAuthorityHeaderIsRebuiltFromCurrentDatabaseRoleAndPermissions() throws Exception {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        UserRepository users = mock(UserRepository.class);
+        RoleRepository roles = mock(RoleRepository.class);
+        User authenticatedUser = mock(User.class);
+        when(authenticatedUser.getId()).thenReturn(73L);
+        when(authenticatedUser.getRole()).thenReturn("DEVELOPER");
+        when(users.findByEmail("verified@example.test")).thenReturn(Optional.of(authenticatedUser));
+        Role currentRole = new Role("DEVELOPER", "Developer");
+        currentRole.getPermissions().add(new Permission("DOCUMENT_CREATE", "Create docs"));
+        when(roles.findWithPermissionsByName("DEVELOPER")).thenReturn(Optional.of(currentRole));
+
+        server.expect(requestTo("http://github.test:8082/api/document-workflows/mine"))
+                .andExpect(header("X-User-Id", "73"))
+                .andExpect(header("X-User-Authorities", "ROLE_DEVELOPER,DOCUMENT_CREATE"))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        GitHubIntegrationBffController controller = new GitHubIntegrationBffController(builder.build(), users,
+                roles, "http://github.test:8082", "internal-test-credential");
+        MockHttpServletRequest incoming = new MockHttpServletRequest(HttpMethod.GET.name(),
+                "/api/document-workflows/mine");
+        incoming.addHeader("X-User-Id", "forged-user");
+        incoming.addHeader("X-User-Authorities", "ROLE_ADMIN,DOCUMENT_APPROVE");
+        controller.proxy(incoming, authenticatedEmail("verified@example.test"), null);
+        server.verify();
+    }
+
+    @Test
+    void administratorReassignSendsOnlyBackendVerifiedActiveStaffTarget() throws Exception {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        UserRepository users = mock(UserRepository.class);
+        RoleRepository roles = mock(RoleRepository.class);
+        User admin = mock(User.class);
+        when(admin.getId()).thenReturn(73L);
+        when(admin.getRole()).thenReturn("ADMIN");
+        when(users.findByEmail("verified@example.test")).thenReturn(Optional.of(admin));
+
+        User staff = mock(User.class);
+        when(staff.isActive()).thenReturn(true);
+        when(staff.getRole()).thenReturn("STAFF");
+        when(users.findById(81L)).thenReturn(Optional.of(staff));
+        Role adminRole = new Role("ADMIN", "Legacy administrator");
+        adminRole.getPermissions().add(new Permission("DOCUMENT_REASSIGN", "Reassign"));
+        Role staffRole = new Role("STAFF", "Staff member");
+        staffRole.getPermissions().add(new Permission("DOCUMENT_CLAIM", "Claim"));
+        staffRole.getPermissions().add(new Permission("DOCUMENT_REVIEW", "Review"));
+        when(roles.findWithPermissionsByName("ADMIN")).thenReturn(Optional.of(adminRole));
+        when(roles.findWithPermissionsByName("STAFF")).thenReturn(Optional.of(staffRole));
+
+        server.expect(requestTo("http://github.test:8082/api/document-workflows/11111111-1111-1111-1111-111111111111/reassign"))
+                .andExpect(header("X-User-Id", "73"))
+                .andExpect(header("X-User-Authorities", "ROLE_ADMIN,DOCUMENT_REASSIGN"))
+                .andExpect(header("X-Verified-Staff-User-Id", "81"))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        var controller = new GitHubIntegrationBffController(builder.build(), users, roles,
+                "http://github.test:8082", "internal-test-credential");
+        MockHttpServletRequest incoming = new MockHttpServletRequest(HttpMethod.POST.name(),
+                "/api/document-workflows/11111111-1111-1111-1111-111111111111/reassign");
+        incoming.addHeader("X-Verified-Staff-User-Id", "999");
+        controller.proxy(incoming, authenticatedEmail("verified@example.test"),
+                "{\"targetStaffUserId\":81,\"reason\":\"Workload transfer\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        server.verify();
+    }
+
+    @Test
+    void reassignRejectsInactiveTargetAndNonAdministratorBeforeProxying() {
+        RestClient.Builder builder = RestClient.builder();
+        UserRepository users = mock(UserRepository.class);
+        RoleRepository roles = mock(RoleRepository.class);
+        User admin = mock(User.class);
+        when(admin.getId()).thenReturn(73L);
+        when(admin.getRole()).thenReturn("ADMINISTRATOR");
+        when(users.findByEmail("verified@example.test")).thenReturn(Optional.of(admin));
+        User inactive = mock(User.class);
+        when(inactive.isActive()).thenReturn(false);
+        when(inactive.getRole()).thenReturn("STAFF");
+        when(users.findById(81L)).thenReturn(Optional.of(inactive));
+        Role administratorRole = new Role("ADMINISTRATOR", "Administrator");
+        administratorRole.getPermissions().add(new Permission("DOCUMENT_REASSIGN", "Reassign"));
+        when(roles.findWithPermissionsByName("ADMINISTRATOR")).thenReturn(Optional.of(administratorRole));
+        when(roles.findWithPermissionsByName("STAFF")).thenReturn(Optional.of(new Role("STAFF", "Staff")));
+
+        var controller = new GitHubIntegrationBffController(builder.build(), users, roles,
+                "http://github.test:8082", "internal-test-credential");
+        MockHttpServletRequest request = new MockHttpServletRequest(HttpMethod.POST.name(),
+                "/api/document-workflows/11111111-1111-1111-1111-111111111111/reassign");
+        byte[] body = "{\"targetStaffUserId\":81,\"reason\":\"Workload transfer\"}"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+        assertThatThrownBy(() -> controller.proxy(request, authenticatedEmail("verified@example.test"), body))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode().value()).isEqualTo(400));
+
+        when(inactive.isActive()).thenReturn(true);
+        when(inactive.getRole()).thenReturn("MANAGER");
+        assertThatThrownBy(() -> controller.proxy(request, authenticatedEmail("verified@example.test"), body))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode().value()).isEqualTo(400));
+
+        User manager = mock(User.class);
+        when(manager.getId()).thenReturn(74L);
+        when(manager.getRole()).thenReturn("MANAGER");
+        when(users.findByEmail("manager@example.test")).thenReturn(Optional.of(manager));
+        Role managerRole = new Role("MANAGER", "Manager");
+        managerRole.getPermissions().add(new Permission("DOCUMENT_REASSIGN", "Reassign"));
+        when(roles.findWithPermissionsByName("MANAGER")).thenReturn(Optional.of(managerRole));
+        assertThatThrownBy(() -> controller.proxy(request, authenticatedEmail("manager@example.test"), body))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode().value()).isEqualTo(403));
     }
 
     @Test

@@ -33,6 +33,25 @@ class DocumentCreate(_Actor):
     title: Optional[str] = Field(default=None, max_length=200)
 
 
+class InternalDocumentCreate(BaseModel):
+    """Internal save request. Owner is taken from a trusted service header, never this body."""
+    job_id: str = Field(min_length=1)
+    title: Optional[str] = Field(default=None, max_length=200)
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
+class DocumentContentEdit(BaseModel):
+    content: str = Field(min_length=1, max_length=2_000_000)
+    expected_version: int = Field(ge=1)
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
+class InternalVersionDecision(BaseModel):
+    version: int = Field(ge=1)
+    decision: str = Field(pattern="^(APPROVED|REJECTED)$")
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
 # ---------- Stored data ----------
 
 class VersionStatus(str, Enum):
@@ -115,6 +134,8 @@ class Document(BaseModel):
     template_id: str
     output_language: str
     source_job_id: Optional[str] = None
+    # Absent on legacy documents; never backfilled from the untrusted historical actor field.
+    owner_user_id: Optional[str] = None
     current_version: int = 1               # newest accepted version
     pending_version: Optional[int] = None  # proposal waiting for review, if any
     versions_total: int = 1

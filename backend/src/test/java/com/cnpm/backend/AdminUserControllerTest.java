@@ -100,6 +100,29 @@ class AdminUserControllerTest {
     }
 
     @Test
+    void roleFilterUsesPrimaryRoleForStaffAndLegacyAdminWithoutNewEndpoint() {
+        UserRepository repository = mock(UserRepository.class);
+        var pageable = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "createdAt"));
+        User staff = user(12L, "staff@example.test", "STAFF");
+        User legacyAdmin = user(13L, "admin@example.test", "ADMIN");
+        when(repository.searchForAdministration(null, "STAFF", null, pageable))
+                .thenReturn(new PageImpl<>(List.of(staff), pageable, 1));
+        when(repository.searchForAdministration(null, "ADMIN", null, pageable))
+                .thenReturn(new PageImpl<>(List.of(legacyAdmin), pageable, 1));
+        var controller = new AdminUserController(repository);
+
+        var staffPage = controller.listUsers(0, 20, null, "staff", null);
+        var legacyAdminPage = controller.listUsers(0, 20, null, "admin", null);
+
+        assertThat(staffPage.content()).extracting(AdminUserController.UserResponse::role)
+                .containsExactly("STAFF");
+        assertThat(legacyAdminPage.content()).extracting(AdminUserController.UserResponse::role)
+                .containsExactly("ADMIN");
+        assertThat(staffPage.totalElements()).isEqualTo(1);
+        assertThat(legacyAdminPage.totalElements()).isEqualTo(1);
+    }
+
+    @Test
     void listUsersRejectsInvalidPagination() {
         UserRepository repository = mock(UserRepository.class);
 
@@ -147,6 +170,38 @@ class AdminUserControllerTest {
                 .satisfies(error -> assertThat(
                         ((ResponseStatusException) error).getStatusCode())
                         .isEqualTo(HttpStatus.CONFLICT));
+    }
+
+    @Test
+    void administratorCanAssignOneOfTheFixedPrimaryRolesToAnotherUser() {
+        UserRepository repository = mock(UserRepository.class);
+        User admin = user(10L, "admin@example.test", "ADMIN");
+        User target = user(11L, "developer@example.test", "DEVELOPER");
+        when(repository.findByEmail("admin@example.test")).thenReturn(Optional.of(admin));
+        when(repository.findById(11L)).thenReturn(Optional.of(target));
+        when(repository.save(target)).thenReturn(target);
+
+        var response = new AdminUserController(repository).updatePrimaryRole(11L,
+                new AdminUserController.UpdateUserRoleRequest("staff"), authentication("admin@example.test"));
+
+        assertThat(response.role()).isEqualTo("STAFF");
+    }
+
+    @Test
+    void administratorCannotPromoteThemselfOrAssignUnknownRole() {
+        UserRepository repository = mock(UserRepository.class);
+        User admin = user(10L, "admin@example.test", "ADMIN");
+        when(repository.findByEmail("admin@example.test")).thenReturn(Optional.of(admin));
+        var controller = new AdminUserController(repository);
+
+        assertThatThrownBy(() -> controller.updatePrimaryRole(10L,
+                new AdminUserController.UpdateUserRoleRequest("ADMINISTRATOR"), authentication("admin@example.test")))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(error -> assertThat(((ResponseStatusException) error).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+        assertThatThrownBy(() -> controller.updatePrimaryRole(11L,
+                new AdminUserController.UpdateUserRoleRequest("UNKNOWN"), authentication("admin@example.test")))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(error -> assertThat(((ResponseStatusException) error).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
     }
 
     private static Authentication authentication(String email) {
