@@ -4,11 +4,15 @@ import com.cnpm.backend.controller.AdminUserController;
 import com.cnpm.backend.entity.User;
 import com.cnpm.backend.repository.UserRepository;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -72,6 +76,77 @@ class AdminUserControllerTest {
         assertThat(java.util.Arrays.stream(response.getClass().getRecordComponents())
                 .map(java.lang.reflect.RecordComponent::getName).toList())
                 .doesNotContain("password");
+    }
+
+    @Test
+    void listUsersAppliesSearchRoleAndStatusFiltersWithPagination() {
+        UserRepository repository = mock(UserRepository.class);
+        User target = user(11L, "developer@example.test", "DEVELOPER");
+        var pageable = PageRequest.of(1, 10,
+                Sort.by(Sort.Direction.DESC, "createdAt"));
+        when(repository.searchForAdministration("dev", "DEVELOPER", false, pageable))
+                .thenReturn(new PageImpl<>(List.of(target), pageable, 11));
+
+        var response = new AdminUserController(repository)
+                .listUsers(1, 10, " dev ", "developer", false);
+
+        assertThat(response.content()).hasSize(1);
+        assertThat(response.page()).isEqualTo(1);
+        assertThat(response.size()).isEqualTo(10);
+        assertThat(response.totalElements()).isEqualTo(11);
+        assertThat(response.totalPages()).isEqualTo(2);
+        assertThat(response.content().getFirst().email()).isEqualTo("developer@example.test");
+        verify(repository).searchForAdministration("dev", "DEVELOPER", false, pageable);
+    }
+
+    @Test
+    void listUsersRejectsInvalidPagination() {
+        UserRepository repository = mock(UserRepository.class);
+
+        assertThatThrownBy(() -> new AdminUserController(repository)
+                .listUsers(0, 101, null, null, null))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(error -> assertThat(
+                        ((ResponseStatusException) error).getStatusCode())
+                        .isEqualTo(HttpStatus.BAD_REQUEST));
+        verify(repository, never()).searchForAdministration(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void getUserReturnsSafeDetailsWithoutPassword() {
+        UserRepository repository = mock(UserRepository.class);
+        User target = user(11L, "developer@example.test", "DEVELOPER");
+        when(repository.findById(11L)).thenReturn(Optional.of(target));
+
+        var response = new AdminUserController(repository).getUser(11L);
+
+        assertThat(response.id()).isEqualTo(11L);
+        assertThat(response.username()).isEqualTo("developer");
+        assertThat(response.role()).isEqualTo("DEVELOPER");
+        assertThat(java.util.Arrays.stream(response.getClass().getRecordComponents())
+                .map(java.lang.reflect.RecordComponent::getName).toList())
+                .doesNotContain("password");
+    }
+
+    @Test
+    void profileUpdateRejectsDuplicateEmail() {
+        UserRepository repository = mock(UserRepository.class);
+        User target = user(11L, "developer@example.test", "DEVELOPER");
+        when(repository.findById(11L)).thenReturn(Optional.of(target));
+        when(repository.existsByEmailIgnoreCaseAndIdNot("other@example.test", 11L))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> new AdminUserController(repository).updateUser(
+                11L, new AdminUserController.UpdateUserRequest(
+                        null, "other@example.test", null, null)))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(error -> assertThat(
+                        ((ResponseStatusException) error).getStatusCode())
+                        .isEqualTo(HttpStatus.CONFLICT));
     }
 
     private static Authentication authentication(String email) {
