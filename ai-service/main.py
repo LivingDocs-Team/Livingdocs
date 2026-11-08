@@ -11,12 +11,13 @@ from fastapi.responses import PlainTextResponse
 
 from app.generator import get_generator
 from app.jobs import jobs, run_job
-from app.models import (SECTION_KINDS, SECTION_NAMES, GenerateRequest, Job, JobReport, JobStatus,
-                        Template, TemplateIn, TemplateSections)
+from app.models import (SECTION_KINDS, SECTION_NAMES, GenerateRequest, Job, JobReport,
+                        JobStatus, ReviewEvidenceResponse, Template, TemplateIn,
+                        TemplateSections)
 from app.templates import TemplateNameTaken, templates
 from app.version_models import (Document, DocumentContentEdit, DocumentCreate, DocumentVersion,
                                 HistoryEvent, InternalDocumentCreate, InternalVersionDecision,
-                                VersionSummary)
+                                VersionComparison, VersionSummary)
 from app.versions import VersionError, documents
 from app.internal_auth import require_internal_service
 
@@ -153,7 +154,14 @@ def create_document(data: DocumentCreate):
     output = jobs.get_output(data.job_id)
     if output is None:
         raise HTTPException(409, "Job result is no longer available")
-    return documents.create_from_job(data.job_id, output, data.title, data.actor, data.note)
+    return documents.create_from_job(
+              data.job_id,
+              output,
+              data.title,
+              data.actor,
+              data.note,
+              report=jobs.get_report(data.job_id),
+)
 
 
 @app.post("/internal/documents/from-job", response_model=Document, status_code=201,
@@ -171,8 +179,15 @@ def create_owned_document(data: InternalDocumentCreate,
     output = jobs.get_output(data.job_id)
     if output is None:
         raise HTTPException(409, "Job result is no longer available")
-    return documents.create_from_job(data.job_id, output, data.title, user_id, data.note,
-                                     owner_user_id=user_id)
+    return documents.create_from_job(
+    data.job_id,
+    output,
+    data.title,
+    user_id,
+    data.note,
+    owner_user_id=user_id,
+    report=jobs.get_report(data.job_id),
+)
 
 
 @app.get("/internal/documents/{doc_id}", response_model=Document,
@@ -186,6 +201,37 @@ def get_owned_document(doc_id: str):
 def get_internal_document_content(doc_id: str, version: Optional[int] = Query(None, ge=1)):
     v = _call(documents.version, doc_id, version)
     return PlainTextResponse(v.content, media_type="text/markdown")
+@app.get(
+    "/internal/documents/{doc_id}/review-evidence",
+    response_model=ReviewEvidenceResponse,
+    dependencies=[Depends(require_internal_service)],
+)
+def get_internal_document_review_evidence(
+    doc_id: str,
+    version: Optional[int] = Query(None, ge=1),
+):
+    """Return AI evidence and source snapshot for a specific document version."""
+    v = _call(documents.version, doc_id, version)
+
+    if v.review_report is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Review evidence is not available for this document version",
+        )
+
+    return ReviewEvidenceResponse(
+        **v.review_report.model_dump(),
+        source_snapshot=v.source_snapshot,
+    )
+
+@app.get(
+    "/internal/documents/{doc_id}/review-comparison",
+    response_model=VersionComparison,
+    dependencies=[Depends(require_internal_service)],
+)
+def get_internal_document_review_comparison(doc_id: str):
+    """Compare the pending version with the latest approved version."""
+    return _call(documents.review_comparison, doc_id)
 
 
 @app.put("/internal/documents/{doc_id}/content", response_model=DocumentVersion,

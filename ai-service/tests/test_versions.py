@@ -7,7 +7,15 @@ os.environ.pop("ANTHROPIC_API_KEY", None)  # offline generator
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.jobs import JobOutput  # noqa: E402
-from app.models import Scope  # noqa: E402
+from app.models import (
+    ConfidenceLevel,
+    Evidence,
+    EvidenceKind,
+    FileReport,
+    FileResultStatus,
+    JobReport,
+    Scope,
+)  # noqa: E402
 from app.versions import DocumentStore, VersionError
 from main import app  # noqa: E402
 
@@ -24,8 +32,62 @@ USERS = {
                  "methods": [{"name": "get_user", "parameters": [{"name": "user_id", "type": "int"}],
                               "return_type": "User"}]}],
 }
+REVIEW_REPORT = JobReport(
+    job_id="job-review-001",
+    template_id="default",
+    template_name="Standard technical docs",
+    confidence=0.9,
+    level=ConfidenceLevel.high,
+    method="Evidence-based confidence assessment",
+    files=[
+        FileReport(
+            path="shop/cart.py",
+            status=FileResultStatus.generated,
+            confidence=0.9,
+            level=ConfidenceLevel.high,
+            entities=[],
+            context_used=[
+                Evidence(
+                    id="E1",
+                    kind=EvidenceKind.source,
+                    path="shop/cart.py",
+                    name="get_cart_total",
+                    line_start=10,
+                    line_end=13,
+                    excerpt="def get_cart_total(cart_id: int):",
+                )
+            ],
+        )
+    ],
+)
 
+def test_save_job_report_in_document_version():
+    store = DocumentStore()
 
+    out = JobOutput(
+        scope=Scope.repository,
+        target="acme",
+        template_id="default",
+        template_name="Standard technical docs",
+        output_language="en",
+        sections=[("shop/cart.py", "# Cart documentation\n", "offline", 0.5)],
+        confidence=0.5,
+    )
+
+    doc = store.create_from_job(
+        "job-review-001",
+        out,
+        actor="linh",
+        report=REVIEW_REPORT,
+    )
+
+    version = store.version(doc.id, 1)
+
+    assert version.review_report is not None
+    assert version.review_report.job_id == "job-review-001"
+    assert version.review_report.confidence == 0.9
+    assert version.review_report.files[0].path == "shop/cart.py"
+    assert version.review_report.files[0].context_used[0].id == "E1"
 # ---------- LD-195: documents and version history ----------
 
 def new_document(files=None, scope="repository", target="acme/shop"):
@@ -90,7 +152,35 @@ def test_documents_survive_restart(tmp_path):
     path.write_text("{not json", encoding="utf-8")
     assert DocumentStore(str(path)).list() == []
     assert list(tmp_path.glob("documents.corrupt-*.json"))
+def test_review_report_survives_restart(tmp_path):
+    path = tmp_path / "documents.json"
+    store = DocumentStore(str(path))
 
+    out = JobOutput(
+        scope=Scope.repository,
+        target="acme",
+        template_id="default",
+        template_name="Standard technical docs",
+        output_language="en",
+        sections=[("shop/cart.py", "# Cart documentation\n", "offline", 0.5)],
+        confidence=0.5,
+    )
+
+    doc = store.create_from_job(
+        "job-review-001",
+        out,
+        actor="linh",
+        report=REVIEW_REPORT,
+    )
+
+    restored = DocumentStore(str(path))
+    version = restored.version(doc.id, 1)
+
+    assert version.review_report is not None
+    assert version.review_report.job_id == "job-review-001"
+    assert version.review_report.files[0].context_used[0].excerpt == (
+        "def get_cart_total(cart_id: int):"
+    )
 
 def test_workflow_owner_is_persisted_and_legacy_actor_is_not_an_owner(tmp_path):
     path = tmp_path / "documents.json"
@@ -214,3 +304,177 @@ def test_document_versions_support_repeated_changes_and_final_decision():
     assert persisted.pending_version is None
     assert store.version(doc.id).status.value == "accepted"
     assert store.history(doc.id)[-1].actor == "84"
+def test_legacy_job_report_without_template_snapshot_remains_valid():
+    report = JobReport(
+        job_id="legacy-job",
+        template_id="default",
+        template_name="Default",
+    )
+
+    assert report.template_instructions is None
+    assert report.template_sections == []
+def create_internal_review_document(monkeypatch, source_snapshot=None):
+    monkeypatch.setenv("INTERNAL_API_SECRET", "workflow-internal-secret")
+
+    payload = {
+        "scope": "repository",
+        "target": "acme/shop",
+        "files": [CART, USERS],
+    }
+
+    if source_snapshot is not None:
+        payload["source_snapshot"] = source_snapshot
+
+    job_response = client.post("/generate", json=payload)
+    assert job_response.status_code == 202, job_response.text
+
+    job_id = job_response.json()["id"]
+
+    created_response = client.post(
+        "/internal/documents/from-job",
+        headers={
+            "Authorization": "Bearer workflow-internal-secret",
+            "X-User-Id": "73",
+        },
+        json={"job_id": job_id},
+    )
+
+    assert created_response.status_code == 201, created_response.text
+    return created_response.json()
+def test_review_evidence_returns_report_and_source_snapshot(monkeypatch):
+    snapshot = {
+        "repository_id": "repo-123",
+        "repository_full_name": "acme/shop",
+        "branch": "main",
+        "commit_sha": "a" * 40,
+        "fetched_at": "2026-11-09T10:00:00Z",
+    }
+
+    doc = create_internal_review_document(monkeypatch, snapshot)
+
+    response = client.get(
+        f"/internal/documents/{doc['id']}/review-evidence?version=1",
+        headers={
+            "Authorization": "Bearer workflow-internal-secret",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+
+    data = response.json()
+
+    # Các trường evidence cũ vẫn được giữ nguyên.
+    assert data["job_id"]
+    assert "files" in data
+    assert "template_name" in data
+
+    # Snapshot phải đúng với snapshot đã lưu ở version 1.
+    assert data["source_snapshot"]["repository_id"] == "repo-123"
+    assert data["source_snapshot"]["repository_full_name"] == "acme/shop"
+    assert data["source_snapshot"]["branch"] == "main"
+    assert data["source_snapshot"]["commit_sha"] == "a" * 40
+
+
+def test_review_evidence_without_source_snapshot_returns_null(monkeypatch):
+    doc = create_internal_review_document(monkeypatch)
+
+    response = client.get(
+        f"/internal/documents/{doc['id']}/review-evidence?version=1",
+        headers={
+            "Authorization": "Bearer workflow-internal-secret",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+
+    data = response.json()
+
+    assert data["job_id"]
+    assert "files" in data
+    assert data["source_snapshot"] is None
+
+
+def test_review_evidence_uses_requested_version(monkeypatch):
+    snapshot = {
+        "repository_id": "repo-version-test",
+        "repository_full_name": "acme/shop",
+        "branch": "main",
+        "commit_sha": "b" * 40,
+        "fetched_at": "2026-11-09T10:00:00Z",
+    }
+
+    doc = create_internal_review_document(monkeypatch, snapshot)
+
+    # Tạo version 2 bằng chỉnh sửa thủ công.
+    # Version này không được kế thừa evidence/snapshot của version 1.
+    edit_response = client.put(
+        f"/internal/documents/{doc['id']}/content",
+        headers={
+            "Authorization": "Bearer workflow-internal-secret",
+            "X-User-Id": "73",
+        },
+        json={
+            "content": "# Manually edited documentation",
+            "expected_version": 1,
+        },
+    )
+
+    assert edit_response.status_code == 200, edit_response.text
+    assert edit_response.json()["number"] == 2
+
+    # Yêu cầu version 1 phải nhận snapshot của version 1.
+    response_v1 = client.get(
+        f"/internal/documents/{doc['id']}/review-evidence?version=1",
+        headers={
+            "Authorization": "Bearer workflow-internal-secret",
+        },
+    )
+
+    assert response_v1.status_code == 200, response_v1.text
+    assert response_v1.json()["source_snapshot"]["commit_sha"] == "b" * 40
+
+    # Version 2 là bản chỉnh sửa thủ công, không có evidence.
+    response_v2 = client.get(
+        f"/internal/documents/{doc['id']}/review-evidence?version=2",
+        headers={
+            "Authorization": "Bearer workflow-internal-secret",
+        },
+    )
+
+    assert response_v2.status_code == 404
+
+
+def test_review_evidence_returns_404_when_report_is_missing(monkeypatch):
+    snapshot = {
+        "repository_id": "repo-no-evidence",
+        "repository_full_name": "acme/shop",
+        "branch": "main",
+        "commit_sha": "c" * 40,
+        "fetched_at": "2026-11-09T10:00:00Z",
+    }
+
+    doc = create_internal_review_document(monkeypatch, snapshot)
+
+    # Tạo version chỉnh sửa thủ công không có review_report.
+    edit_response = client.put(
+        f"/internal/documents/{doc['id']}/content",
+        headers={
+            "Authorization": "Bearer workflow-internal-secret",
+            "X-User-Id": "73",
+        },
+        json={
+            "content": "# Edited documentation",
+            "expected_version": 1,
+        },
+    )
+
+    assert edit_response.status_code == 200, edit_response.text
+
+    response = client.get(
+        f"/internal/documents/{doc['id']}/review-evidence?version=2",
+        headers={
+            "Authorization": "Bearer workflow-internal-secret",
+        },
+    )
+
+    assert response.status_code == 404
