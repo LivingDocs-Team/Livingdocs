@@ -72,15 +72,23 @@ def test_drift_found_in_generated_document_and_readme(pr_body, saved_document):
     f = by_entity(rep)
     sig = f[("CartService.add_item", "document")]
     assert sig["type"] == "signature" and sig["severity"] == "high"   # the doc still names `quantity`
+    assert sig["kind"] == "parameter_renamed" and sig["breaking"] is True   # LD-153: same position, type
     assert sig["confidence_level"] == "high" and sig["after"].startswith("add_item(")
     assert sig["document"]["document_id"] == saved_document["id"] and sig["document"]["version"] == 1
 
     ren = f[("CartService.grand_total", "document")]
     assert ren["type"] == "referential" and ren["severity"] == "high"
+    assert ren["kind"] == "entity_renamed"
     assert (ren["before"], ren["after"]) == ("CartService.total", "CartService.grand_total")
 
     sem = f[("CartService", "repository")]
     assert sem["type"] == "semantic" and sem["document"]["path"] == "README.md"
+    assert sem["kind"] == "docstring_changed"
+    # LD-154: the generated section copied the old docstring; it is quoted as evidence
+    own = f[("CartService", "document")]
+    quoted = [m for m in own["document"]["matches"] if m["kind"] == "docstring"]
+    assert quoted and quoted[0]["term"] == "Prices are in VND and include VAT."
+    assert own["severity"] == "high" and own["confidence"] > sem["confidence"]
     assert sem["confidence"] < f[("CartService", "document")]["confidence"]   # not its own section
 
 

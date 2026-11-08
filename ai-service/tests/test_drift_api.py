@@ -42,6 +42,10 @@ def test_changes_endpoint_lists_entity_changes():
     assert changes["get_cart_total"] == "signature_changed"
     assert changes["clear_cart"] == "removed"
     assert changes["GET /api/carts/{id}"] == "renamed"
+    sig = next(c for c in data["files"][0]["entity_changes"] if c["name"] == "get_cart_total")
+    assert sig["breaking"] is True and sig["aspects"] == ["parameters"]
+    assert {(p["change"], p["name"]) for p in sig["parameter_changes"]} == {("removed", "discount"),
+                                                                            ("added", "currency")}
 
 
 def test_analyze_saved_document_and_repository_markdown():
@@ -58,6 +62,9 @@ def test_analyze_saved_document_and_repository_markdown():
     sig = next(f for f in report["findings"]
                if f["entity"] == "get_cart_total" and f["document"]["document_id"] == doc["id"])
     assert sig["type"] == "signature" and sig["severity"] == "high"
+    assert sig["kind"] == "parameter_removed" and sig["breaking"] is True and sig["rules"]
+    assert report["summary"]["by_kind"]["parameter_removed"] >= 1
+    assert report["summary"]["breaking"] == sum(1 for f in report["findings"] if f["breaking"])
     assert sig["confidence_level"] == "high"
     assert {e["kind"] for e in sig["evidence"]} == {"code_diff", "documentation", "commit", "ticket"}
     assert sig["document"]["version"] == 1
