@@ -96,17 +96,35 @@ public class DocumentWorkflowController {
         return workflowService.get(userId, parse(authorities), id);
     }
 
-    @GetMapping("/document-workflows/{id}/document")
+        @GetMapping("/document-workflows/{id}/document")
     public ContentResponse content(@RequestHeader(USER_HEADER) String userId,
             @RequestHeader(AUTHORITIES_HEADER) String authorities, @PathVariable UUID id) {
         return workflowService.content(userId, parse(authorities), id);
     }
 
+    @GetMapping("/document-workflows/{id}/review-evidence")
+    public com.fasterxml.jackson.databind.JsonNode reviewEvidence(
+            @RequestHeader(USER_HEADER) String userId,
+            @RequestHeader(AUTHORITIES_HEADER) String authorities,
+            @PathVariable UUID id) {
+        return workflowService.reviewEvidence(userId, parse(authorities), id);
+    }
+
+    @GetMapping("/document-workflows/{id}/review-comparison")
+    public com.fasterxml.jackson.databind.JsonNode reviewComparison(
+            @RequestHeader(USER_HEADER) String userId,
+            @RequestHeader(AUTHORITIES_HEADER) String authorities,
+            @PathVariable UUID id) {
+        return workflowService.reviewComparison(userId, parse(authorities), id);
+    }
     @GetMapping("/document-workflows/{id}/history")
-    public java.util.List<AuditResponse> history(@RequestHeader(USER_HEADER) String userId,
+    public java.util.List<AuditResponse> history(
+            @RequestHeader(USER_HEADER) String userId,
             @RequestHeader(AUTHORITIES_HEADER) String authorities, @PathVariable UUID id) {
         return workflowService.history(userId, parse(authorities), id);
     }
+
+
 
     @PostMapping("/document-workflows/{id}/submit")
     public WorkflowResponse submit(@RequestHeader(USER_HEADER) String userId,

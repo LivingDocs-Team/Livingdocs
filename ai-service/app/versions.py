@@ -15,7 +15,7 @@ from typing import Dict, List, Optional
 
 from .generator import DocGenerator
 from .jobs import JobOutput
-from .models import Scope, now
+from .models import JobReport, Scope, now
 from .renderer import render_overview
 from .version_models import (Document, DocumentVersion, FileSection, HistoryAction, HistoryEvent,
                              SectionAction, SectionChange, SkippedFile, VersionOrigin,
@@ -149,6 +149,41 @@ class DocumentStore:
         self.get(doc_id)
         return list(self._events[doc_id])
 
+    def review_comparison(self, doc_id: str):
+        """Compare the pending version with the latest approved version."""
+        import difflib
+
+        doc = self.get(doc_id)
+
+        if doc.pending_version is None:
+            raise VersionError(409, "No document version is awaiting review")
+
+        pending = self.version(doc_id, doc.pending_version)
+
+        approved = (
+            self.version(doc_id, doc.current_version)
+            if doc.current_version > 0
+            else None
+        )
+
+        diff = ""
+        if approved is not None:
+            diff = "".join(
+                difflib.unified_diff(
+                    approved.content.splitlines(keepends=True),
+                    pending.content.splitlines(keepends=True),
+                    fromfile=f"approved-v{approved.number}",
+                    tofile=f"pending-v{pending.number}",
+                )
+            )
+
+        return {
+            "pending_version": pending,
+            "approved_version": approved,
+            "has_approved_version": approved is not None,
+            "diff": diff,
+            "changes": pending.changes,
+        }
     # ---------- internal helpers ----------
 
     def _event(self, doc_id: str, action: HistoryAction, version: int, actor: Optional[str] = None,
@@ -160,7 +195,7 @@ class DocumentStore:
 
     def create_from_job(self, job_id: str, output: JobOutput, title: Optional[str] = None,
                         actor: Optional[str] = None, note: Optional[str] = None,
-                        owner_user_id: Optional[str] = None) -> Document:
+                        owner_user_id: Optional[str] = None,report: Optional[JobReport] = None) -> Document:
         with self._lock:
             if owner_user_id is not None:
                 for existing in self._docs.values():
@@ -181,10 +216,11 @@ class DocumentStore:
                                 status=VersionStatus.proposed if owner_user_id is not None else VersionStatus.accepted,
                                 origin=VersionOrigin.generated,
                                 content=assemble(doc, sections, skipped, output.template_name),
-                                sections=sections, skipped=skipped, confidence=output.confidence,
+                                sections=sections, skipped=skipped, confidence=output.confidence,review_report=report,
                                 changes=[SectionChange(path=s.path, action=SectionAction.added)
                                          for s in sections],
                                 note=note, created_by=actor,
+                                source_snapshot=output.source_snapshot,
                                 decided_by=None if owner_user_id is not None else actor,
                                 decided_at=None if owner_user_id is not None else now())
             self._docs[doc.id] = doc
