@@ -283,6 +283,54 @@ class DriftAnalysisServiceTest {
         aiServiceServer.verify();
     }
 
+    @Test
+    void repositoryReportCanBeFilteredBySeverityAndRenderedAsMarkdown() {
+        stubGitHub();
+        expectAnalyzer(ANALYSIS_BEFORE, ANALYSIS_AFTER);
+        expectDocuments();
+        aiServiceServer.expect(requestTo("http://ai.test/drift/analyze"))
+                .andRespond(withStatus(HttpStatus.CREATED).contentType(MediaType.APPLICATION_JSON).body(REPORT));
+        aiServiceServer.expect(requestTo("http://ai.test/drift/reports/report-1?min_severity=high"))
+                .andExpect(method(GET))
+                .andRespond(withSuccess(REPORT, MediaType.APPLICATION_JSON));
+        aiServiceServer.expect(requestTo("http://ai.test/drift/reports/report-1/markdown"))
+                .andRespond(withSuccess("## Documentation drift - PR #7", MediaType.parseMediaType("text/markdown")));
+        aiServiceServer.expect(requestTo("http://ai.test/drift/severity-rules"))
+                .andRespond(withSuccess("{\"levels\":[{\"level\":\"critical\"}],\"rules\":[]}",
+                        MediaType.APPLICATION_JSON));
+
+        driftService.analyzePullRequest(USER_ID, REPOSITORY_ID, new DriftAnalysisRequest(7, null, false));
+        JsonNode report = driftService.getReport(USER_ID, REPOSITORY_ID, "report-1", "HIGH");
+        String markdown = driftService.getReportMarkdown(USER_ID, REPOSITORY_ID, "report-1", null);
+        JsonNode rules = driftService.severityRules();
+        ApiException badLevel = assertThrows(ApiException.class,
+                () -> driftService.getReport(USER_ID, REPOSITORY_ID, "report-1", "urgent"));
+
+        assertEquals("report-1", report.path("id").asText());
+        assertTrue(markdown.startsWith("## Documentation drift"));
+        assertEquals("critical", rules.path("levels").get(0).path("level").asText());
+        assertEquals(HttpStatus.BAD_REQUEST, badLevel.getStatus());
+        aiServiceServer.verify();
+    }
+
+    @Test
+    void repositoryReportMustBelongToThatRepository() {
+        stubGitHub();
+        expectAnalyzer(ANALYSIS_BEFORE, ANALYSIS_AFTER);
+        expectDocuments();
+        aiServiceServer.expect(requestTo("http://ai.test/drift/analyze"))
+                .andRespond(withStatus(HttpStatus.CREATED).contentType(MediaType.APPLICATION_JSON).body(REPORT));
+        aiServiceServer.expect(requestTo("http://ai.test/drift/reports/report-1"))
+                .andRespond(withSuccess(REPORT.replace("acme/shop", "other/repo"), MediaType.APPLICATION_JSON));
+
+        driftService.analyzePullRequest(USER_ID, REPOSITORY_ID, new DriftAnalysisRequest(7, null, false));
+        ApiException error = assertThrows(ApiException.class,
+                () -> driftService.getReport(USER_ID, REPOSITORY_ID, "report-1", null));
+
+        assertEquals(HttpStatus.NOT_FOUND, error.getStatus());
+        aiServiceServer.verify();
+    }
+
     // ------------------------------------------------------------------ fixtures
 
     /** PR #7: shop/cart.py modified (Python, analyzed) and web/app.js modified (not analyzed). */

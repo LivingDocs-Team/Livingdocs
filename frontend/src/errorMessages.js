@@ -32,6 +32,10 @@ const MESSAGES_BY_CODE = {
   DOCUMENTATION_NOT_READY: 'Documentation is not ready yet. Wait for generation to finish and try again.',
   AI_SERVICE_FAILED: 'The documentation service is temporarily unavailable. Try again later.',
   AI_SERVICE_INVALID_RESPONSE: 'The documentation service returned an invalid response. Try again later.',
+  // Documentation drift (LD-145, LD-156)
+  PULL_REQUEST_NOT_FOUND: 'The pull request was not found in this repository. Check the number and try again.',
+  DRIFT_REQUEST_INVALID: 'The pull request could not be checked for documentation drift.',
+  GITHUB_INVALID_RESPONSE: 'GitHub returned an incomplete pull request. Please try again later.',
 };
 
 const MESSAGES_BY_STATUS = {

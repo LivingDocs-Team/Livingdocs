@@ -1,4 +1,4 @@
-# LivingDocs AI Service (LD-90, LD-340, LD-195, LD-145, LD-151)
+# LivingDocs AI Service (LD-90, LD-340, LD-195, LD-145, LD-151, LD-156)
 
 AI-assisted documentation generation. Takes source code that has already been analyzed
 (classes, methods, endpoints, parameters, return values) and produces Markdown docs
@@ -55,7 +55,9 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | POST | `/drift/changes` | Changed code entities of a Pull Request (LD-146); nothing is stored |
 | POST | `/drift/analyze` | Drift report of a Pull Request: findings, affected docs, evidence (LD-147/148/149) |
 | GET | `/drift/reports?repository=&pull_request=` | Drift reports, newest first |
-| GET | `/drift/reports/{id}` | One drift report |
+| GET | `/drift/reports/{id}?min_severity=high` | One drift report (optionally only findings at or above a level) |
+| GET | `/drift/reports/{id}/markdown?min_severity=` | The report as Markdown grouped by severity (PR comment) |
+| GET | `/drift/severity-rules` | Severity levels (score bands, meaning, action) and every severity rule |
 
 Built-in templates: `default`, `api-reference`, `brief`.
 
@@ -124,10 +126,25 @@ PR files (patch + analyzer result at base/head)
   status_code, value, docstring, line_ref) and as `D` evidence, and raise the severity by one level.
   A signature change whose body also changed (status codes, exceptions, values) gives a second,
   semantic finding.
-- **Severity** Low < Medium < High < Critical: removed/renamed entity High (endpoint Critical);
-  signature breaking Medium / not breaking Low (endpoint +1); behaviour Low (status codes,
-  exceptions or docstring changed +1, >= 15 changed lines +1); documentation still states the old
-  detail +1; private `_name` -1; stale line references Low (shifted) / Medium (lines changed).
+- **Severity assessment (LD-156)**, all rules in `app/drift_severity.py` (one table, `RULES`):
+  - *LD-157 rules*: a classifier only names the **base rule** and the **adjustments** that apply,
+    each with the documentation passages that prove it. Base rules: `endpoint_gone` Critical,
+    `entity_gone` High, `file_section_removed` High, `file_reference_removed` / `file_reference_moved`
+    Medium, `own_section_moved` Low, `line_reference_changed` Medium / `line_reference_shifted` Low,
+    `breaking_signature` Medium / `compatible_signature` Low, `behaviour_changed` Low,
+    `undocumented_entity` Low. Adjustments: `public_endpoint` +1, `doc_states_old_detail` +1,
+    `contract_behaviour` +1, `large_change` +1, `private_name` -1, `uncertain_match` -1 (confidence
+    < 0.5). Semantic drift is capped at High.
+  - *LD-158 classification*: score 0-100 inside the level's band (Low 0-24, Medium 25-49, High 50-74,
+    Critical 75-100; more confident findings score higher; `classify_score` maps back). Each affected
+    document and the report take the level of their most severe finding; `summary.severity_score`
+    and `summary.recommendation` (action for that level, e.g. "Fix the documentation before
+    merging").
+  - *Evidence*: `finding.severity_assessment` = level, score, base rule + reason + evidence ids,
+    every adjustment with its evidence ids (X1 code diff, D2 documentation line), cap, one-line
+    summary. `finding.rules` keeps the short form.
+  - *LD-159 display*: `GET /drift/reports/{id}/markdown` (PR comment) and the frontend page
+    "Documentation Drift" (`frontend/src/DocumentationDrift.jsx`).
 - **Confidence** 0-1 = match x method x location x certainty; levels as LD-340 (high >= 0.75,
   medium >= 0.50). Every finding has `factors` explaining the score.
 - **Evidence** (BR-50): `X1` code diff of the entity (without a diff: signature and docstring
@@ -141,9 +158,10 @@ PR files (patch + analyzer result at base/head)
   `/drift/analyze` with the saved documents of that repository only. Details:
   [github-integration-service README](../services/github-integration-service/README.md).
 - Reports are kept in memory (last 500); history and resolution of drift are LD-167.
-- Tests (LD-150, LD-155): `tests/test_drift.py`, `tests/test_drift_classification.py`,
-  `tests/test_drift_api.py`, `tests/integration/test_drift_integration.py`, live:
-  `test_live_pipeline.py`.
+- Tests (LD-150, LD-155, LD-160): `tests/test_drift.py`, `tests/test_drift_classification.py`,
+  `tests/test_drift_severity.py`, `tests/test_drift_api.py`,
+  `tests/integration/test_drift_integration.py`, live: `test_live_pipeline.py`; UI:
+  `tests/test_frontend_drift.py` (repository root).
 
 ### Example request
 
