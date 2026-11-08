@@ -52,6 +52,8 @@ class GitHubOAuth2UserServiceTest {
                 .clientId("test-client")
                 .clientSecret("test-secret")
                 .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .authorizationUri("https://github.test/login/oauth/authorize")
+                .tokenUri("https://github.test/login/oauth/access_token")
                 .redirectUri("{baseUrl}/login/oauth2/code/{registrationId}")
                 .scope("read:user")
                 .userInfoUri("https://api.github.test/user")
