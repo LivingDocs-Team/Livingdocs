@@ -10,6 +10,7 @@ import pathlib
 import re
 
 import pytest
+from playwright.sync_api import Page
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 
