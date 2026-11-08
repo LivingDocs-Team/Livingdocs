@@ -500,7 +500,7 @@ button:disabled {
 
 .quick-access-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 18px;
 }
 
@@ -3758,4 +3758,76 @@ button:disabled {
   .documentation-page .markdown-preview-content h2 {
     font-size: 20px;
   }
+}
+.documentation-search-page {
+  width: min(960px, calc(100% - 32px));
+  margin: 24px auto;
+}
+
+.documentation-search-form {
+  display: grid;
+  gap: 10px;
+  margin: 22px 0;
+}
+
+.documentation-search-input-row {
+  display: flex;
+  gap: 10px;
+}
+
+.documentation-search-input-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.documentation-search-results {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.documentation-search-result {
+  padding: 16px;
+  border: 1px solid #dce3ed;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.documentation-search-result-heading,
+.documentation-search-result-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: #5c687a;
+  font-size: 0.88rem;
+}
+
+.documentation-search-kind {
+  color: #315aa8;
+  font-weight: 700;
+}
+
+.kind-code {
+  color: #6941a5;
+}
+
+.documentation-search-result h3 {
+  margin: 12px 0 6px;
+}
+
+.documentation-search-result p {
+  white-space: pre-wrap;
+}
+
+.documentation-search-result pre {
+  overflow-x: auto;
+  padding: 10px;
+  border-radius: 8px;
+  background: #f4f6fa;
+}
+
+.documentation-search-result-actions a {
+  color: #315aa8;
 }

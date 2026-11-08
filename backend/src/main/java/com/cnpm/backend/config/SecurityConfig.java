@@ -14,6 +14,8 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.beans.factory.annotation.Value;
@@ -85,11 +87,21 @@ public class SecurityConfig {
     }
 
     @Bean
+    public FilterRegistrationBean<AccountStatusFilter> accountStatusFilterRegistration(
+            AccountStatusFilter accountStatusFilter) {
+        FilterRegistrationBean<AccountStatusFilter> registration =
+                new FilterRegistrationBean<>(accountStatusFilter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
     public SecurityFilterChain securityFilterChain(
         HttpSecurity http,
         DaoAuthenticationProvider authenticationProvider,
         GitHubOAuth2UserService gitHubOAuth2UserService,
-        CsrfTokenRepository csrfTokenRepository)
+        CsrfTokenRepository csrfTokenRepository,
+        AccountStatusFilter accountStatusFilter)
         throws Exception {
 
         http
@@ -116,6 +128,7 @@ public class SecurityConfig {
                     "/api/**"
                 ).permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/auth/csrf").permitAll()
+                .requestMatchers("/api/admin/**").hasAnyRole("ADMIN", "ADMINISTRATOR")
                 .requestMatchers(
                     HttpMethod.POST,
                     "/api/auth/register",
@@ -127,11 +140,14 @@ public class SecurityConfig {
             )
 
             .oauth2Login(oauth -> oauth
-    .userInfoEndpoint(userInfo -> userInfo
-        .userService(gitHubOAuth2UserService)
-    )
-    .defaultSuccessUrl("/api/auth/oauth2/success", true)
-);
+                .userInfoEndpoint(userInfo -> userInfo
+                    .userService(gitHubOAuth2UserService)
+                )
+                .defaultSuccessUrl("/api/auth/oauth2/success", true)
+                .failureUrl("/?oauth=error")
+            );
+
+        http.addFilterBefore(accountStatusFilter, AuthorizationFilter.class);
 
         return http.build();
     }
