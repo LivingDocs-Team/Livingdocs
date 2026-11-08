@@ -93,12 +93,10 @@ public class AdminUserController {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                         "A valid email address is required");
             }
-            userRepository.findByEmail(email)
-                    .filter(other -> !other.getId().equals(id))
-                    .ifPresent(other -> {
-                        throw new ResponseStatusException(HttpStatus.CONFLICT,
-                                "Email is already in use");
-                    });
+            if (userRepository.existsByEmailIgnoreCaseAndIdNot(email, id)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "Email is already in use");
+            }
             user.setEmail(email);
         }
 
