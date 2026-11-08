@@ -47,7 +47,7 @@ public class AdminUserController {
         }
 
         String normalizedSearch = normalizeFilter(search);
-        String normalizedRole = normalizeFilter(role);
+        String normalizedRole = role == null || role.isBlank() ? null : role.trim().toUpperCase(java.util.Locale.ROOT);
         Page<UserResponse> users = userRepository.searchForAdministration(
                         normalizedSearch, normalizedRole, active,
                         PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")))
@@ -69,6 +69,9 @@ public class AdminUserController {
     public UserResponse updateUser(
             @PathVariable Long id,
             @RequestBody UpdateUserRequest request) {
+        if (request == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Request body is required");
+        }
         User user = findUser(id);
 
         if (request.username() != null) {
@@ -115,7 +118,7 @@ public class AdminUserController {
             @PathVariable Long id,
             @RequestBody UpdateUserStatusRequest request,
             Authentication authentication) {
-        if (request.active() == null) {
+        if (request == null || request.active() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "The active field is required");
         }
