@@ -58,12 +58,28 @@ class RoleCatalogInitializerTest {
 
         assertThat(permissionCodes(roles.get("DEVELOPER"))).contains("DOCUMENT_CREATE", "DOCUMENT_UPDATE", "DOCUMENT_SUBMIT");
         assertThat(permissionCodes(roles.get("STAFF"))).contains("DOCUMENT_REVIEW_QUEUE_VIEW", "DOCUMENT_CLAIM", "DOCUMENT_RELEASE", "DOCUMENT_REVIEW");
-        assertThat(permissionCodes(roles.get("MANAGER"))).contains("DOCUMENT_APPROVAL_QUEUE_VIEW", "DOCUMENT_APPROVE", "DOCUMENT_REJECT");
+        assertThat(permissionCodes(roles.get("MANAGER")))
+        .contains(
+                "DOCUMENT_APPROVAL_QUEUE_VIEW",
+                "DOCUMENT_APPROVE",
+                "DOCUMENT_REJECT",
+                "DOCUMENT_ROLLBACK"
+        );
         assertThat(permissionCodes(roles.get("TECHNICAL_LEAD"))).contains("DOCUMENT_TECHNICAL_REVIEW");
-        assertThat(permissionCodes(roles.get("ADMINISTRATOR"))).contains("DOCUMENT_REASSIGN")
-                .doesNotContain("DOCUMENT_APPROVE", "DOCUMENT_REJECT");
-        assertThat(permissionCodes(roles.get("ADMIN"))).contains("DOCUMENT_REASSIGN")
-                .doesNotContain("DOCUMENT_APPROVE", "DOCUMENT_REJECT");
+        assertThat(permissionCodes(roles.get("ADMINISTRATOR")))
+        .contains("DOCUMENT_REASSIGN")
+        .doesNotContain(
+                "DOCUMENT_APPROVE",
+                "DOCUMENT_REJECT",
+                "DOCUMENT_ROLLBACK"
+        );
+        assertThat(permissionCodes(roles.get("ADMIN")))
+        .contains("DOCUMENT_REASSIGN")
+        .doesNotContain(
+                "DOCUMENT_APPROVE",
+                "DOCUMENT_REJECT",
+                "DOCUMENT_ROLLBACK"
+        );
 
         // Existing assignments are left intact; policy changes do not delete data automatically.
         roles.get("ADMINISTRATOR").getPermissions().add(storedPermissions.get("DOCUMENT_APPROVE"));

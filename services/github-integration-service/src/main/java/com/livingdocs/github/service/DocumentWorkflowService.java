@@ -97,7 +97,28 @@ public class DocumentWorkflowService {
         return new ContentResponse(workflow.getDocumentId(), version,
                 documents.getDocumentContent(actor, workflow.getDocumentId(), version));
     }
+    @Transactional(readOnly = true)
+    public JsonNode evidence(String actor, Set<String> authorities, UUID workflowId) {
+      require(authorities, "DOCUMENT_APPROVAL_QUEUE_VIEW");
+      requireRole(authorities, "MANAGER");
 
+      DocumentWorkflow workflow = find(workflowId);
+      requireReadable(workflow, actor, authorities);
+
+      if (workflow.getStaffReviewResult() != StaffReviewResult.PASSED) {
+        throw ApiException.forbidden(
+                "Grounding evidence is available only after a successful staff review.");
+    }
+
+    JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
+    requireDocumentOwner(document, workflow.getOwnerUserId());
+
+    int version = workflow.getSubmittedDocumentVersion() == null
+            ? visibleDocumentVersion(workflow, document)
+            : workflow.getSubmittedDocumentVersion();
+
+    return documents.getDocumentEvidence(actor, workflow.getDocumentId(), version);
+}
     @Transactional(readOnly = true)
     public List<AuditResponse> history(String actor, Set<String> authorities, UUID workflowId) {
         DocumentWorkflow workflow = find(workflowId);
@@ -277,7 +298,88 @@ public class DocumentWorkflowService {
         record(workflow, actor, decision.name(), previous, workflow.getStatus(), comment);
         return toResponse(workflow);
     }
+    @Transactional
+    public WorkflowResponse rollback(
+        String actor,
+        Set<String> authorities,
+        UUID workflowId,
+        Integer sourceVersion,
+        String reason) {
 
+    // Chỉ Manager có quyền rollback.
+    require(authorities, "DOCUMENT_ROLLBACK");
+    requireRole(authorities, "MANAGER");
+
+    DocumentWorkflow workflow = lock(workflowId);
+
+    // Chỉ cho phép rollback tài liệu đã được duyệt.
+    if (workflow.getStatus() != DocumentWorkflowStatus.APPROVED) {
+        throw conflict("Only an approved document can be rolled back.");
+    }
+
+    if (sourceVersion == null || sourceVersion <= 0) {
+        throw ApiException.badRequest("A valid source version is required.");
+    }
+
+    String comment = normalizeComment(reason);
+
+    if (comment == null) {
+        throw ApiException.badRequest("A rollback reason is required.");
+    }
+
+    // Không cho chọn chính phiên bản đang được duyệt.
+    if (workflow.getSubmittedDocumentVersion() != null
+            && sourceVersion.equals(workflow.getSubmittedDocumentVersion())) {
+        throw ApiException.badRequest(
+                "The source version must be different from the currently approved version.");
+    }
+
+    JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
+    requireDocumentOwner(document, workflow.getOwnerUserId());
+
+    int pendingVersion = document.path("pending_version").asInt(0);
+    int currentVersion = document.path("current_version").asInt(0);
+
+    // Không rollback nếu tài liệu đang có phiên bản chờ xử lý
+    // hoặc phiên bản hiện tại không khớp workflow.
+    if (pendingVersion != 0
+            || currentVersion != workflow.getSubmittedDocumentVersion()) {
+        throw conflict("The document version changed. Reload and retry.");
+    }
+
+    // Yêu cầu AI service tạo phiên bản mới từ phiên bản đã duyệt.
+    JsonNode rollbackVersion = documents.rollbackDocumentVersion(
+            actor,
+            workflow.getOwnerUserId(),
+            workflow.getDocumentId(),
+            sourceVersion,
+            comment
+    );
+
+    int newVersion = rollbackVersion.path("number").asInt(0);
+
+    if (newVersion <= 0) {
+        throw conflict("The rollback service returned an invalid version.");
+    }
+
+    DocumentWorkflowStatus previous = workflow.getStatus();
+
+    // Phiên bản rollback phải được Staff Review lại.
+    workflow.startRollbackReview(newVersion);
+
+    workflows.saveAndFlush(workflow);
+
+    record(
+            workflow,
+            actor,
+            "ROLLBACK_REQUESTED",
+            previous,
+            workflow.getStatus(),
+            "Restored from version " + sourceVersion + ". Reason: " + comment
+    );
+
+    return toResponse(workflow);
+}
     private DocumentWorkflow lock(UUID id) {
         try {
             return workflows.lockById(id).orElseThrow(() -> ApiException.notFound("Document workflow not found."));
