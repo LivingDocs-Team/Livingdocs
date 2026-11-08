@@ -1,4 +1,4 @@
-# LivingDocs AI Service (LD-90, LD-340, LD-195, LD-145)
+# LivingDocs AI Service (LD-90, LD-340, LD-195, LD-145, LD-151, LD-156)
 
 AI-assisted documentation generation. Takes source code that has already been analyzed
 (classes, methods, endpoints, parameters, return values) and produces Markdown docs
@@ -55,7 +55,9 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | POST | `/drift/changes` | Changed code entities of a Pull Request (LD-146); nothing is stored |
 | POST | `/drift/analyze` | Drift report of a Pull Request: findings, affected docs, evidence (LD-147/148/149) |
 | GET | `/drift/reports?repository=&pull_request=` | Drift reports, newest first |
-| GET | `/drift/reports/{id}` | One drift report |
+| GET | `/drift/reports/{id}?min_severity=high` | One drift report (optionally only findings at or above a level) |
+| GET | `/drift/reports/{id}/markdown?min_severity=` | The report as Markdown grouped by severity (PR comment) |
+| GET | `/drift/severity-rules` | Severity levels (score bands, meaning, action) and every severity rule |
 
 Built-in templates: `default`, `api-reference`, `brief`.
 
@@ -84,7 +86,7 @@ for the AI) and an ordered list of `sections` taken from `Overview`, `Classes`, 
 - Saved to `DOCUMENTS_FILE` (default `data/documents.json`, atomic writes; empty = memory only).
 - Details: `Docs/Linh/` FR6.md.
 
-### Documentation drift detection (LD-145)
+### Documentation drift detection (LD-145, LD-151)
 
 Checks whether a Pull Request makes existing documentation outdated.
 
@@ -94,6 +96,7 @@ PR files (patch + analyzer result at base/head)
                                    signature_changed / behavior_changed
   -> LD-148 app/drift_affected.py  saved document sections + repository Markdown that name them
   -> LD-147 app/drift.py           findings: type, severity, confidence
+     LD-151 app/drift_referential.py / drift_signature.py / drift_semantic.py: kind, breaking
   -> LD-149 app/drift_evidence.py  code diff, documentation passage, commit, Jira ticket
 ```
 
@@ -106,9 +109,42 @@ PR files (patch + analyzer result at base/head)
 - **Types** (BR-49): *Referential* (removed / renamed code, moved endpoint, deleted or moved file
   still named), *Signature* (parameters, return type, fields, endpoint contract changed), *Semantic*
   (body or docstring changed, or a new entity is not described in its file's section).
-- **Severity** Low < Medium < High < Critical: removed/renamed entity High (endpoint Critical);
-  signature Medium (endpoint +1, the docs still name a removed parameter +1); behaviour Low
-  (docstring changed +1, >= 15 changed lines +1); private `_name` -1. Rules: `app/drift.py`.
+- **Classification (LD-151)**: every finding also has a `kind`, `breaking` and the `rules` that set
+  its severity; `summary.by_kind` and `summary.breaking` count them.
+
+  | Type | Kinds | Module |
+  |---|---|---|
+  | Referential (LD-152) | `entity_removed`, `endpoint_removed`, `entity_renamed`, `endpoint_moved`, `file_removed`, `file_moved`, `module_removed` (`shop.cart`, `com.acme.Order`), `module_moved`, `line_reference_stale` (`shop/cart.py:19-25`, `#L19-L25`: new range computed from the diff) | `app/drift_referential.py` |
+  | Signature (LD-153) | `endpoint_method_changed` (GET -> POST, same path), `parameter_removed`, `parameter_renamed`, `parameter_type_changed`, `parameter_order_changed`, `return_type_changed`, `endpoint_contract_changed`, `class_contract_changed`, `parameter_added`, `parameter_default_changed` | `app/drift_signature.py` |
+  | Semantic (LD-154) | `status_codes_changed`, `exceptions_changed`, `values_changed`, `docstring_changed`, `implementation_changed`, `undocumented_entity` | `app/drift_semantic.py` |
+
+  Breaking = documented usage stops working (removed / renamed / required parameter, type, order,
+  return type, HTTP method, contract; status codes for semantic). The documentation is also checked
+  for what it *still says* after a mention of the entity: removed parameter, old type or default
+  (same table row), removed exception, old status code, old value, a sentence of the old docstring.
+  Such passages are listed in `document.matches` (`kind` = parameter, type, default, exception,
+  status_code, value, docstring, line_ref) and as `D` evidence, and raise the severity by one level.
+  A signature change whose body also changed (status codes, exceptions, values) gives a second,
+  semantic finding.
+- **Severity assessment (LD-156)**, all rules in `app/drift_severity.py` (one table, `RULES`):
+  - *LD-157 rules*: a classifier only names the **base rule** and the **adjustments** that apply,
+    each with the documentation passages that prove it. Base rules: `endpoint_gone` Critical,
+    `entity_gone` High, `file_section_removed` High, `file_reference_removed` / `file_reference_moved`
+    Medium, `own_section_moved` Low, `line_reference_changed` Medium / `line_reference_shifted` Low,
+    `breaking_signature` Medium / `compatible_signature` Low, `behaviour_changed` Low,
+    `undocumented_entity` Low. Adjustments: `public_endpoint` +1, `doc_states_old_detail` +1,
+    `contract_behaviour` +1, `large_change` +1, `private_name` -1, `uncertain_match` -1 (confidence
+    < 0.5). Semantic drift is capped at High.
+  - *LD-158 classification*: score 0-100 inside the level's band (Low 0-24, Medium 25-49, High 50-74,
+    Critical 75-100; more confident findings score higher; `classify_score` maps back). Each affected
+    document and the report take the level of their most severe finding; `summary.severity_score`
+    and `summary.recommendation` (action for that level, e.g. "Fix the documentation before
+    merging").
+  - *Evidence*: `finding.severity_assessment` = level, score, base rule + reason + evidence ids,
+    every adjustment with its evidence ids (X1 code diff, D2 documentation line), cap, one-line
+    summary. `finding.rules` keeps the short form.
+  - *LD-159 display*: `GET /drift/reports/{id}/markdown` (PR comment) and the frontend page
+    "Documentation Drift" (`frontend/src/DocumentationDrift.jsx`).
 - **Confidence** 0-1 = match x method x location x certainty; levels as LD-340 (high >= 0.75,
   medium >= 0.50). Every finding has `factors` explaining the score.
 - **Evidence** (BR-50): `X1` code diff of the entity (without a diff: signature and docstring
@@ -122,8 +158,10 @@ PR files (patch + analyzer result at base/head)
   `/drift/analyze` with the saved documents of that repository only. Details:
   [github-integration-service README](../services/github-integration-service/README.md).
 - Reports are kept in memory (last 500); history and resolution of drift are LD-167.
-- Tests (LD-150): `tests/test_drift.py`, `tests/test_drift_api.py`,
-  `tests/integration/test_drift_integration.py`, live: `test_live_pipeline.py`.
+- Tests (LD-150, LD-155, LD-160): `tests/test_drift.py`, `tests/test_drift_classification.py`,
+  `tests/test_drift_severity.py`, `tests/test_drift_api.py`,
+  `tests/integration/test_drift_integration.py`, live: `test_live_pipeline.py`; UI:
+  `tests/test_frontend_drift.py` (repository root).
 
 ### Example request
 
