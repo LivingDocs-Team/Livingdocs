@@ -113,9 +113,19 @@ class DocumentStore:
     def list(self) -> List[Document]:
         return sorted(self._docs.values(), key=lambda d: d.updated_at, reverse=True)
 
+    def list_public(self) -> List[Document]:
+        """Legacy public API remains limited to documents without verified ownership."""
+        return [doc for doc in self.list() if doc.owner_user_id is None]
+
     def get(self, doc_id: str) -> Document:
         doc = self._docs.get(doc_id)
         if doc is None:
+            raise _not_found("Document")
+        return doc
+
+    def get_public(self, doc_id: str) -> Document:
+        doc = self.get(doc_id)
+        if doc.owner_user_id is not None:
             raise _not_found("Document")
         return doc
 
@@ -149,21 +159,34 @@ class DocumentStore:
     # ---------- create ----------
 
     def create_from_job(self, job_id: str, output: JobOutput, title: Optional[str] = None,
-                        actor: Optional[str] = None, note: Optional[str] = None) -> Document:
+                        actor: Optional[str] = None, note: Optional[str] = None,
+                        owner_user_id: Optional[str] = None) -> Document:
         with self._lock:
+            if owner_user_id is not None:
+                for existing in self._docs.values():
+                    if existing.source_job_id == job_id and existing.owner_user_id == owner_user_id:
+                        return existing
+                    if existing.source_job_id == job_id and existing.owner_user_id not in (None, owner_user_id):
+                        raise VersionError(409, "This generation job is already linked to another owner")
             doc = Document(id=uuid.uuid4().hex, title=title or output.target, target=output.target,
                            scope=output.scope, template_id=output.template_id,
-                           output_language=output.output_language, source_job_id=job_id)
+                           output_language=output.output_language, source_job_id=job_id,
+                           owner_user_id=owner_user_id,
+                           current_version=0 if owner_user_id is not None else 1,
+                           pending_version=1 if owner_user_id is not None else None)
             sections = [FileSection(path=p, markdown=md, status=st, confidence=c)
                         for p, md, st, c in output.sections]
             skipped = [SkippedFile(path=p, reason=r) for p, r in output.skipped]
-            v = DocumentVersion(number=1, status=VersionStatus.accepted,
+            v = DocumentVersion(number=1,
+                                status=VersionStatus.proposed if owner_user_id is not None else VersionStatus.accepted,
                                 origin=VersionOrigin.generated,
                                 content=assemble(doc, sections, skipped, output.template_name),
                                 sections=sections, skipped=skipped, confidence=output.confidence,
                                 changes=[SectionChange(path=s.path, action=SectionAction.added)
                                          for s in sections],
-                                note=note, created_by=actor, decided_by=actor, decided_at=now())
+                                note=note, created_by=actor,
+                                decided_by=None if owner_user_id is not None else actor,
+                                decided_at=None if owner_user_id is not None else now())
             self._docs[doc.id] = doc
             self._versions[doc.id] = [v]
             self._events[doc.id] = []
@@ -171,6 +194,85 @@ class DocumentStore:
             self._event(doc.id, HistoryAction.created, 1, actor, note or f"From job {job_id}")
             self._save()
             return doc
+
+    def get_owned(self, doc_id: str, owner_user_id: str) -> Document:
+        with self._lock:
+            doc = self.get(doc_id)
+            if doc.owner_user_id is None or doc.owner_user_id != owner_user_id:
+                raise _not_found("Document")
+            return doc
+
+    def edit_owned(self, doc_id: str, owner_user_id: str, expected_version: int, content: str,
+                   note: Optional[str] = None) -> DocumentVersion:
+        with self._lock:
+            doc = self.get_owned(doc_id, owner_user_id)
+            if doc.pending_version is not None:
+                if doc.pending_version != expected_version:
+                    raise VersionError(409, "The submitted document version has changed")
+                base = self.version(doc_id, doc.pending_version)
+            else:
+                if doc.current_version != expected_version:
+                    raise VersionError(409, "The submitted document version has changed")
+                base = self.version(doc_id, doc.current_version)
+            number = len(self._versions[doc_id]) + 1
+            if doc.pending_version is not None:
+                base.status = VersionStatus.superseded
+                base.superseded_by = number
+                self._event(doc_id, HistoryAction.superseded, base.number, owner_user_id,
+                            "Replaced after another changes request", related=number)
+            version = DocumentVersion(
+                number=number,
+                status=VersionStatus.proposed,
+                origin=VersionOrigin.edit,
+                base_version=doc.current_version,
+                content=content,
+                sections=list(base.sections),
+                skipped=list(base.skipped),
+                sections_match_content=False,
+                manual=True,
+                note=note,
+                created_by=owner_user_id,
+            )
+            self._versions[doc_id].append(version)
+            doc.pending_version = number
+            doc.versions_total = number
+            doc.updated_at = now()
+            self._event(doc_id, HistoryAction.proposed, number, owner_user_id, note or "Owner edited after changes requested")
+            self._save()
+            return version
+
+    def resolve_workflow_version(self, doc_id: str, owner_user_id: str, version_number: int,
+                                 decision: str, actor_user_id: str,
+                                 note: Optional[str] = None) -> None:
+        with self._lock:
+            doc = self.get_owned(doc_id, owner_user_id)
+            if doc.pending_version is None:
+                version = self.version(doc_id, version_number)
+                if decision == "APPROVED" and doc.current_version == version_number \
+                        and version.status == VersionStatus.accepted:
+                    return  # Idempotent retry after the workflow transaction committed remotely first.
+                if decision == "REJECTED" and version.status == VersionStatus.dismissed:
+                    return
+                raise VersionError(409, "No matching proposed version is awaiting a decision")
+            if doc.pending_version != version_number:
+                raise VersionError(409, "The pending document version has changed")
+            version = self.version(doc_id, version_number)
+            if decision == "APPROVED":
+                version.status = VersionStatus.accepted
+                doc.current_version = version_number
+                action = HistoryAction.accepted
+            elif decision == "REJECTED":
+                version.status = VersionStatus.dismissed
+                action = HistoryAction.dismissed
+            else:
+                raise VersionError(400, "Unknown review decision")
+            version.decided_by = actor_user_id
+            version.decided_at = now()
+            version.note = note or version.note
+            doc.pending_version = None
+            doc.updated_at = now()
+            self._event(doc_id, action, version_number, actor_user_id, note)
+            self._save()
 
 
 documents = DocumentStore(os.getenv("DOCUMENTS_FILE", DEFAULT_FILE) or None)
