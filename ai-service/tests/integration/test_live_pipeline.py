@@ -107,9 +107,6 @@ def test_analyzer_output_to_drift_detection(shop_readme):
     assert {("CartService.add_item", "signature"), ("CartService.grand_total", "referential"),
             ("CartService", "semantic")} <= found
     assert all(f["evidence"][0]["kind"] == "code_diff" for f in rep["findings"])
-    kinds = {(f["entity"], f["kind"]) for f in rep["findings"]}               # LD-151
-    assert {("CartService.add_item", "parameter_renamed"),
-            ("CartService.grand_total", "entity_renamed")} <= kinds
     got = httpx.get(f"{AI}/drift/reports/{rep['id']}", timeout=10)
     assert got.status_code == 200 and got.json()["summary"] == rep["summary"]
 

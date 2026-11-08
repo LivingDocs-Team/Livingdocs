@@ -23,8 +23,6 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 from .drift_models import (ChangedFile, ChangeStatus, DiffHunk, EntityChange, EntityChangeType,
                            FileChangeSummary, PullRequestAnalysis, PullRequestInfo)
-from .drift_semantic import extract_signals, without_renames
-from .drift_signature import assess, parameter_changes, parse_java_param, parse_python_param
 from .evidence import entities
 from .models import AnalysisStatus, ClassInfo, Endpoint, FileAnalysis, Function, Parameter
 
@@ -130,9 +128,6 @@ class Shape:
     line_end: Optional[int] = None
     rename_key: Tuple = ()            # what must be equal for "renamed"
     recognisable: bool = True         # False: too little information to pair a rename
-    param_info: List[Tuple] = field(default_factory=list)   # (name, type, default), LD-153
-    source: Optional[str] = None      # raw source, LD-154
-    handler: Optional[str] = None     # endpoints
 
 
 def _function_shape(kind: str, key: str, fn: Function) -> Shape:
@@ -151,8 +146,7 @@ def _function_shape(kind: str, key: str, fn: Function) -> Shape:
     return Shape(kind, key, sig, [p.name for p in fn.parameters], contract, body,
                  _norm(fn.docstring) or None, fn.line_start, fn.line_end,
                  rename_key=(kind, contract, body or ""),
-                 recognisable=bool(fn.parameters or fn.return_type or body or fn.signature),
-                 param_info=[(p.name, p.type, p.default) for p in fn.parameters], source=fn.source)
+                 recognisable=bool(fn.parameters or fn.return_type or body or fn.signature))
 
 
 def _class_shape(c: ClassInfo) -> Shape:
@@ -165,8 +159,7 @@ def _class_shape(c: ClassInfo) -> Shape:
     return Shape("class", c.name, sig, [f.name for f in c.fields], contract, None,
                  _norm(c.docstring) or None, c.line_start, c.line_end,
                  rename_key=("class", contract, methods),
-                 recognisable=bool(fields_ or methods or c.bases),
-                 param_info=[(f.name, f.type, f.default) for f in c.fields])
+                 recognisable=bool(fields_ or methods or c.bases))
 
 
 def _endpoint_shape(e: Endpoint) -> Shape:
@@ -181,8 +174,7 @@ def _endpoint_shape(e: Endpoint) -> Shape:
     return Shape("endpoint", key, sig, [p.name for p in e.parameters], contract, None, None,
                  e.line_start, e.line_end,
                  rename_key=("endpoint", e.http_method, e.handler or "", contract),
-                 recognisable=bool(e.handler),
-                 param_info=[(p.name, p.type, p.default) for p in e.parameters], handler=e.handler)
+                 recognisable=bool(e.handler))
 
 
 def shapes(f: Optional[FileAnalysis]) -> Dict[str, Shape]:
@@ -210,106 +202,29 @@ def _param_names(params: List[str]) -> List[str]:
 
 
 def _signature_details(old: Shape, new: Shape) -> Tuple[List[str], List[str], List[str]]:
-    """Readable details and removed / added parameter names (LD-146)."""
-    info = signature_change(old, new)
-    return info["details"], info["removed_parameters"], info["added_parameters"]
-
-
-def signature_change(old: Shape, new: Shape) -> dict:
-    """LD-146 + LD-153: what exactly changed in the contract of an entity (EntityChange fields)."""
     removed = [p for p in old.params if p not in new.params]
     added = [p for p in new.params if p not in old.params]
-    params = parameter_changes(old.param_info, new.param_info)
-    aspects: List[str] = []
     details = []
     if removed:
         details.append("removed parameter(s): " + ", ".join(removed))
     if added:
         details.append("added parameter(s): " + ", ".join(added))
-    for c in params:
-        if c.change.value in ("type_changed", "default_removed", "default_added", "default_changed",
-                              "reordered"):
-            details.append(f"parameter {c.name}: " + {
-                "type_changed": f"type {c.old_type} -> {c.new_type}",
-                "default_removed": f"now required (default {c.old_default} removed)",
-                "default_added": f"now optional (default {c.new_default})",
-                "default_changed": f"default {c.old_default} -> {c.new_default}",
-                "reordered": "order changed"}[c.change.value])
-    old_ret = new_ret = None
-    if old.kind in ("function", "method"):
-        if old.contract[0] != new.contract[0]:
-            aspects.append("parameters")
-        if old.contract[1:] != new.contract[1:]:
-            aspects.append("return_type")
-            old_ret, new_ret = old.contract[1] or None, new.contract[1] or None
-            details.append(f"return type: {old.contract[1] or '-'} -> {new.contract[1] or '-'}")
+    if old.kind in ("function", "method") and old.contract[1:] != new.contract[1:]:
+        details.append(f"return type: {old.contract[1] or '-'} -> {new.contract[1] or '-'}")
     if old.kind == "class":
         if old.contract[0] != new.contract[0]:
-            aspects.append("kind")
             details.append(f"kind: {old.contract[0]} -> {new.contract[0]}")
         if old.contract[1] != new.contract[1]:
-            aspects.append("bases")
             details.append(f"bases: {', '.join(old.contract[1]) or '-'} -> "
                            f"{', '.join(new.contract[1]) or '-'}")
-        if old.contract[2] != new.contract[2]:
-            aspects.append("fields")
     if old.kind == "endpoint":
-        if old.contract[0] != new.contract[0]:
-            aspects.append("parameters")
         if old.contract[1] != new.contract[1]:
-            aspects.append("request_body")
             details.append(f"request body: {old.contract[1] or '-'} -> {new.contract[1] or '-'}")
         if old.contract[2] != new.contract[2]:
-            aspects.append("response")
             details.append(f"response: {old.contract[2] or '-'} -> {new.contract[2] or '-'}")
     if not details:
         details.append(f"signature: {old.signature} -> {new.signature}")
-    return dict(details=details, removed_parameters=removed, added_parameters=added,
-                aspects=aspects, parameter_changes=params, old_return_type=old_ret,
-                new_return_type=new_ret, breaking=assess(old.kind, aspects, params))
-
-
-def _renames(params, removed: List[str], added: List[str]) -> List[Tuple[str, str]]:
-    """Old -> new names of renamed (or removed + added in the same number) parameters."""
-    pairs = [(p.old_name, p.name) for p in params if p.change.value == "renamed" and p.old_name]
-    if not pairs and removed and len(removed) == len(added):
-        pairs = list(zip(removed, added))
-    return pairs
-
-
-def _path_key(endpoint_key: str) -> str:
-    path = endpoint_key.split(" ", 1)[-1]
-    return re.sub(r"\{[^}/]*\}|:\w+|<[^>/]*>", "{}", path).rstrip("/") or "/"
-
-
-def _pair_methods(removed: Dict[str, Shape], added: Dict[str, Shape]) -> List[Tuple[Shape, Shape]]:
-    """LD-153: an endpoint that keeps its path (and handler) but changes its HTTP method."""
-    pairs = []
-    for ok, o in list(removed.items()):
-        if o.kind != "endpoint":
-            continue
-        verb = ok.split(" ", 1)[0]
-        same = [a for a in added.values() if a.kind == "endpoint"
-                and _path_key(a.key) == _path_key(ok) and a.key.split(" ", 1)[0] != verb
-                and (a.handler == o.handler or not (a.handler and o.handler))]
-        if len(same) == 1:
-            pairs.append((o, same[0]))
-            removed.pop(ok)
-            added.pop(same[0].key)
-    return pairs
-
-
-def _diff_texts(hunks: List[DiffHunk], old_range: Optional[Tuple[int, int]],
-                new_range: Optional[Tuple[int, int]]) -> Tuple[str, str]:
-    """Removed lines inside `old_range` and added lines inside `new_range` (LD-154 signals)."""
-    old, new = [], []
-    for h in hunks:
-        for o, n, line in numbered(h):
-            if line.startswith("-") and old_range and o is not None and old_range[0] <= o <= old_range[1]:
-                old.append(line[1:])
-            elif line.startswith("+") and new_range and n is not None and new_range[0] <= n <= new_range[1]:
-                new.append(line[1:])
-    return "\n".join(old), "\n".join(new)
+    return details, removed, added
 
 
 def _pair_renames(removed: Dict[str, Shape], added: Dict[str, Shape]) -> List[Tuple[Shape, Shape]]:
@@ -352,18 +267,6 @@ def compare_analyses(cf: ChangedFile, hunks: List[DiffHunk]) -> List[EntityChang
                                     details=[f"renamed: {o.key} -> {n.key}"],
                                     line_start=n.line_start, line_end=n.line_end,
                                     old_line_start=o.line_start, old_line_end=o.line_end))
-    for o, n in _pair_methods(removed, added):
-        info = signature_change(o, n)
-        info["aspects"] = ["http_method"] + info["aspects"]
-        info["details"] = [f"HTTP method: {o.key.split(' ', 1)[0]} -> {n.key.split(' ', 1)[0]}"] + \
-            [d for d in info["details"] if not d.startswith("signature:")]
-        info["breaking"] = True
-        changes.append(EntityChange(path=path, previous_path=prev, kind="endpoint", name=n.key,
-                                    change=EntityChangeType.signature_changed, old_name=o.key,
-                                    old_signature=o.signature, new_signature=n.signature,
-                                    line_start=n.line_start, line_end=n.line_end,
-                                    old_line_start=o.line_start, old_line_end=o.line_end,
-                                    changed_lines=changed_lines_in(hunks, _range(o), _range(n)), **info))
     for o, n in _pair_renames(removed, added):
         changes.append(EntityChange(path=path, previous_path=prev, kind=n.kind, name=n.key,
                                     change=EntityChangeType.renamed, old_name=o.key,
@@ -393,18 +296,10 @@ def compare_analyses(cf: ChangedFile, hunks: List[DiffHunk]) -> List[EntityChang
                       old_signature=o.signature, new_signature=n.signature,
                       line_start=n.line_start, line_end=n.line_end,
                       old_line_start=o.line_start, old_line_end=o.line_end, changed_lines=lines)
-        if o.source is not None and n.source is not None:
-            old_code, new_code = o.source, n.source
-        else:                                # LD-154: only the diff lines of the entity
-            old_code, new_code = _diff_texts(hunks, _range(o), _range(n))
         if o.contract != n.contract:
-            # the body may change too: those signals give a second, semantic finding (LD-151)
-            info = signature_change(o, n)
-            signals = without_renames(extract_signals(old_code, new_code, o.docstring, n.docstring),
-                                      _renames(info["parameter_changes"], info["removed_parameters"],
-                                               info["added_parameters"]))
-            changes.append(EntityChange(change=EntityChangeType.signature_changed, signals=signals,
-                                        **info, **common))
+            details, rem, add = _signature_details(o, n)
+            changes.append(EntityChange(change=EntityChangeType.signature_changed, details=details,
+                                        removed_parameters=rem, added_parameters=add, **common))
             continue
         details = []
         if o.docstring != n.docstring:
@@ -422,9 +317,8 @@ def compare_analyses(cf: ChangedFile, hunks: List[DiffHunk]) -> List[EntityChang
             docs = {}
             if o.docstring != n.docstring:   # shown as evidence (LD-149) when there is no diff
                 docs = dict(old_docstring=o.docstring, new_docstring=n.docstring)
-            signals = extract_signals(old_code, new_code, o.docstring, n.docstring)
             changes.append(EntityChange(change=EntityChangeType.behavior_changed, details=details,
-                                        signals=signals, **docs, **common))
+                                        **docs, **common))
     return changes
 
 
@@ -484,7 +378,6 @@ class Decl:
     params: List[str]
     contract: str
     line: int
-    param_info: List[Tuple] = field(default_factory=list)   # LD-153
 
 
 def _java_route(m: re.Match, rest: str) -> Tuple[str, str]:
@@ -515,15 +408,14 @@ def _decl(line: str, lang: str, cls: Optional[str], lineno: int) -> Optional[Dec
         m = PY_DEF.match(text)
         if m:
             raw = _split_params(m.group(3))
-            params = [p for p in raw if p.split(":")[0].strip() not in ("self", "cls", "*", "/")]
+            params = [p for p in raw if p.split(":")[0].strip() not in ("self", "cls")]
             names = _param_names(params)
             ret = _norm(m.group(5))
             nested = bool(m.group(1)) and cls
             key = f"{cls}.{m.group(2)}" if nested else m.group(2)
             sig = f"{m.group(2)}({', '.join(params)})" + (f" -> {ret}" if ret else "")
             return Decl("method" if nested else "function", key, sig, names,
-                        _norm(", ".join(params)) + "|" + ret, lineno,
-                        [parse_python_param(p) for p in params])
+                        _norm(", ".join(params)) + "|" + ret, lineno)
         m = PY_ROUTE.match(text)
         if m:
             verb, path = _python_route(m)
@@ -547,8 +439,7 @@ def _decl(line: str, lang: str, cls: Optional[str], lineno: int) -> Optional[Dec
         key = f"{cls}.{m.group(2)}" if cls else m.group(2)
         sig = f"{ret + ' ' if ret else ''}{m.group(2)}({', '.join(params)})"
         return Decl("method" if cls else "function", key, sig, names,
-                    _norm(", ".join(params)) + "|" + ret, lineno,
-                    [parse_java_param(p) for p in params])
+                    _norm(", ".join(params)) + "|" + ret, lineno)
     return None
 
 
@@ -579,7 +470,6 @@ def scan_patch(path: str, prev: Optional[str], hunks: List[DiffHunk], lang: str)
     old: Dict[str, Decl] = {}
     new: Dict[str, Decl] = {}
     body: Dict[str, Tuple[str, int, int, int]] = {}  # key -> (kind, line, changed lines, old line)
-    body_lines: Dict[str, Dict[str, List[str]]] = {}  # key -> {"-": [...], "+": [...]} (LD-154)
 
     for h in hunks:
         cls, func = _enclosing(h.header, lang)
@@ -605,29 +495,11 @@ def scan_patch(path: str, prev: Optional[str], hunks: List[DiffHunk], lang: str)
             if tag in "+-" and func_key and _is_code(line, lang):
                 k, ln, cnt, ol = body.get(func_key, (func_kind, n or o or 0, 0, o or 0))
                 body[func_key] = (k, ln, cnt + 1, ol)
-                body_lines.setdefault(func_key, {"-": [], "+": []})[tag].append(line[1:])
 
     changes: List[EntityChange] = []
     common = dict(path=path, previous_path=prev, source="patch")
     only_old = {k: d for k, d in old.items() if k not in new}
     only_new = {k: d for k, d in new.items() if k not in old}
-    for k in list(only_old):    # LD-153: same path, other HTTP method
-        d = only_old[k]
-        if d.kind != "endpoint":
-            continue
-        verb = d.key.split(" ", 1)[0]
-        twin = [x for x in only_new.values() if x.kind == "endpoint"
-                and _path_key(x.key) == _path_key(d.key) and x.key.split(" ", 1)[0] != verb]
-        if len(twin) == 1:
-            t = twin[0]
-            changes.append(EntityChange(kind="endpoint", name=t.key, old_name=d.key,
-                                        change=EntityChangeType.signature_changed,
-                                        old_signature=d.signature, new_signature=t.signature,
-                                        details=[f"HTTP method: {verb} -> {t.key.split(' ', 1)[0]}"],
-                                        aspects=["http_method"], breaking=True,
-                                        line_start=t.line, old_line_start=d.line, **common))
-            only_old.pop(k)
-            only_new.pop(t.key)
     for k in list(only_old):
         d = only_old[k]
         if d.kind == "endpoint":  # same HTTP method, other path: the route was moved
@@ -668,52 +540,23 @@ def scan_patch(path: str, prev: Optional[str], hunks: List[DiffHunk], lang: str)
                 details.append("removed parameter(s): " + ", ".join(removed))
             if added:
                 details.append("added parameter(s): " + ", ".join(added))
-            params = parameter_changes(o.param_info, d.param_info)
-            aspects = []
-            if d.kind == "class":
-                aspects.append("kind" if lang == "java" else "bases")
-            else:
-                if o.contract.split("|")[0] != d.contract.split("|")[0]:
-                    aspects.append("parameters")
-                if o.contract.split("|")[-1] != d.contract.split("|")[-1]:
-                    aspects.append("return_type")
-                    details.append(f"return type: {o.contract.split('|')[-1] or '-'} -> "
-                                   f"{d.contract.split('|')[-1] or '-'}")
-            for c in params:
-                if c.change.value == "type_changed":
-                    details.append(f"parameter {c.name}: type {c.old_type} -> {c.new_type}")
-                elif c.change.value.startswith("default"):
-                    details.append(f"parameter {c.name}: default {c.old_default or '-'} -> "
-                                   f"{c.new_default or '-'}")
             if not details:
                 details.append(f"signature: {o.signature} -> {d.signature}")
-            ret = "return_type" in aspects
-            texts = body_lines.get(k, {"-": [], "+": []})
-            signals = without_renames(extract_signals("\n".join(texts["-"]), "\n".join(texts["+"])),
-                                      _renames(params, removed, added))
             changes.append(EntityChange(kind=d.kind, name=k, change=EntityChangeType.signature_changed,
-                                        signals=signals,
                                         old_signature=o.signature, new_signature=d.signature,
                                         details=details, removed_parameters=removed,
                                         added_parameters=added, line_start=d.line,
-                                        old_line_start=o.line, aspects=aspects,
-                                        parameter_changes=params,
-                                        old_return_type=(o.contract.split("|")[-1] or None) if ret else None,
-                                        new_return_type=(d.contract.split("|")[-1] or None) if ret else None,
-                                        breaking=assess(d.kind, aspects, params), **common))
+                                        old_line_start=o.line, **common))
         elif k not in body:
             body[k] = (d.kind, d.line, 1, o.line)
     reported = {c.name for c in changes} | {c.old_name for c in changes if c.old_name}
     for k, (kind, ln, cnt, ol) in body.items():
         if k in reported or kind in ("class", "endpoint"):
             continue
-        texts = body_lines.get(k, {"-": [], "+": []})
         changes.append(EntityChange(kind=kind, name=k, change=EntityChangeType.behavior_changed,
                                     details=[f"{cnt} changed line(s) in the body"],
                                     line_start=ln or None, old_line_start=ol or None,
-                                    changed_lines=cnt,
-                                    signals=extract_signals("\n".join(texts["-"]), "\n".join(texts["+"])),
-                                    **common))
+                                    changed_lines=cnt, **common))
     return changes
 
 

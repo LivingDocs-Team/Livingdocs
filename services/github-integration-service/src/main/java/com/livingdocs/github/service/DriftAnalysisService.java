@@ -73,7 +73,6 @@ public class DriftAnalysisService {
     static final int MAX_PATCH_CHARS = 1_000_000;
 
     private static final Set<String> ANALYZED_LANGUAGES = Set.of("python", "java");
-    private static final Set<String> SEVERITY_LEVELS = Set.of("low", "medium", "high", "critical");
     private static final Set<String> GITHUB_STATUSES = Set.of(
             "added", "modified", "removed", "renamed", "copied", "changed", "unchanged");
     private static final Set<String> SKIPPED_DIRECTORIES = Set.of(
@@ -172,66 +171,6 @@ public class DriftAnalysisService {
     }
 
     public JsonNode getReport(String userId, String reportId) {
-        return getReport(userId, null, reportId, null);
-    }
-
-    /**
-     * LD-159: one report of a repository (the route the frontend reaches through the BFF).
-     * {@code minSeverity} (low | medium | high | critical) keeps only findings at that level or above.
-     */
-    public JsonNode getReport(String userId, UUID repositoryId, String reportId, String minSeverity) {
-        String repository = requireReport(userId, repositoryId, reportId);
-        String level = severity(minSeverity);
-        JsonNode report = getAiJson(level == null
-                        ? aiServiceClient.get().uri("/drift/reports/{id}", reportId)
-                        : aiServiceClient.get().uri("/drift/reports/{id}?min_severity={s}", reportId, level),
-                "The AI service could not return the drift report.");
-        if (!report.isObject()) {
-            throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid response.");
-        }
-        if (repository != null && !repository.equalsIgnoreCase(report.path("repository").asText())) {
-            throw ApiException.notFound("Drift report not found for this repository.");
-        }
-        return report;
-    }
-
-    /** LD-159: the report as Markdown grouped by severity (Pull Request comment, download). */
-    public String getReportMarkdown(String userId, UUID repositoryId, String reportId, String minSeverity) {
-        requireReport(userId, repositoryId, reportId);
-        String level = severity(minSeverity);
-        try {
-            String markdown = (level == null
-                    ? aiServiceClient.get().uri("/drift/reports/{id}/markdown", reportId)
-                    : aiServiceClient.get().uri("/drift/reports/{id}/markdown?min_severity={s}", reportId, level))
-                    .retrieve().body(String.class);
-            if (markdown == null || markdown.isBlank()) {
-                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an empty report.");
-            }
-            return markdown;
-        } catch (RestClientResponseException e) {
-            if (e.getStatusCode().value() == 404) {
-                throw ApiException.notFound("Drift report not found in the AI service.");
-            }
-            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not return the drift report.");
-        } catch (RestClientException e) {
-            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not return the drift report.");
-        }
-    }
-
-    /** LD-157 / LD-158: severity levels and rules, for the legend of the drift screen. */
-    public JsonNode severityRules() {
-        JsonNode rules = getAiJson(aiServiceClient.get().uri("/drift/severity-rules"),
-                "The AI service could not return the severity rules.");
-        if (!rules.isObject() || !rules.path("levels").isArray()) {
-            throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid response.");
-        }
-        return rules;
-    }
-
-    /** Owner check; returns the repository name when a repository id is given. */
-    private String requireReport(String userId, UUID repositoryId, String reportId) {
-        String repository = repositoryId == null ? null
-                : repositorySyncService.requireOwned(userId, repositoryId).getFullName();
         String owner = reportOwners.get(reportId);
         if (owner == null) {
             throw ApiException.notFound("Drift report not found or the service was restarted.");
@@ -239,18 +178,12 @@ public class DriftAnalysisService {
         if (!Objects.equals(owner, userId)) {
             throw ApiException.forbidden("This drift report belongs to another user.");
         }
-        return repository;
-    }
-
-    private static String severity(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
+        JsonNode report = getAiJson(aiServiceClient.get().uri("/drift/reports/{id}", reportId),
+                "The AI service could not return the drift report.");
+        if (!report.isObject()) {
+            throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid response.");
         }
-        String level = value.trim().toLowerCase(Locale.ROOT);
-        if (!SEVERITY_LEVELS.contains(level)) {
-            throw ApiException.badRequest("minSeverity must be one of low, medium, high, critical.");
-        }
-        return level;
+        return report;
     }
 
     // ------------------------------------------------------------------ GitHub

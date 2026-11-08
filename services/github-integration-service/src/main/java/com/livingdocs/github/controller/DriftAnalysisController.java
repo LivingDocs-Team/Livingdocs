@@ -60,32 +60,4 @@ public class DriftAnalysisController {
     public JsonNode getReport(@RequestHeader(USER_HEADER) String userId, @PathVariable String reportId) {
         return driftService.getReport(userId, reportId);
     }
-
-    /** LD-159: same report under the repository, so the browser reaches it through the Backend BFF. */
-    @GetMapping(path = "/api/repositories/{id}/drift/reports/{reportId}", produces = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(summary = "One drift report of a repository; minSeverity keeps findings at or above a level")
-    public JsonNode getRepositoryReport(
-            @RequestHeader(USER_HEADER) String userId,
-            @PathVariable UUID id,
-            @PathVariable String reportId,
-            @RequestParam(name = "minSeverity", required = false) String minSeverity) {
-        return driftService.getReport(userId, id, reportId, minSeverity);
-    }
-
-    @GetMapping(path = "/api/repositories/{id}/drift/reports/{reportId}/markdown", produces = "text/markdown")
-    @Operation(summary = "The drift report as Markdown grouped by severity (pull request comment)")
-    public ResponseEntity<String> getRepositoryReportMarkdown(
-            @RequestHeader(USER_HEADER) String userId,
-            @PathVariable UUID id,
-            @PathVariable String reportId,
-            @RequestParam(name = "minSeverity", required = false) String minSeverity) {
-        return ResponseEntity.ok().contentType(MediaType.parseMediaType("text/markdown"))
-                .body(driftService.getReportMarkdown(userId, id, reportId, minSeverity));
-    }
-
-    @GetMapping(path = "/api/documentation/drift/severity-rules", produces = MediaType.APPLICATION_JSON_VALUE)
-    @Operation(summary = "Severity levels (score bands, meaning, action) and the rules that set them")
-    public JsonNode severityRules(@RequestHeader(USER_HEADER) String userId) {
-        return driftService.severityRules();
-    }
 }

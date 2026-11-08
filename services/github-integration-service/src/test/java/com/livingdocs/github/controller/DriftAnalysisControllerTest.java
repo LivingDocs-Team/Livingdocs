@@ -18,7 +18,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -83,29 +82,5 @@ class DriftAnalysisControllerTest {
         mockMvc.perform(get("/api/drift/reports/report-1").header("X-User-Id", "user-1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("no_drift"));
-    }
-
-    @Test
-    void repositoryScopedReportMarkdownAndSeverityRules() throws Exception {
-        when(driftService.getReport("user-1", REPOSITORY_ID, "report-1", "high")).thenReturn(JSON.readTree("""
-                {"id":"report-1","summary":{"highest_severity":"critical"},"findings":[]}
-                """));
-        when(driftService.getReportMarkdown("user-1", REPOSITORY_ID, "report-1", null))
-                .thenReturn("## Documentation drift");
-        when(driftService.severityRules()).thenReturn(JSON.readTree("""
-                {"levels":[{"level":"critical","min_score":75}],"rules":[]}
-                """));
-
-        mockMvc.perform(get("/api/repositories/" + REPOSITORY_ID + "/drift/reports/report-1")
-                        .header("X-User-Id", "user-1").param("minSeverity", "high"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.summary.highest_severity").value("critical"));
-        mockMvc.perform(get("/api/repositories/" + REPOSITORY_ID + "/drift/reports/report-1/markdown")
-                        .header("X-User-Id", "user-1"))
-                .andExpect(status().isOk())
-                .andExpect(content().string("## Documentation drift"));
-        mockMvc.perform(get("/api/documentation/drift/severity-rules").header("X-User-Id", "user-1"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.levels[0].min_score").value(75));
     }
 }

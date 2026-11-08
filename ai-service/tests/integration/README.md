@@ -55,11 +55,10 @@ github-integration ──files+content──▶ analyzer /api/v1/analyze-repo �
 | D3 | Bằng chứng của mọi finding | Đủ `code_diff`, `documentation`, `commit`, `ticket`; đoạn tài liệu có thật trong document đã lưu; không có diff thì hiện docstring cũ → mới |
 | D4 | PR không đổi gì | `no_drift`, không có finding, không có tài liệu bị ảnh hưởng |
 | D5 | `/drift/reports`, `/drift/reports/{id}` | Báo cáo được lưu, lọc theo repo và số PR |
-| D6 | Phân loại (LD-151) trên cùng PR | `add_item`: `parameter_renamed` (breaking); `grand_total`: `entity_renamed`; `CartService`: `docstring_changed`, section tự sinh còn chép docstring cũ nên có bằng chứng `docstring` và mức `high` |
 | L1 | 2 service thật đang chạy | Cả hai trả lời |
 | L2 | Body giống github-integration → analyzer → ai-service | Job `completed`, giữ tên repo, giữ số dòng |
 | L3 | Claude thật | JSON hợp lệ, không trích dẫn sai, ≥ 80% thực thể có dẫn chứng |
-| L4 | Analyzer thật → document đã lưu → `/drift/analyze` | Tìm đủ 3 loại lệch, mọi finding có `code_diff`, đúng `kind` (LD-151); đọc lại được báo cáo |
+| L4 | Analyzer thật → document đã lưu → `/drift/analyze` | Tìm đủ 3 loại lệch, mọi finding có `code_diff`; đọc lại được báo cáo |
 | Q1 | Lớp, hàm Python và số dòng | Khớp đúng với file nguồn (so bằng `ast`) |
 | Q2 | Phương thức Java và số dòng | Số dòng trỏ đúng dòng khai báo |
 | Q3 | Mọi thực thể của analyzer | Có trong Markdown |
