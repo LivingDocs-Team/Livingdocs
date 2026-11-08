@@ -128,7 +128,22 @@ public class DocumentWorkflow {
         reviewedAt = null;
         decidedAt = null;
     }
+    public void startRollbackReview(int documentVersion) {
+    status = DocumentWorkflowStatus.PENDING_STAFF_REVIEW;
+    submittedDocumentVersion = documentVersion;
 
+    reviewerUserId = null;
+    staffReviewResult = null;
+    staffComment = null;
+
+    managerUserId = null;
+    managerDecision = null;
+    managerComment = null;
+
+    submittedAt = Instant.now();
+    reviewedAt = null;
+    decidedAt = null;
+ }
     public void claim(String reviewerUserId) {
         status = DocumentWorkflowStatus.STAFF_REVIEWING;
         this.reviewerUserId = reviewerUserId;

@@ -365,7 +365,61 @@ class DocumentWorkflowServiceTest {
                 .isInstanceOf(ApiException.class)
                 .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(403));
     }
+    @Test
+    void managerCanReadEvidenceForTheExactSubmittedVersion() throws Exception {
+    DocumentWorkflow workflow = pendingStaffWorkflow();
+    workflow.review(StaffReviewResult.PASSED, "All checks passed");
 
+    when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+    when(documents.getDocument(MANAGER, "doc-1")).thenReturn(
+            new ObjectMapper().readTree(
+                    "{\"id\":\"doc-1\",\"owner_user_id\":\"73\","
+                    + "\"current_version\":0,\"pending_version\":1}"));
+
+    var expectedEvidence = new ObjectMapper().readTree(
+            "{\"job_id\":\"job-1\",\"files\":[]}");
+
+    when(documents.getDocumentEvidence(MANAGER, "doc-1", 1))
+            .thenReturn(expectedEvidence);
+
+    var result = service.evidence(
+            MANAGER,
+            Set.of("ROLE_MANAGER", "DOCUMENT_APPROVAL_QUEUE_VIEW"),
+            ID);
+
+    assertThat(result).isEqualTo(expectedEvidence);
+
+    verify(documents).getDocumentEvidence(MANAGER, "doc-1", 1);
+}
+
+@Test
+void managerCannotReadEvidenceBeforeStaffReviewPasses() {
+    DocumentWorkflow workflow = pendingStaffWorkflow();
+
+    when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+
+    assertThatThrownBy(() -> service.evidence(
+            MANAGER,
+            Set.of("ROLE_MANAGER", "DOCUMENT_APPROVAL_QUEUE_VIEW"),
+            ID))
+            .isInstanceOf(ApiException.class);
+
+    verify(documents, never()).getDocumentEvidence(
+            any(), any(), org.mockito.ArgumentMatchers.anyInt());
+}
+
+@Test
+void nonManagerCannotReadGroundingEvidence() {
+    assertThatThrownBy(() -> service.evidence(
+            MANAGER,
+            Set.of("DOCUMENT_APPROVAL_QUEUE_VIEW"),
+            ID))
+            .isInstanceOf(ApiException.class)
+            .satisfies(error -> assertThat(
+                    ((ApiException) error).getStatus().value()).isEqualTo(403));
+
+    verify(workflows, never()).findById(ID);
+}
     @Test
     void historyIsReturnedOnlyToAuthorizedOwner() {
         DocumentWorkflow workflow = submittedWorkflow();
@@ -378,7 +432,88 @@ class DocumentWorkflowServiceTest {
                 .isInstanceOf(ApiException.class)
                 .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(404));
     }
+     @Test
+void managerCanReadAuditTrailForPendingApprovalWorkflow() {
+    DocumentWorkflow workflow = pendingStaffWorkflow();
+    workflow.review(StaffReviewResult.PASSED, "All checks passed");
 
+    when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+    when(audit.findByWorkflowIdOrderByCreatedAtAsc(ID)).thenReturn(List.of(
+            new DocumentWorkflowAudit(
+                    ID,
+                    REVIEWER,
+                    "PASSED",
+                    "STAFF_REVIEWING",
+                    "PENDING_MANAGER_APPROVAL",
+                    "All checks passed"
+            ),
+            new DocumentWorkflowAudit(
+                    ID,
+                    MANAGER,
+                    "APPROVED",
+                    "PENDING_MANAGER_APPROVAL",
+                    "APPROVED",
+                    "Approved"
+            )
+    ));
+
+    var history = service.history(
+            MANAGER,
+            Set.of("ROLE_MANAGER", "DOCUMENT_APPROVAL_QUEUE_VIEW"),
+            ID
+    );
+
+    assertThat(history).hasSize(2);
+    verify(audit).findByWorkflowIdOrderByCreatedAtAsc(ID);
+}
+        @Test
+    void managerCanRollbackApprovedDocumentAndRollbackMustPassStaffReviewAgain() throws Exception {
+        DocumentWorkflow workflow = approvedWorkflow();
+
+        when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
+
+        when(documents.getDocument(MANAGER, "doc-1")).thenReturn(
+                new ObjectMapper().readTree(
+                        "{\"owner_user_id\":\"73\",\"current_version\":2,\"pending_version\":null}"
+                )
+        );
+
+        when(documents.rollbackDocumentVersion(
+                MANAGER,
+                OWNER,
+                "doc-1",
+                1,
+                "Restore stable version"
+        )).thenReturn(
+                new ObjectMapper().readTree(
+                        "{\"number\":3,\"status\":\"proposed\",\"origin\":\"rollback\",\"restored_from\":1}"
+                )
+        );
+
+        when(workflows.saveAndFlush(workflow)).thenReturn(workflow);
+
+        var result = service.rollback(
+                MANAGER,
+                Set.of("ROLE_MANAGER", "DOCUMENT_ROLLBACK"),
+                ID,
+                1,
+                "Restore stable version"
+        );
+
+        assertThat(result.status()).isEqualTo(DocumentWorkflowStatus.PENDING_STAFF_REVIEW);
+        assertThat(result.submittedDocumentVersion()).isEqualTo(3);
+
+        verify(documents).rollbackDocumentVersion(
+                MANAGER,
+                OWNER,
+                "doc-1",
+                1,
+                "Restore stable version"
+        );
+
+        verify(workflows).saveAndFlush(workflow);
+        verify(audit).save(any(DocumentWorkflowAudit.class));
+    }
     @Test
     void persistenceDeclaresUniqueDocumentKeyAndPessimisticClaimDecisionLock() throws Exception {
         Lock lock = DocumentWorkflowRepository.class.getMethod("lockById", UUID.class).getAnnotation(Lock.class);
@@ -390,7 +525,17 @@ class DocumentWorkflowServiceTest {
         assertThat(DocumentWorkflow.class.getDeclaredField("documentId")
                 .getAnnotation(jakarta.persistence.Column.class).unique()).isTrue();
     }
+    private static DocumentWorkflow approvedWorkflow() {
+    DocumentWorkflow workflow = new DocumentWorkflow("doc-1", "Document", OWNER);
+    ReflectionTestUtils.setField(workflow, "id", ID);
 
+    workflow.submit(2);
+    workflow.claim(REVIEWER);
+    workflow.review(StaffReviewResult.PASSED, "Staff review passed");
+    workflow.decide(MANAGER, ManagerDecision.APPROVED, "Approved");
+
+    return workflow;
+}
     private static DocumentWorkflow pendingStaffWorkflow() {
         DocumentWorkflow workflow = submittedWorkflow();
         workflow.claim(REVIEWER);

@@ -16,7 +16,7 @@ from app.models import (SECTION_KINDS, SECTION_NAMES, GenerateRequest, Job, JobR
 from app.templates import TemplateNameTaken, templates
 from app.version_models import (Document, DocumentContentEdit, DocumentCreate, DocumentVersion,
                                 HistoryEvent, InternalDocumentCreate, InternalVersionDecision,
-                                VersionSummary)
+                                InternalRollbackRequest,VersionSummary)
 from app.versions import VersionError, documents
 from app.internal_auth import require_internal_service
 
@@ -186,7 +186,25 @@ def get_owned_document(doc_id: str):
 def get_internal_document_content(doc_id: str, version: Optional[int] = Query(None, ge=1)):
     v = _call(documents.version, doc_id, version)
     return PlainTextResponse(v.content, media_type="text/markdown")
+@app.get(
+    "/internal/documents/{doc_id}/evidence",
+    response_model=JobReport,
+    dependencies=[Depends(require_internal_service)],
+)
+def get_internal_document_evidence(
+    doc_id: str,
+    version: int = Query(..., ge=1),
+):
+    """Return grounding evidence for an exact owned-document version."""
+    document_version = _call(documents.version, doc_id, version)
 
+    if document_version.evidence_report is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Grounding evidence not found for this document version",
+        )
+
+    return document_version.evidence_report
 
 @app.put("/internal/documents/{doc_id}/content", response_model=DocumentVersion,
          dependencies=[Depends(require_internal_service)])
@@ -209,7 +227,28 @@ def resolve_owned_document_version(doc_id: str, data: InternalVersionDecision,
     except VersionError as e:
         raise HTTPException(e.status, e.message)
 
-
+@app.post(
+    "/internal/documents/{doc_id}/rollback",
+    response_model=DocumentVersion,
+    status_code=201,
+    dependencies=[Depends(require_internal_service)],
+)
+def rollback_owned_document(
+    doc_id: str,
+    data: InternalRollbackRequest,
+    user_id: str = Header(alias="X-User-Id"),
+    owner_id: str = Header(alias="X-Document-Owner-Id"),
+):
+    try:
+        return documents.rollback_owned(
+            doc_id,
+            owner_id,
+            data.source_version,
+            user_id,
+            data.note,
+        )
+    except VersionError as e:
+        raise HTTPException(e.status, e.message)
 @app.get("/documents", response_model=List[Document], response_model_exclude={"owner_user_id"})
 def list_documents():
     return documents.list_public()

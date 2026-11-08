@@ -21,6 +21,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.context.TestPropertySource;
 
 import java.util.List;
 
@@ -40,6 +41,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@TestPropertySource(properties = {
+        "github.client-id=test-client-id",
+        "github.client-secret=test-client-secret",
+        "github.app-slug=livingdocs-test"
+})
 @Import(com.livingdocs.github.security.InternalServiceTestMvcConfig.class)
 class GitHubIntegrationFlowTest {
 
