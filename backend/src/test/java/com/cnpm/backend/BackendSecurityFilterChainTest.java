@@ -32,6 +32,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.core.userdetails.User.withUsername;
@@ -42,7 +43,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(controllers = {
         com.cnpm.backend.controller.GitHubIntegrationBffController.class,
         com.cnpm.backend.controller.CsrfTokenController.class,
-        com.cnpm.backend.controller.UserLoginController.class
+        com.cnpm.backend.controller.UserLoginController.class,
+        com.cnpm.backend.controller.AdminUserController.class
 }, properties = {
         "services.github-integration.base-url=http://127.0.0.1:1",
         "services.github-integration.internal-secret=filter-chain-test-credential",
@@ -68,6 +70,8 @@ class BackendSecurityFilterChainTest {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    private User testUser;
+
     @BeforeEach
     void setUp() {
         UserDetails details = withUsername(EMAIL)
@@ -76,10 +80,10 @@ class BackendSecurityFilterChainTest {
                 .build();
         when(userDetailsService.loadUserByUsername(EMAIL)).thenReturn(details);
 
-        User user = new User(EMAIL, "test-encoded-password", "Bff", "User", "DEVELOPER", true);
-        user.setUsername("bff-user");
-        ReflectionTestUtils.setField(user, "id", 73L);
-        when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
+        testUser = new User(EMAIL, "test-encoded-password", "Bff", "User", "DEVELOPER", true);
+        testUser.setUsername("bff-user");
+        ReflectionTestUtils.setField(testUser, "id", 73L);
+        when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(testUser));
     }
 
     @Test
@@ -121,7 +125,7 @@ class BackendSecurityFilterChainTest {
                         .content("{\"githubRepoIds\":[]}"))
                 .andExpect(status().isBadGateway());
 
-        verify(userRepository).findByEmail(EMAIL);
+        verify(userRepository, atLeastOnce()).findByEmail(EMAIL);
     }
 
     @Test
@@ -140,6 +144,27 @@ class BackendSecurityFilterChainTest {
         mvc.perform(get("/api/github/connection")
                         .cookie(new Cookie("JSESSIONID", sessionId)))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void developerCannotAccessAdminUserManagementApi() throws Exception {
+        Csrf csrf = fetchCsrf();
+        MockHttpSession session = login(csrf);
+
+        mvc.perform(get("/api/admin/users").session(session))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void disabledAccountSessionIsRejectedAndInvalidatedOnNextRequest() throws Exception {
+        Csrf csrf = fetchCsrf();
+        MockHttpSession session = login(csrf);
+        testUser.setActive(false);
+
+        mvc.perform(get("/api/github/connection").session(session))
+                .andExpect(status().isUnauthorized());
+
+        assertThat(session.isInvalid()).isTrue();
     }
 
     @Test
