@@ -95,6 +95,7 @@ class PromptDrivenModel:
 def base_url():
     return os.getenv("BASE_URL", "http://localhost:3000")
 
+@pytest.fixture
 def use_model(monkeypatch):
     """Route the API's background jobs through a fake model: use_model(PromptDrivenModel())."""
     from app import jobs

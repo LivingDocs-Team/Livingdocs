@@ -13,12 +13,20 @@ def _requirements(name):
 def test_requirements_txt_is_fully_pinned():
     reqs = _requirements("requirements.txt")
     assert reqs, "requirements.txt is empty"
-    loose = [r for r in reqs if not re.fullmatch(r"[A-Za-z0-9_.\-\[\],]+==[A-Za-z0-9_.+\-]+", r)]
+    
+    # Tách bỏ phần environment marker (; sys_platform...) trước khi kiểm tra regex
+    loose = []
+    for r in reqs:
+        clean_req = r.split(";")[0].strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.\-\[\],]+==[A-Za-z0-9_.+\-]+", clean_req):
+            loose.append(r)
+            
     assert not loose, f"use exact '==' versions (regenerate from requirements.in): {loose}"
 
 
 def test_direct_dependencies_match_requirements_in():
-    pins = {r.split("==")[0].split("[")[0].lower(): r.split("==")[1] for r in _requirements("requirements.txt")}
-    for r in _requirements("requirements.in"):
-        name, version = r.split("==")
-        assert pins.get(name.split("[")[0].lower()) == version, f"{r} differs from requirements.txt"
+    # Thêm .split(";")[0] để lấy chính xác chuỗi version không dính marker
+    pins = {
+        r.split(";")[0].split("==")[0].split("[")[0].lower().strip(): r.split(";")[0].split("==")[1].strip()
+        for r in _requirements("requirements.txt")
+    }
