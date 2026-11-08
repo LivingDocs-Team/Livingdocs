@@ -49,6 +49,12 @@ public GitHubOAuth2UserService(
         User user = userRepository.findByGithubId(githubId)
                 .orElseGet(() -> createGitHubUser(attributes, githubId));
 
+        if (!user.isActive()) {
+            throw new OAuth2AuthenticationException(
+                    new org.springframework.security.oauth2.core.OAuth2Error("access_denied"),
+                    "This account has been disabled");
+        }
+
         return new org.springframework.security.oauth2.core.user.DefaultOAuth2User(
                 githubUser.getAuthorities(),
                 attributes,
