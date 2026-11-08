@@ -14,6 +14,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRepository;
@@ -83,6 +84,15 @@ public class SecurityConfig {
                 .sameSite(sameSite)
                 .path("/"));
         return repository;
+    }
+
+    @Bean
+    public FilterRegistrationBean<AccountStatusFilter> accountStatusFilterRegistration(
+            AccountStatusFilter accountStatusFilter) {
+        FilterRegistrationBean<AccountStatusFilter> registration =
+                new FilterRegistrationBean<>(accountStatusFilter);
+        registration.setEnabled(false);
+        return registration;
     }
 
     @Bean
