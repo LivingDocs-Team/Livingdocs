@@ -1,6 +1,7 @@
 package com.cnpm.backend;
 
 import com.cnpm.backend.config.SecurityConfig;
+import com.cnpm.backend.config.AccountStatusFilter;
 import com.cnpm.backend.config.SpaCsrfTokenRequestHandler;
 import com.cnpm.backend.entity.User;
 import com.cnpm.backend.repository.UserRepository;
@@ -51,7 +52,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "SESSION_COOKIE_SECURE=false",
         "SESSION_COOKIE_SAME_SITE=Lax"
 })
-@Import({SecurityConfig.class, SpaCsrfTokenRequestHandler.class,
+@Import({SecurityConfig.class, AccountStatusFilter.class, SpaCsrfTokenRequestHandler.class,
         BackendSecurityFilterChainTest.TestBeans.class})
 class BackendSecurityFilterChainTest {
 
