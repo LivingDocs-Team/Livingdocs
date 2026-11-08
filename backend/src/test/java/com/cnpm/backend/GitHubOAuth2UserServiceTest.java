@@ -6,18 +6,16 @@ import com.cnpm.backend.service.GitHubOAuth2UserService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.OAuth2AccessToken;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
-import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.Instant;
-import java.util.List;
+import java.util.Set;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -65,7 +63,7 @@ class GitHubOAuth2UserServiceTest {
                 "test-access-token",
                 Instant.now(),
                 Instant.now().plusSeconds(300),
-                List.of("read:user"));
+                Set.of("read:user"));
         OAuth2UserRequest request = new OAuth2UserRequest(registration, token);
 
         assertThatThrownBy(() -> service.loadUser(request))
