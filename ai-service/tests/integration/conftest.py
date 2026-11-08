@@ -10,7 +10,6 @@ import pathlib
 import re
 
 import pytest
-from playwright.sync_api import Page
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 
@@ -110,7 +109,3 @@ def use_model(monkeypatch):
 
 def live_url(name):
     return (os.getenv(name) or "").rstrip("/")
-
-def test_frontend_homepage_title(page: Page, base_url: str):
-    page.goto(f"{base_url}/")
-    expect(page).to_have_title("LivingDocs - Automated Documentation Generator")
