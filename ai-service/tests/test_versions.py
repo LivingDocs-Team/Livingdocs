@@ -172,7 +172,7 @@ def test_internal_document_edit_checks_owner_and_adds_version(monkeypatch):
 
     denied = client.put(path, headers={
         "Authorization": "Bearer workflow-internal-secret", "X-User-Id": "74",
-    }, json={"content": "Not the owner"})
+    }, json={"content": "Not the owner", "expected_version": 1})
     assert denied.status_code == 404
 
     edited = client.put(path, headers={
