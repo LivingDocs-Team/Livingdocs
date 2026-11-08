@@ -1,9 +1,20 @@
-
 import os
+import uuid
+from datetime import datetime, timezone
+from typing import List
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, APIRouter, HTTPException, status
 
-from app.models import RepoAnalysisRequest, RepoAnalysisResponse, FileAnalysis
+from app.models import (
+    EvidenceResponse,
+    EvidenceCreate,
+    SubmissionResponse,
+    SubmissionCreate,
+    SubmissionStatus,
+    RepoAnalysisRequest,
+    RepoAnalysisResponse,
+    FileAnalysis,
+)
 from app.analyzer import ASTAnalyzer
 from app.reader import FileReader
 from app.extractor import EntityExtractor
@@ -37,21 +48,17 @@ async def analyze_repository(request: RepoAnalysisRequest):
     seen_paths = set()
 
     for file_input in request.files:
-        # The same path twice would make the AI service reject the whole request: keep the first.
         if file_input.path in seen_paths:
             warnings.append(f"{file_input.path}: duplicate path, only the first copy was analyzed.")
             continue
         seen_paths.add(file_input.path)
 
-        # Detect the language if the client did not provide one ("Python" == "python").
         lang = (
             (file_input.language or "").strip().lower()
             or FileReader.detect_language(file_input.path)
         )
-        # Files saved on Windows may start with a UTF-8 byte order mark.
         content = file_input.content.lstrip("\ufeff")
 
-        # Handle empty files.
         if not content.strip():
             analyzed_files.append(
                 FileAnalysis(
@@ -63,7 +70,6 @@ async def analyze_repository(request: RepoAnalysisRequest):
             )
             continue
 
-        # Handle unsupported languages.
         if lang not in ("python", "java"):
             analyzed_files.append(
                 FileAnalysis(
@@ -76,7 +82,6 @@ async def analyze_repository(request: RepoAnalysisRequest):
             )
             continue
 
-        # Parse the source code into an AST.
         tree, error = ASTAnalyzer.parse_code(content, lang)
 
         if error:
@@ -90,7 +95,6 @@ async def analyze_repository(request: RepoAnalysisRequest):
             )
             continue
 
-        # Extract classes, functions, and endpoints.
         if lang == "python":
             classes, functions, endpoints = (
                 EntityExtractor.extract_python_entities(tree, content)
@@ -140,3 +144,61 @@ def java_module(path: str):
             break
     folder = p.rsplit("/", 1)[0] if "/" in p else ""
     return folder.replace("/", ".") or None
+
+
+# --- EVIDENCE & SUBMISSION ROUTER ---
+router = APIRouter(prefix="/api/v1", tags=["Evidence & Submission"])
+
+db_evidences = {}
+db_submissions = {}
+
+@router.post("/evidences", response_model=EvidenceResponse, status_code=status.HTTP_201_CREATED)
+async def create_evidence(payload: EvidenceCreate):
+    evidence_id = f"ev-{uuid.uuid4().hex[:8]}"
+    evidence_data = EvidenceResponse(
+        id=evidence_id,
+        created_at=datetime.now(timezone.utc),
+        **payload.model_dump()
+    )
+    db_evidences[evidence_id] = evidence_data
+    return evidence_data
+
+@router.post("/submissions", response_model=SubmissionResponse, status_code=status.HTTP_201_CREATED)
+async def create_submission(payload: SubmissionCreate):
+    missing_evidences = [ev_id for ev_id in payload.evidence_ids if ev_id not in db_evidences]
+    if missing_evidences:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Các Evidence ID sau không tồn tại: {missing_evidences}"
+        )
+
+    sub_id = f"sub-{uuid.uuid4().hex[:8]}"
+    evidences_list = [db_evidences[ev_id] for ev_id in payload.evidence_ids]
+    
+    submission_data = SubmissionResponse(
+        id=sub_id,
+        task_id=payload.task_id,
+        title=payload.title,
+        status=SubmissionStatus.DRAFT,
+        evidences=evidences_list,
+        created_at=datetime.now(timezone.utc)
+    )
+    db_submissions[sub_id] = submission_data
+    return submission_data
+
+@router.post("/submissions/{submission_id}/submit", response_model=SubmissionResponse)
+async def submit_submission(submission_id: str):
+    if submission_id not in db_submissions:
+        raise HTTPException(status_code=404, detail="Submission không tồn tại")
+    
+    sub = db_submissions[submission_id]
+    if not sub.evidences:
+        raise HTTPException(status_code=400, detail="Cần ít nhất 1 evidence để thực hiện submit")
+    
+    sub.status = SubmissionStatus.SUBMITTED
+    sub.submitted_at = datetime.now(timezone.utc)
+    db_submissions[submission_id] = sub
+    return sub
+
+# Đăng ký router vào FastAPI app
+app.include_router(router)

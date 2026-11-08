@@ -1,5 +1,8 @@
+from enum import Enum
 from typing import List, Optional
+from datetime import datetime
 from pydantic import BaseModel, Field
+from typing import Optional
 
 class FileInput(BaseModel):
     """Input data for a source file."""
@@ -76,3 +79,52 @@ class RepoAnalysisResponse(BaseModel):
     target: str
     files: List[FileAnalysis] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+
+class EvidenceType(str, Enum):
+    LOG = "log"
+    SCREENSHOT = "screenshot"
+    TEST_RESULT = "test_result"
+    DOCUMENT_DIFF = "document_diff"
+
+class SubmissionStatus(str, Enum):
+    DRAFT = "DRAFT"
+    PENDING = "PENDING"
+    SUBMITTED = "SUBMITTED"
+    VERIFIED = "VERIFIED"
+    REJECTED = "REJECTED"
+
+class EvidenceCreate(BaseModel):
+    task_id: str
+    evidence_type: EvidenceType
+    file_path: str
+    description: Optional[str] = None
+    metadata: Optional[dict] = Field(default_factory=dict)
+
+class EvidenceResponse(EvidenceCreate):
+    id: str
+    created_at: datetime
+
+class EvidenceResponse(BaseModel):
+    id: str
+    task_id: str
+    evidence_type: str
+    file_path: str
+    description: Optional[str] = None
+
+    class Config:
+        from_attributes = True  # Hoặc orm_mode = True nếu dùng Pydantic v1
+
+class SubmissionCreate(BaseModel):
+    task_id: str
+    title: str
+    evidence_ids: List[str]
+    notes: Optional[str] = None
+
+class SubmissionResponse(BaseModel):
+    id: str
+    task_id: str
+    title: str
+    status: SubmissionStatus
+    evidences: List[EvidenceResponse]
+    submitted_at: Optional[datetime] = None
+    created_at: datetime
