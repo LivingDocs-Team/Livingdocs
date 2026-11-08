@@ -22,6 +22,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     boolean existsByUsername(String username);
 
+    boolean existsByUsernameIgnoreCaseAndIdNot(String username, Long id);
+
     @Query("""
             select u from User u
             where (:search is null or
