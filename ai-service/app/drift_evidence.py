@@ -5,9 +5,7 @@ Every drift finding carries the evidence a reviewer needs to check it without op
 
     X1..  code_diff       the lines of the Pull Request diff that changed the entity (or, without
                           a diff, the signature and changed docstring before -> after)
-    D1..  documentation   each place where the documentation still describes the old code,
-                          including what LD-151 found it still says (old parameter, type,
-                          default, exception, status code, value, docstring, line reference)
+    D1..  documentation   each place where the documentation still describes the old code
     C1    commit          head commit and Pull Request number / link
     T1..  ticket          Jira keys named in the PR title, branch or description
 """
@@ -15,7 +13,7 @@ from typing import List, Optional, Tuple
 
 from .drift_affected import Hit
 from .drift_changes import numbered
-from .drift_models import (DiffHunk, DocMatch, DriftEvidence, DriftEvidenceKind, EntityChange,
+from .drift_models import (DiffHunk, DriftEvidence, DriftEvidenceKind, EntityChange,
                            FileChangeSummary, PullRequestAnalysis)
 
 MAX_DIFF_LINES = 30
@@ -92,8 +90,7 @@ def signature_lines(change: EntityChange) -> List[str]:
     return lines
 
 
-def build_evidence(hit: Hit, analysis: PullRequestAnalysis,
-                   details: Optional[List[DocMatch]] = None) -> List[DriftEvidence]:
+def build_evidence(hit: Hit, analysis: PullRequestAnalysis) -> List[DriftEvidence]:
     pr = analysis.pull_request
     f: FileChangeSummary = hit.target.file
     change = hit.target.change
@@ -121,7 +118,7 @@ def build_evidence(hit: Hit, analysis: PullRequestAnalysis,
     doc = hit.doc
     shown = sorted(hit.matches, key=lambda m: (not m.in_code, m.line))[:MAX_DOC_MATCHES]
     seen = {m.line for m in shown}
-    shown += [m for m in hit.param_matches + (details or []) if m.line not in seen]
+    shown += [m for m in hit.param_matches if m.line not in seen]
     for n, m in enumerate(sorted(shown, key=lambda m: m.line), start=1):
         out.append(DriftEvidence(id=f"D{n}", kind=DriftEvidenceKind.documentation, path=doc.path,
                                  document_id=doc.document_id, version=doc.version,

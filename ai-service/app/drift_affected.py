@@ -22,7 +22,7 @@ Matching rules (to keep false positives low):
 """
 import re
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from .drift_models import (AffectedDocument, ChangeStatus, DocMatch, DocSource, EntityChange,
                            EntityChangeType, FileChangeSummary, PullRequestAnalysis)
@@ -98,7 +98,6 @@ class Term:
     own_file_only: bool = False
     full: bool = True         # False for a bare method name or a file's base name
     verb: Optional[str] = None  # endpoints: a different HTTP method written before the path
-    kind: str = "name"        # name | path | module (DocMatch.kind)
 
 
 def _plain_word(name: str) -> bool:
@@ -129,12 +128,11 @@ def endpoint_terms(key: str) -> List[Term]:
 
 
 def file_terms(path: str) -> List[Term]:
-    terms = [Term(path, path, re.compile(r"(?<![\w.-])" + re.escape(path) + r"(?![\w/-])"),
-                  kind="path")]
+    terms = [Term(path, path, re.compile(r"(?<![\w.-])" + re.escape(path) + r"(?![\w/-])"))]
     base = path.rsplit("/", 1)[-1]
     if base != path and "." in base:
         terms.append(Term(base, path, re.compile(r"(?<![\w./-])" + re.escape(base) + r"(?![\w/-])"),
-                          code_only=True, full=False, kind="path"))
+                          code_only=True, full=False))
     return terms
 
 
@@ -153,7 +151,6 @@ def entity_terms(kind: str, name: str) -> List[Term]:
 
 FILE_REMOVED = "file_removed"
 FILE_RENAMED = "file_renamed"
-LINE_REFS = "line_references"      # LD-152: `path:12-30` references into a modified file
 
 
 @dataclass
@@ -163,7 +160,6 @@ class Target:
     file_event: Optional[str] = None
     terms: List[Term] = field(default_factory=list)
     params: List[str] = field(default_factory=list)  # removed parameters to look for
-    matcher: Optional[Callable[["DocText"], List[DocMatch]]] = None   # instead of `terms`
 
     @property
     def label(self) -> str:
@@ -173,25 +169,17 @@ class Target:
 
 
 def targets_of(analysis: PullRequestAnalysis) -> List[Target]:
-    from .drift_referential import module_terms, stale_line_refs  # imports this module
-
     out: List[Target] = []
     for f in analysis.files:
         if f.status == ChangeStatus.removed:
-            out.append(Target(f, file_event=FILE_REMOVED,
-                              terms=file_terms(f.path) + module_terms(f.path)))
+            out.append(Target(f, file_event=FILE_REMOVED, terms=file_terms(f.path)))
         elif f.previous_path and f.status != ChangeStatus.copied:  # moved / renamed file
-            out.append(Target(f, file_event=FILE_RENAMED,
-                              terms=file_terms(f.previous_path) + module_terms(f.previous_path)))
-        elif f.hunks:                                 # LD-152: line references into the file
-            out.append(Target(f, file_event=LINE_REFS,
-                              matcher=lambda doc, f=f: stale_line_refs(doc, f.path, f.path, f.hunks)))
+            out.append(Target(f, file_event=FILE_RENAMED, terms=file_terms(f.previous_path)))
         for c in f.entity_changes:
             if c.change == EntityChangeType.added:
                 out.append(Target(f, c))              # only matters for the file's own section
                 continue
-            # renamed entities and endpoints whose HTTP method changed are documented by the old name
-            documented = c.old_name or c.name
+            documented = c.old_name if c.change == EntityChangeType.renamed else c.name
             params = [p for p in c.removed_parameters if p not in ("self", "cls")] \
                 if c.change == EntityChangeType.signature_changed else []
             out.append(Target(f, c, terms=entity_terms(c.kind, documented), params=params))
@@ -231,8 +219,7 @@ def search(doc: DocText, terms: Sequence[Term], own_file: bool) -> List[DocMatch
                 k = (i, t.target)
                 if k not in found or (code and not found[k].in_code):
                     found[k] = DocMatch(term=m.group(0), target=t.target, line=i + 1,
-                                        excerpt=excerpt(line), in_code=code, exact=t.full,
-                                        kind=t.kind)
+                                        excerpt=excerpt(line), in_code=code, exact=t.full)
     return sorted(found.values(), key=lambda m: m.line)
 
 
@@ -248,7 +235,7 @@ def search_params(doc: DocText, params: List[str], near: List[DocMatch]) -> List
                 for m in pat.finditer(doc.lines[i]):
                     if doc.in_code(i, m.start()):
                         hit = DocMatch(term=p, target=p, line=i + 1, excerpt=excerpt(doc.lines[i]),
-                                       in_code=True, kind="parameter", note=f"`{p}` was removed")
+                                       in_code=True)
                         break
                 if hit:
                     break
@@ -275,12 +262,8 @@ def find_affected(analysis: PullRequestAnalysis,
     for doc in docs:
         for t in targets:
             own = _documents(doc, t.file)
-            if t.matcher is not None:
-                matches = t.matcher(doc)
-            else:
-                matches = search(doc, t.terms, own) if t.terms else []
-            if not matches and not (own and (t.file_event in (FILE_REMOVED, FILE_RENAMED)
-                                             or t.change is not None)):
+            matches = search(doc, t.terms, own) if t.terms else []
+            if not matches and not (own and (t.file_event or t.change is not None)):
                 continue
             hit = Hit(doc, t, matches, documents_file=own)
             if t.params and matches:
