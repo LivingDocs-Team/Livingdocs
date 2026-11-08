@@ -33,8 +33,9 @@ class AdminUserControllerTest {
         assertThatThrownBy(() -> controller.updateStatus(
                 10L, new AdminUserController.UpdateUserStatusRequest(false), authentication))
                 .isInstanceOf(ResponseStatusException.class)
-                .extracting(error -> ((ResponseStatusException) error).getStatusCode())
-                .isEqualTo(HttpStatus.FORBIDDEN);
+                .satisfies(error -> assertThat(
+                        ((ResponseStatusException) error).getStatusCode())
+                        .isEqualTo(HttpStatus.FORBIDDEN));
         verify(repository, never()).save(admin);
     }
 
@@ -68,8 +69,8 @@ class AdminUserControllerTest {
 
         assertThat(response.role()).isEqualTo("DEVELOPER");
         assertThat(response.username()).isEqualTo("new-name");
-        assertThat(response.getClass().getRecordComponents())
-                .extracting(component -> component.getName())
+        assertThat(java.util.Arrays.stream(response.getClass().getRecordComponents())
+                .map(java.lang.reflect.RecordComponent::getName).toList())
                 .doesNotContain("password");
     }
 
