@@ -44,6 +44,10 @@ public class User {
     @Column(name = "notification_enabled", nullable = false)
     private boolean notificationEnabled = true;
 
+    // Existing accounts remain enabled when Hibernate adds this column.
+    @Column(nullable = false, columnDefinition = "boolean default true")
+    private boolean active = true;
+
     @Column(name = "created_at", nullable = false,
             updatable = false)
     private LocalDateTime createdAt;
@@ -127,6 +131,14 @@ public class User {
 
     public void setRole(String role) {
         this.role = role;
+    }
+
+    public boolean isActive() {
+        return active;
+    }
+
+    public void setActive(boolean active) {
+        this.active = active;
     }
 
     public boolean isNotificationEnabled() {
