@@ -380,3 +380,7 @@ def test_login_can_open_github_connection_and_view_status(page: Page):
     page.get_by_role("button", name="GitHub Connection").click()
     expect(page.get_by_role("heading", name="GitHub Integration")).to_be_visible()
     expect(page.get_by_role("status").filter(has_text="Connected as @test-user")).to_be_visible()
+
+def test_frontend_homepage_title(page: Page, base_url: str):
+    page.goto(f"{base_url}/")
+    expect(page).to_have_title("LivingDocs - Automated Documentation Generator")
