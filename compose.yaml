@@ -74,8 +74,9 @@
       dockerfile: Dockerfile
     image: livingdocs-ai:local
     environment:
-      # custom documentation templates survive restarts (named volume below)
+      # custom templates and versioned documents survive restarts (named volume below)
       TEMPLATES_FILE: /app/data/templates.json
+      DOCUMENTS_FILE: /app/data/documents.json
     volumes:
       - ai-templates:/app/data
     ports:
