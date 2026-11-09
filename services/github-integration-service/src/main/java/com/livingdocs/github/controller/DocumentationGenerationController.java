@@ -35,9 +35,10 @@ public class DocumentationGenerationController {
     public ResponseEntity<JsonNode> generate(
             @RequestHeader(USER_HEADER) String userId,
             @PathVariable UUID id,
+            @RequestHeader(value = "X-Verified-Workspace-Id", required = false) String verifiedWorkspaceId,
             @RequestBody(required = false) DocumentationGenerationRequest request) {
         return ResponseEntity.status(HttpStatus.ACCEPTED)
-                .body(generationService.generate(userId, id, request));
+                .body(generationService.generate(userId, id, request, verifiedWorkspaceId));
     }
 
     @GetMapping(path = "/api/documentation/jobs/{jobId}", produces = MediaType.APPLICATION_JSON_VALUE)

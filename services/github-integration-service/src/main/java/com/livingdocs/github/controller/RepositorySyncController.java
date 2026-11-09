@@ -43,6 +43,8 @@ public class RepositorySyncController {
     public SyncResultResponse sync(
             @RequestHeader(USER_HEADER) String userId,
             @PathVariable UUID id,
+            @RequestHeader(value = "X-Verified-Workspace-Id", required = false) String verifiedWorkspaceId,
+            @RequestHeader(value = "X-Verified-Workspace-Access", required = false) String verifiedAccess,
             @io.swagger.v3.oas.annotations.parameters.RequestBody(required = false, content = @Content(
                     mediaType = "application/json",
                     schema = @Schema(implementation = SyncRequest.class),
@@ -52,19 +54,23 @@ public class RepositorySyncController {
                                     value = "{\"branch\": \"develop\", \"maxFiles\": 50}")}))
             @RequestBody(required = false) SyncRequest request) {
         SyncOptions options = request == null ? SyncOptions.defaults() : request.toOptions();
-        return SyncResultResponse.from(syncService.sync(userId, id, options));
+        return SyncResultResponse.from(syncService.sync(userId, id, options, verifiedWorkspaceId, verifiedAccess));
     }
 
     @GetMapping("/api/repositories/{id}/sync/latest")
     @Operation(summary = "Kết quả lần đồng bộ gần nhất (không kèm nội dung file)")
-    public SyncResultResponse latest(@RequestHeader(USER_HEADER) String userId, @PathVariable UUID id) {
-        return SyncResultResponse.from(syncService.latest(userId, id));
+    public SyncResultResponse latest(@RequestHeader(USER_HEADER) String userId, @PathVariable UUID id,
+            @RequestHeader(value = "X-Verified-Workspace-Id", required = false) String verifiedWorkspaceId,
+            @RequestHeader(value = "X-Verified-Workspace-Access", required = false) String verifiedAccess) {
+        return SyncResultResponse.from(syncService.latest(userId, id, verifiedWorkspaceId, verifiedAccess));
     }
 
     @GetMapping("/api/repositories/{id}/sync/latest/analysis-input")
     @Operation(summary = "Dữ liệu gửi sang service phân tích code (LD-328)",
             description = "Body cho POST /api/v1/analyze-repo: các file đã tải được nội dung, kèm nội dung.")
-    public AnalysisInput analysisInput(@RequestHeader(USER_HEADER) String userId, @PathVariable UUID id) {
-        return AnalysisInput.from(syncService.latest(userId, id));
+    public AnalysisInput analysisInput(@RequestHeader(USER_HEADER) String userId, @PathVariable UUID id,
+            @RequestHeader(value = "X-Verified-Workspace-Id", required = false) String verifiedWorkspaceId,
+            @RequestHeader(value = "X-Verified-Workspace-Access", required = false) String verifiedAccess) {
+        return AnalysisInput.from(syncService.latest(userId, id, verifiedWorkspaceId, verifiedAccess));
     }
 }
