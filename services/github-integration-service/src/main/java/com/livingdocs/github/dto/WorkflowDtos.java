@@ -25,7 +25,10 @@ public final class WorkflowDtos {
                                  @NotBlank @Size(max = 1000) String reason) { }
     public record EditDocumentRequest(@NotBlank @Size(max = 2_000_000) String content,
                                       @Size(max = 1000) String note) { }
-
+    public record RollbackRequest(
+        @NotNull @Positive Integer sourceVersion,
+        @NotBlank @Size(max = 1000) String reason
+) { }
     public record WorkflowResponse(UUID id, String documentId, String documentTitle, String ownerUserId,
             DocumentWorkflowStatus status, Integer submittedDocumentVersion, String reviewerUserId,
             StaffReviewResult staffReviewResult, String staffComment, String managerUserId,

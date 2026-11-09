@@ -132,9 +132,18 @@ class DocumentStore:
     def versions(self, doc_id: str) -> List[VersionSummary]:
         """All versions, newest first, without their text."""
         self.get(doc_id)
-        return [VersionSummary.model_validate(v.model_dump(exclude={"content", "sections", "skipped",
-                                                                    "sections_match_content"}))
-                for v in reversed(self._versions[doc_id])]
+        return [
+           VersionSummary.model_validate(
+              v.model_dump(exclude={
+               "content",
+               "sections",
+               "skipped",
+               "sections_match_content",
+               "evidence_report",
+         })
+    )
+    for v in reversed(self._versions[doc_id])
+]
 
     def version(self, doc_id: str, number: Optional[int] = None) -> DocumentVersion:
         doc = self.get(doc_id)
@@ -182,6 +191,7 @@ class DocumentStore:
                                 origin=VersionOrigin.generated,
                                 content=assemble(doc, sections, skipped, output.template_name),
                                 sections=sections, skipped=skipped, confidence=output.confidence,
+                                evidence_report=output.evidence_report,
                                 changes=[SectionChange(path=s.path, action=SectionAction.added)
                                          for s in sections],
                                 note=note, created_by=actor,
@@ -240,7 +250,87 @@ class DocumentStore:
             self._event(doc_id, HistoryAction.proposed, number, owner_user_id, note or "Owner edited after changes requested")
             self._save()
             return version
+    def rollback_owned(
+        self,
+        doc_id: str,
+        owner_user_id: str,
+        source_version_number: int,
+        actor_user_id: str,
+        note: Optional[str] = None,
+    ) -> DocumentVersion:
+        with self._lock:
+            doc = self.get_owned(doc_id, owner_user_id)
 
+            # Allow safe retry if the previous request already created
+            # the same rollback proposal.
+            if doc.pending_version is not None:
+                pending = self.version(doc_id, doc.pending_version)
+
+                if (
+                    pending.origin == VersionOrigin.rollback
+                    and pending.restored_from == source_version_number
+                    and pending.created_by == actor_user_id
+                    and pending.note == note
+                ):
+                    return pending
+
+                raise VersionError(
+                    409,
+                    "A document version is already awaiting review",
+                )
+
+            source = self.version(doc_id, source_version_number)
+
+            if source.status != VersionStatus.accepted:
+                raise VersionError(
+                    409,
+                    "Only an accepted document version can be restored",
+                )
+
+            number = len(self._versions[doc_id]) + 1
+
+            version = DocumentVersion(
+                number=number,
+                status=VersionStatus.proposed,
+                origin=VersionOrigin.rollback,
+                base_version=doc.current_version,
+                restored_from=source.number,
+                content=source.content,
+                sections=[section.model_copy(deep=True) for section in source.sections],
+                skipped=[item.model_copy(deep=True) for item in source.skipped],
+                changes=[],
+                source_changes=[
+                    item.model_copy(deep=True) for item in source.source_changes
+                ],
+                warnings=list(source.warnings),
+                confidence=source.confidence,
+                manual=source.manual,
+                note=note,
+                created_by=actor_user_id,
+                evidence_report=(
+                    source.evidence_report.model_copy(deep=True)
+                    if source.evidence_report is not None
+                    else None
+                ),
+                sections_match_content=source.sections_match_content,
+            )
+
+            self._versions[doc_id].append(version)
+            doc.pending_version = number
+            doc.versions_total = number
+            doc.updated_at = now()
+
+            self._event(
+                doc_id,
+                HistoryAction.rolled_back,
+                number,
+                actor_user_id,
+                note or f"Restored from version {source.number}",
+                related=source.number,
+            )
+
+            self._save()
+            return version
     def resolve_workflow_version(self, doc_id: str, owner_user_id: str, version_number: int,
                                  decision: str, actor_user_id: str,
                                  note: Optional[str] = None) -> None:
