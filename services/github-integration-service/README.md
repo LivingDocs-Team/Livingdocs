@@ -23,6 +23,9 @@ Công nghệ: Java 21, Spring Boot 3.5, PostgreSQL, Flyway, Swagger (springdoc).
 | GET | `/api/repositories/{id}/sync/latest` | Kết quả lần đồng bộ gần nhất |
 | GET | `/api/repositories/{id}/sync/latest/analysis-input` | Dữ liệu gửi sang service phân tích code (`POST /api/v1/analyze-repo`, LD-395) |
 | DELETE | `/api/repositories/{id}` | Gỡ repo khỏi workspace |
+| POST | `/api/repositories/{id}/drift/analyze` | Phân tích lệch tài liệu thủ công cho một Pull Request (LD-145), body: `{"pullRequestNumber":7}` |
+| GET | `/api/repositories/{id}/drift/reports?pullRequest=7` | Các báo cáo lệch tài liệu của repo, mới nhất trước |
+| GET | `/api/drift/reports/{reportId}` | Một báo cáo: findings, tài liệu bị ảnh hưởng, bằng chứng |
 
 > Browser không gọi service này trực tiếp. Backend BFF xác minh session, lấy user ID từ principal phía server và gửi request kèm `GITHUB_INTEGRATION_INTERNAL_SECRET`. GitHub Integration từ chối request thiếu/sai credential. Chi tiết: [Backend BFF authentication contract](docs/backend-bff-authentication.md).
 
@@ -74,9 +77,35 @@ Dữ liệu mẫu (cho frontend, test, service phân tích) và hướng dẫn c
 
 Chạy thử với GitHub thật (repo public, không cần token): chạy `GitHubRepositoryFetcherLiveTest` với biến môi trường `GITHUB_LIVE_TEST=true` (tuỳ chọn thêm `GITHUB_LIVE_REPO=owner/repo`).
 
+## Phát hiện lệch tài liệu (LD-145)
+
+`service/DriftAnalysisService` phân tích **thủ công** một Pull Request (người dùng nhập số PR):
+
+```
+GitHub: PR + file thay đổi kèm diff        GET /repos/{o}/{r}/pulls/{n}, /pulls/{n}/files (nhiều trang)
+        merge base của PR                  GET /repos/{o}/{r}/compare/{base}...{head}
+        nội dung file .py/.java ở 2 phía   cây thư mục + blob ở merge base và head
+code-analyzer: phân tích 2 phiên bản       POST /api/v1/analyze-repo  (-> before / after)
+GitHub: README + file .md của repo         ở commit head (bỏ node_modules, target, dist...)
+ai-service: POST /drift/analyze            findings Referential / Signature / Semantic, độ nghiêm trọng,
+                                           độ tin cậy, bằng chứng (diff, đoạn tài liệu, commit, ticket)
+```
+
+Body: `pullRequestNumber` (bắt buộc), `documentIds` (tuỳ chọn; mặc định mọi tài liệu đã lưu **của repo
+này**, tài liệu của repo khác bị từ chối kèm cảnh báo), `includeRepositoryDocs` (mặc định `true`).
+
+- Diff của PR tính từ merge base, nên "trước thay đổi" cũng đọc ở merge base (không phải đầu nhánh `main`).
+- Tối đa 100 file Python/Java được tải nội dung, 30 file Markdown; file khác chỉ kiểm tra bằng diff.
+- code-analyzer lỗi hoặc không tải được một file: vẫn có báo cáo, thay đổi đọc từ diff (độ tin cậy thấp
+  hơn), lý do nằm ở đầu `warnings`.
+- Lỗi: `400 BAD_REQUEST` thiếu số PR, `404 PULL_REQUEST_NOT_FOUND`, `401 GITHUB_REAUTH_REQUIRED` (token
+  bị GitHub từ chối, kết nối bị đánh dấu `INVALID`), `502 AI_SERVICE_FAILED`, `403` báo cáo của người khác.
+- Báo cáo giữ trong bộ nhớ (cả ở ai-service), mất khi khởi động lại. Chi tiết luật phát hiện:
+  [ai-service/README.md](../../ai-service/README.md).
+
 ## Chưa làm (để sprint sau)
 
-- Webhook (`push`, `pull_request`) và kiểm tra chữ ký HMAC
+- Webhook (`push`, `pull_request`) và kiểm tra chữ ký HMAC (để phân tích lệch tài liệu tự động khi có PR; hiện chạy thủ công)
 - Kéo Pull Request và commit về database, gửi event Kafka cho TV3 và TV4
 - Thông báo cho người dùng khi token hỏng (hiện tại mới đánh dấu trạng thái `INVALID`)
 - Duy trì credential service-to-service trong secret manager phù hợp với môi trường triển khai
