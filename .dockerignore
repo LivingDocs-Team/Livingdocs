@@ -9,11 +9,18 @@
 **/.env.*
 !**/.env.example
 
+# Compressed Archives
+*.rar
+*.zip
+*.7z
+*.tar.gz
+
 # Dependencies & Logs
 **/node_modules
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+*.log
 
 # Build outputs & Python caches
 **/dist
@@ -24,7 +31,16 @@ yarn-error.log*
 **/.venv
 **/venv
 
-# IDE & Documentation
+# Test & Coverage reports
+coverage
+test-report.html
+test-results.xml
+
+# IDE & Editor trash files
 .vscode
 .idea
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
 *.md

@@ -4,6 +4,13 @@
 !.env.example
 secrets/
 
+# Compressed Archives & Dumps
+*.rar
+*.zip
+*.7z
+*.tar.gz
+*.gz
+
 # Dependencies & Build outputs
 node_modules/
 dist/
