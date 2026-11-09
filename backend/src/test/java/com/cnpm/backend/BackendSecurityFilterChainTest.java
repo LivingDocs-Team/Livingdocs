@@ -5,6 +5,8 @@ import com.cnpm.backend.config.AccountStatusFilter;
 import com.cnpm.backend.config.SpaCsrfTokenRequestHandler;
 import com.cnpm.backend.entity.User;
 import com.cnpm.backend.repository.UserRepository;
+import com.cnpm.backend.repository.RoleRepository;
+import com.cnpm.backend.repository.PermissionRepository;
 import com.cnpm.backend.service.CustomUserDetailsService;
 import com.cnpm.backend.service.GitHubOAuth2UserService;
 import jakarta.servlet.http.Cookie;
@@ -45,7 +47,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         com.cnpm.backend.controller.GitHubIntegrationBffController.class,
         com.cnpm.backend.controller.CsrfTokenController.class,
         com.cnpm.backend.controller.UserLoginController.class,
-        com.cnpm.backend.controller.AdminUserController.class
+        com.cnpm.backend.controller.AdminUserController.class,
+        com.cnpm.backend.controller.AdminRoleController.class
 }, properties = {
         "services.github-integration.base-url=http://127.0.0.1:1",
         "services.github-integration.internal-secret=filter-chain-test-credential",
@@ -67,6 +70,9 @@ class BackendSecurityFilterChainTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private RoleRepository roleRepository;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -157,6 +163,31 @@ class BackendSecurityFilterChainTest {
     }
 
     @Test
+    void administratorAndLegacyAdminNeedBothAdminRoleAndPermissionAuthority() throws Exception {
+        Csrf csrf = fetchCsrf();
+        when(roleRepository.findAll()).thenReturn(java.util.List.of());
+
+        MockHttpSession administrator = loginWithAuthorities(csrf, "ROLE_ADMINISTRATOR", "ROLE_VIEW");
+        mvc.perform(get("/api/admin/roles").session(administrator)).andExpect(status().isOk());
+
+        MockHttpSession legacyAdmin = loginWithAuthorities(csrf, "ROLE_ADMIN", "ROLE_VIEW");
+        mvc.perform(get("/api/admin/roles").session(legacyAdmin)).andExpect(status().isOk());
+
+        MockHttpSession missingPermission = loginWithAuthorities(csrf, "ROLE_ADMIN");
+        mvc.perform(get("/api/admin/roles").session(missingPermission)).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void staffAndManagerPermissionsDoNotGrantSystemAdministration() throws Exception {
+        Csrf csrf = fetchCsrf();
+        MockHttpSession staff = loginWithAuthorities(csrf, "ROLE_STAFF", "DOCUMENT_REVIEW_QUEUE_VIEW");
+        mvc.perform(get("/api/admin/roles").session(staff)).andExpect(status().isForbidden());
+
+        MockHttpSession manager = loginWithAuthorities(csrf, "ROLE_MANAGER", "DOCUMENT_APPROVAL_QUEUE_VIEW");
+        mvc.perform(get("/api/admin/roles").session(manager)).andExpect(status().isForbidden());
+    }
+
+    @Test
     void disabledAccountSessionIsRejectedAndInvalidatedOnNextRequest() throws Exception {
         Csrf csrf = fetchCsrf();
         MockHttpSession session = login(csrf);
@@ -216,6 +247,15 @@ class BackendSecurityFilterChainTest {
         return (MockHttpSession) result.getRequest().getSession(false);
     }
 
+    private MockHttpSession loginWithAuthorities(Csrf csrf, String... authorities) throws Exception {
+        UserDetails details = withUsername(EMAIL)
+                .password(passwordEncoder.encode(PASSWORD))
+                .authorities(authorities)
+                .build();
+        when(userDetailsService.loadUserByUsername(EMAIL)).thenReturn(details);
+        return login(csrf);
+    }
+
     private record Csrf(String token, Cookie cookie) {
     }
 
@@ -231,6 +271,18 @@ class BackendSecurityFilterChainTest {
         @Primary
         UserRepository testUserRepository() {
             return mock(UserRepository.class);
+        }
+
+        @Bean
+        @Primary
+        RoleRepository testRoleRepository() {
+            return mock(RoleRepository.class);
+        }
+
+        @Bean
+        @Primary
+        PermissionRepository testPermissionRepository() {
+            return mock(PermissionRepository.class);
         }
 
         @Bean
