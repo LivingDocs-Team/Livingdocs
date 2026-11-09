@@ -12,8 +12,10 @@ from fastapi.responses import PlainTextResponse
 from app.drift import analyze as analyze_drift
 from app.drift import drift_reports
 from app.drift_changes import analyze_pull_request
+from app.drift_markdown import at_least, render as render_drift_markdown
 from app.drift_models import (DriftAnalyzeRequest, DriftReport, DriftReportSummary,
-                              PullRequestAnalysis)
+                              PullRequestAnalysis, Severity)
+from app.drift_severity import CAPS, SCORE_BANDS, SEVERITY_LEVELS, rules_table
 from app.generator import get_generator
 from app.jobs import jobs, run_job
 from app.models import (SECTION_KINDS, SECTION_NAMES, GenerateRequest, Job, JobReport, JobStatus,
@@ -278,9 +280,34 @@ def list_drift_reports(repository: Optional[str] = Query(None, max_length=300),
     return drift_reports.list(repository, pull_request)
 
 
-@app.get("/drift/reports/{report_id}", response_model=DriftReport)
-def get_drift_report(report_id: str):
+def _drift_report(report_id: str) -> DriftReport:
     report = drift_reports.get(report_id)
     if report is None:
         raise HTTPException(404, "Drift report not found")
     return report
+
+
+@app.get("/drift/reports/{report_id}", response_model=DriftReport)
+def get_drift_report(report_id: str, min_severity: Optional[Severity] = None):
+    """One report; `?min_severity=high` keeps only High and Critical findings (LD-158)."""
+    report = _drift_report(report_id)
+    if min_severity is None:
+        return report
+    return report.model_copy(update={"findings": at_least(report.findings, min_severity)})
+
+
+@app.get("/drift/reports/{report_id}/markdown", response_class=PlainTextResponse)
+def get_drift_report_markdown(report_id: str, min_severity: Optional[Severity] = None):
+    """LD-159: the report as Markdown grouped by severity, e.g. for a Pull Request comment."""
+    return PlainTextResponse(render_drift_markdown(_drift_report(report_id), min_severity),
+                             media_type="text/markdown")
+
+
+@app.get("/drift/severity-rules")
+def drift_severity_rules():
+    """LD-157 / LD-158: severity levels (score bands, meaning, action) and every rule."""
+    return {"levels": [{"level": level.value, "min_score": SCORE_BANDS[level][0],
+                        "max_score": SCORE_BANDS[level][1], **SEVERITY_LEVELS[level.value]}
+                       for level in reversed(list(SCORE_BANDS))],
+            "rules": rules_table(),
+            "caps": {t: level.value for t, level in CAPS.items()}}

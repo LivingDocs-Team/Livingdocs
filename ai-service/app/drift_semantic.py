@@ -19,9 +19,9 @@ The documentation is checked for what it still says, within PARAM_WINDOW lines a
 of the entity: a removed exception name, an old status code, an old value, a sentence of the old
 docstring. Such a passage is strong evidence that the text is outdated.
 
-Severity: Low; +1 when the contract-like behaviour changed (status codes, exceptions) or the
-docstring changed; +1 when the documentation still states the old behaviour; +1 for a large change
-(>= 15 changed lines); private name -1; at most High.
+Severity (rules in app/drift_severity.py, LD-157): base `behaviour_changed` (Low); +1
+`contract_behaviour` (status codes, exceptions or docstring changed); +1 `doc_states_old_detail`;
++1 `large_change` (>= 15 changed lines); -1 `private_name`; semantic drift is capped at High.
 """
 import re
 from typing import Dict, List, Optional, Sequence, Set
@@ -218,29 +218,23 @@ def stale_details(doc, near: List[DocMatch], signals: Sequence[SemanticSignal],
 
 def classify(hit):
     """LD-154: a hit on an entity whose behaviour changed (EntityChangeType.behavior_changed)."""
-    from .drift_models import DriftType, Severity
-    from .drift_rules import BIG_CHANGE_LINES, PARAM_WINDOW, Classified, bump, code, private
+    from .drift_models import DriftType
+    from .drift_rules import BIG_CHANGE_LINES, PARAM_WINDOW, Classified, code, private
 
     c = hit.target.change
     where = "this section" if hit.documents_file else "the documentation"
     kind = semantic_kind(c.signals)
     details = stale_details(hit.doc, hit.matches, c.signals, PARAM_WINDOW)
-    rules = ["behaviour change: low"]
-    steps = 0
+    adjust = []
     contract = {s.kind for s in c.signals} & {"status_codes", "exceptions", "docstring"}
     if contract or "docstring changed" in c.details:
-        steps += 1
-        rules.append("changed " + ", ".join(sorted(contract or {"docstring"})) + ": +1")
+        adjust.append(("contract_behaviour", []))
     if details:
-        steps += 1
-        rules.append("documentation still states the old behaviour: +1")
+        adjust.append(("doc_states_old_detail", details))
     if c.changed_lines >= BIG_CHANGE_LINES:
-        steps += 1
-        rules.append(f">= {BIG_CHANGE_LINES} changed lines: +1")
+        adjust.append(("large_change", []))
     if private(c.name):
-        steps -= 1
-        rules.append("private name: -1")
-    sev = bump(Severity.low, steps, cap=Severity.high)
+        adjust.append(("private_name", []))
 
     what = "; ".join(c.details) if c.change.value == "behavior_changed" else "body changed"
     for s in c.signals:
@@ -254,20 +248,20 @@ def classify(hit):
         stated = " It still says " + "; ".join(
             f"{code(m.term if len(m.term) < 60 else m.term[:57] + '...')} ({m.note})"
             for m in details) + "."
-    return Classified(DriftType.semantic, kind, sev, "behavior_changed",
+    return Classified(DriftType.semantic, kind, "behaviour_changed", "behavior_changed",
                       f"Behaviour of {c.kind} {code(c.name)} changed ({what}); "
                       f"{where} may describe the old behaviour.{stated}",
                       f"Check the description of {code(c.name)} against the new code"
                       + (" and update the passages listed as evidence." if details else "."),
                       before=c.old_signature, after=c.new_signature,
                       certainty=0.9 if details else 0.7,
-                      breaking=kind == "status_codes_changed", rules=rules, details=details)
+                      breaking=kind == "status_codes_changed", adjust=adjust, details=details)
 
 
 def classify_added(hit):
     """LD-154: new code in a documented file that its section does not describe."""
     from .drift_affected import entity_terms, search
-    from .drift_models import DriftType, Severity
+    from .drift_models import DriftType
     from .drift_rules import Classified, code, private
 
     c, f = hit.target.change, hit.target.file
@@ -275,7 +269,7 @@ def classify_added(hit):
         return None
     if search(hit.doc, entity_terms(c.kind, c.name), own_file=True):
         return None  # already described (e.g. the section was edited by hand)
-    return Classified(DriftType.semantic, "undocumented_entity", Severity.low, "added",
+    return Classified(DriftType.semantic, "undocumented_entity", "undocumented_entity", "added",
                       f"New {c.kind} {code(c.name)} in {code(f.path)} is not described in this section.",
                       f"Document {code(c.new_signature or c.name)}.", after=c.new_signature or c.name,
-                      certainty=0.8, rules=["new entity not documented: Low"])
+                      certainty=0.8)
