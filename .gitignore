@@ -4,29 +4,30 @@
 !.env.example
 secrets/
 
-# Node.js
+# Dependencies & Build outputs
 node_modules/
-
-# Build outputs
 dist/
+build/
 target/
+*.log
+coverage/
 
 # Python
 .venv/
 venv/
+.venv-analysis/
 __pycache__/
 .pytest_cache/
 *.py[cod]
 
-# Test reports written by pytest.ini
+# Test reports
 test-report.html
 test-results.xml
 
-# IDE and operating system
+# IDE, OS & Editor trash files
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
-
-# Local Python analysis environment
-.venv-analysis/
+*.swp
+*.swo
