@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { githubApi } from './githubApi';
+import { gitHubConnectErrorMessage } from './errorMessages';
 
 function GitHubConnection({ userId }) {
   const [connection, setConnection] = useState(null);
@@ -8,7 +9,7 @@ function GitHubConnection({ userId }) {
   const [error, setError] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('github') === 'error'
-      ? `GitHub connection failed (${params.get('reason') || 'unknown error'}).`
+      ? gitHubConnectErrorMessage(params.get('reason'))
       : '';
   });
   const [notice, setNotice] = useState(() => {
@@ -106,7 +107,9 @@ function GitHubConnection({ userId }) {
           <div className="github-connect-section">
             <div className="connection-status disconnected" role="status">
               <span className="status-dot" aria-hidden="true" />
-              GitHub not connected
+              {connection?.status === 'INVALID'
+                ? 'GitHub authorization expired. Reconnect GitHub.'
+                : 'GitHub not connected'}
             </div>
             <button
               className="github-connect-button"

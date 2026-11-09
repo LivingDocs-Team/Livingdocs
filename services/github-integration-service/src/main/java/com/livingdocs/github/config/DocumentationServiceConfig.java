@@ -4,6 +4,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.web.client.RestClient;
 
 import java.time.Duration;
@@ -21,8 +22,13 @@ public class DocumentationServiceConfig {
     @Bean("aiServiceRestClient")
     RestClient aiServiceRestClient(
             RestClient.Builder builder,
-            @Value("${services.ai-service.base-url:http://localhost:8001}") String baseUrl) {
-        return builder.clone().baseUrl(baseUrl).requestFactory(requestFactory()).build();
+            @Value("${services.ai-service.base-url:http://localhost:8001}") String baseUrl,
+            @Value("${security.internal-api-secret:}") String internalSecret) {
+        RestClient.Builder client = builder.clone().baseUrl(baseUrl).requestFactory(requestFactory());
+        if (internalSecret != null && !internalSecret.isBlank()) {
+            client.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + internalSecret);
+        }
+        return client.build();
     }
 
     private SimpleClientHttpRequestFactory requestFactory() {
