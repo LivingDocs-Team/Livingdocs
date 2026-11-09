@@ -1,12 +1,12 @@
 package com.cnpm.backend.controller;
 
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
+import com.cnpm.backend.repository.RoleRepository;
+import com.cnpm.backend.repository.WorkspaceMembershipRepository;
+import com.cnpm.backend.repository.WorkspaceRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.cnpm.backend.entity.User;
 import com.cnpm.backend.repository.UserRepository;
-import com.cnpm.backend.repository.RoleRepository;
-import com.cnpm.backend.repository.WorkspaceRepository;
-import com.cnpm.backend.repository.WorkspaceMembershipRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,6 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.List;
@@ -162,7 +163,13 @@ public class GitHubIntegrationBffController {
                     String value = response.getHeaders().getFirst(name);
                     if (value != null) headers.set(name, value);
                 }
-                byte[] responseBody = response.getBody().readAllBytes();
+                byte[] responseBody;
+                try {
+                    responseBody = response.getBody().readAllBytes();
+                } catch (IOException e) {
+                    throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                            "Failed to read response from GitHub Integration.");
+                }
                 return ResponseEntity.status(response.getStatusCode()).headers(headers).body(responseBody);
             });
         } catch (org.springframework.web.client.RestClientException exception) {
@@ -266,8 +273,8 @@ public class GitHubIntegrationBffController {
                     throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
                             "Repository response has no workspace identity.");
                 }
-                byte[] body = response.getBody().readAllBytes();
                 try {
+                    byte[] body = response.getBody().readAllBytes();
                     JsonNode json = objectMapper.readTree(body);
                     JsonNode workspaceId = json == null ? null : json.get("workspaceId");
                     if (workspaceId == null || !workspaceId.isTextual()
@@ -276,7 +283,7 @@ public class GitHubIntegrationBffController {
                                 "Repository response has no workspace identity.");
                     }
                     return workspaceId.textValue();
-                } catch (tools.jackson.core.JacksonException exception) {
+                } catch (IOException e) {
                     throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
                             "Repository response is invalid.");
                 }
@@ -304,7 +311,7 @@ public class GitHubIntegrationBffController {
         final JsonNode request;
         try {
             request = objectMapper.readTree(body);
-        } catch (tools.jackson.core.JacksonException exception) {
+        } catch (IOException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The reassign request is invalid.");
         }
         JsonNode targetIdNode = request == null ? null : request.get("targetStaffUserId");

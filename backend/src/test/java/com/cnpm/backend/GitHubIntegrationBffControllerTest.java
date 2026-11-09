@@ -1,5 +1,11 @@
 package com.cnpm.backend;
 
+import com.cnpm.backend.entity.Workspace;                  
+import com.cnpm.backend.repository.WorkspaceRepository;
+import com.cnpm.backend.entity.Permission;
+import com.cnpm.backend.entity.Role;
+import com.cnpm.backend.repository.RoleRepository;
+import com.cnpm.backend.repository.WorkspaceMembershipRepository;
 import com.cnpm.backend.controller.GitHubIntegrationBffController;
 import com.cnpm.backend.entity.User;
 import com.cnpm.backend.repository.UserRepository;

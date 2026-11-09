@@ -34,8 +34,6 @@ import com.livingdocs.github.service.DocumentWorkflowService;
 import com.livingdocs.github.service.DocumentationGenerationService;
 
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.Positive;
-import jakarta.validation.constraints.Size;
 
 @RestController
 @Validated

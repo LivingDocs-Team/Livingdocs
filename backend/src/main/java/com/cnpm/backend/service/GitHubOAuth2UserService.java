@@ -1,11 +1,10 @@
-
 package com.cnpm.backend.service;
 
 import java.util.Map;
 import java.util.UUID;
 
-import org.springframework.security.authentication.AuthenticationServiceException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.authentication.AuthenticationServiceException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
@@ -15,56 +14,55 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.cnpm.backend.entity.User;
-import com.cnpm.backend.repository.UserRepository;
 import com.cnpm.backend.repository.RoleRepository;
+import com.cnpm.backend.repository.UserRepository;
 
 @Service
 public class GitHubOAuth2UserService extends DefaultOAuth2UserService {
 
     private final UserRepository userRepository;
-private final PasswordEncoder passwordEncoder;
+    private final PasswordEncoder passwordEncoder;
     private final RoleRepository roleRepository;
 
     @Autowired
-public GitHubOAuth2UserService(
-        UserRepository userRepository,
-        PasswordEncoder passwordEncoder,
-        RoleRepository roleRepository) {
-    this.userRepository = userRepository;
-    this.passwordEncoder = passwordEncoder;
-    this.roleRepository = roleRepository;
-}
+    public GitHubOAuth2UserService(
+            UserRepository userRepository,
+            PasswordEncoder passwordEncoder,
+            RoleRepository roleRepository) {
+        this.userRepository = userRepository;
+        this.passwordEncoder = passwordEncoder;
+        this.roleRepository = roleRepository;
+    }
 
-public GitHubOAuth2UserService(UserRepository userRepository, PasswordEncoder passwordEncoder) {
-    this(userRepository, passwordEncoder, null);
-}
+    public GitHubOAuth2UserService(UserRepository userRepository, PasswordEncoder passwordEncoder) {
+        this(userRepository, passwordEncoder, null);
+    }
 
     @Override
     @Transactional
     public OAuth2User loadUser(OAuth2UserRequest request)
             throws OAuth2AuthenticationException {
 
-           OAuth2User githubUser = super.loadUser(request);
+        OAuth2User githubUser = super.loadUser(request);
 
-           Map<String, Object> attributes = githubUser.getAttributes();
-           Object idAttribute = attributes.get("id");
+        Map<String, Object> attributes = githubUser.getAttributes();
+        Object idAttribute = attributes.get("id");
 
-           if (idAttribute == null) {
-              throw new AuthenticationServiceException(
-                      "GitHub account ID is missing");
-           }
+        if (idAttribute == null) {
+            throw new AuthenticationServiceException(
+                    "GitHub account ID is missing");
+        }
 
-           String githubId = String.valueOf(idAttribute);
+        String githubId = String.valueOf(idAttribute);
 
-    // Tìm hoặc tạo user trong CSDL (bỏ "User user =")
-           userRepository.findByGithubId(githubId)
-                   .orElseGet(() -> createGitHubUser(attributes, githubId));
+        userRepository.findByGithubId(githubId)
+                .orElseGet(() -> createGitHubUser(attributes, githubId));
 
-            return new org.springframework.security.oauth2.core.user.DefaultOAuth2User(
-                    githubUser.getAuthorities(),
-                    attributes,
-                    "id");
-}
+        return new org.springframework.security.oauth2.core.user.DefaultOAuth2User(
+                githubUser.getAuthorities(),
+                attributes,
+                "id");
+    }
 
     private User createGitHubUser(
             Map<String, Object> attributes,
@@ -78,15 +76,15 @@ public GitHubOAuth2UserService(UserRepository userRepository, PasswordEncoder pa
                     "GitHub username is missing");
         }
 
-String[] nameParts = (name == null || name.isBlank())
-        ? new String[] { githubLogin, "GitHub" }
-        : name.trim().split("\\s+", 2);
+        String[] nameParts = (name == null || name.isBlank())
+                ? new String[] { githubLogin, "GitHub" }
+                : name.trim().split("\\s+", 2);
 
-String firstName = nameParts[0];
-String lastName = nameParts.length > 1
-        && !nameParts[1].isBlank()
-                ? nameParts[1]
-                : "GitHub";
+        String firstName = nameParts[0];
+        String lastName = nameParts.length > 1
+                && !nameParts[1].isBlank()
+                        ? nameParts[1]
+                        : "GitHub";
 
         String email = stringValue(attributes.get("email"));
 
@@ -102,13 +100,13 @@ String lastName = nameParts.length > 1
 
         String username = uniqueUsername(githubLogin, githubId);
 
-User newUser = new User(
-        email,
-        passwordEncoder.encode(UUID.randomUUID().toString()),
-        firstName,
-        lastName,
-        "DEVELOPER",
-        true);
+        User newUser = new User(
+                email,
+                passwordEncoder.encode(UUID.randomUUID().toString()),
+                firstName,
+                lastName,
+                "DEVELOPER",
+                true);
 
         newUser.setUsername(username);
         newUser.setGithubId(githubId);
