@@ -23,6 +23,9 @@ public class DocumentWorkflowAudit {
     @Column(name = "actor_user_id", nullable = false, length = 100)
     private String actorUserId;
 
+    @Column(name = "actor_role", length = 40)
+    private String actorRole;
+
     @Column(name = "previous_reviewer_user_id", length = 100)
     private String previousReviewerUserId;
 
@@ -48,14 +51,22 @@ public class DocumentWorkflowAudit {
 
     public DocumentWorkflowAudit(UUID workflowId, String actorUserId, String action,
             String previousStatus, String newStatus, String comment) {
-        this(workflowId, actorUserId, action, previousStatus, newStatus, comment, null, null);
+        this(workflowId, actorUserId, action, previousStatus, newStatus, comment, null, null, null);
     }
 
     public DocumentWorkflowAudit(UUID workflowId, String actorUserId, String action,
             String previousStatus, String newStatus, String comment,
             String previousReviewerUserId, String newReviewerUserId) {
+        this(workflowId, actorUserId, action, previousStatus, newStatus, comment,
+                previousReviewerUserId, newReviewerUserId, null);
+    }
+
+    public DocumentWorkflowAudit(UUID workflowId, String actorUserId, String action,
+            String previousStatus, String newStatus, String comment,
+            String previousReviewerUserId, String newReviewerUserId, String actorRole) {
         this.workflowId = workflowId;
         this.actorUserId = actorUserId;
+        this.actorRole = actorRole;
         this.action = action;
         this.previousStatus = previousStatus;
         this.newStatus = newStatus;
@@ -68,6 +79,7 @@ public class DocumentWorkflowAudit {
     public UUID getId() { return id; }
     public UUID getWorkflowId() { return workflowId; }
     public String getActorUserId() { return actorUserId; }
+    public String getActorRole() { return actorRole; }
     public String getPreviousReviewerUserId() { return previousReviewerUserId; }
     public String getNewReviewerUserId() { return newReviewerUserId; }
     public String getAction() { return action; }

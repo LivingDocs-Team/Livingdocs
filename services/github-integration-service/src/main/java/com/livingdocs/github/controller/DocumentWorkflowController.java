@@ -90,6 +90,13 @@ public class DocumentWorkflowController {
         return workflowService.managerQueue(parse(authorities), page, size);
     }
 
+    @GetMapping("/document-workflows/history-accessible")
+    public PageResponse<WorkflowResponse> historyAccessible(@RequestHeader(USER_HEADER) String userId,
+            @RequestHeader(AUTHORITIES_HEADER) String authorities,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        return workflowService.historyAccessible(userId, parse(authorities), page, size);
+    }
+
     @GetMapping("/document-workflows/{id}")
     public WorkflowResponse get(@RequestHeader(USER_HEADER) String userId,
             @RequestHeader(AUTHORITIES_HEADER) String authorities, @PathVariable UUID id) {
