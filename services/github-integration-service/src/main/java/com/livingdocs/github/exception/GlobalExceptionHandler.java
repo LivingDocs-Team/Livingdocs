@@ -8,6 +8,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.dao.PessimisticLockingFailureException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
@@ -26,6 +29,18 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ErrorResponse> handleApi(ApiException e) {
         return build(e.getStatus(), e.getCode(), e.getMessage());
+    }
+
+    @ExceptionHandler({OptimisticLockingFailureException.class, PessimisticLockingFailureException.class})
+    public ResponseEntity<ErrorResponse> handleWorkflowConcurrency(Exception e) {
+        return build(HttpStatus.CONFLICT, "WORKFLOW_CONFLICT",
+                "The workflow changed concurrently. Reload it and retry the action.");
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ErrorResponse> handleConstraintConflict(DataIntegrityViolationException e) {
+        return build(HttpStatus.CONFLICT, "WORKFLOW_CONFLICT",
+                "The document or workflow already exists or changed concurrently.");
     }
 
     /** Lỗi đồng bộ repository (LD-63): mã HTTP lấy theo SyncErrorCode, kèm Retry-After khi bị rate limit. */
