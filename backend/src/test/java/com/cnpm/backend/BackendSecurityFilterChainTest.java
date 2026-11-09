@@ -11,17 +11,17 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -63,9 +63,6 @@ class BackendSecurityFilterChainTest {
     private CustomUserDetailsService userDetailsService;
 
     @Autowired
-    private UserRepository userRepository;
-
-    @Autowired
     private PasswordEncoder passwordEncoder;
 
     @BeforeEach
@@ -74,13 +71,21 @@ class BackendSecurityFilterChainTest {
                 .password(passwordEncoder.encode(PASSWORD))
                 .roles("DEVELOPER")
                 .build();
+
         when(userDetailsService.loadUserByUsername(EMAIL)).thenReturn(details);
 
-        User user = new User(EMAIL, "test-encoded-password", "Bff", "User", "DEVELOPER", true);
+        User user = new User(EMAIL, "test-encoded-password", "First", "Last", "DEVELOPER", true);
         user.setUsername("bff-user");
         ReflectionTestUtils.setField(user, "id", 73L);
+
         when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
     }
+
+    @MockitoBean
+    private UserRepository userRepository;
+
+    @MockitoBean
+    private GitHubOAuth2UserService gitHubOAuth2UserService;
 
     @Test
     void missingOrExpiredSessionCannotCallBffEvenWithForgedIdentity() throws Exception {

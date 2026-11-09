@@ -34,26 +34,27 @@ public GitHubOAuth2UserService(
     public OAuth2User loadUser(OAuth2UserRequest request)
             throws OAuth2AuthenticationException {
 
-        OAuth2User githubUser = super.loadUser(request);
+           OAuth2User githubUser = super.loadUser(request);
 
-        Map<String, Object> attributes = githubUser.getAttributes();
-        Object idAttribute = attributes.get("id");
+           Map<String, Object> attributes = githubUser.getAttributes();
+           Object idAttribute = attributes.get("id");
 
-        if (idAttribute == null) {
-            throw new AuthenticationServiceException(
-                    "GitHub account ID is missing");
-        }
+           if (idAttribute == null) {
+              throw new AuthenticationServiceException(
+                      "GitHub account ID is missing");
+           }
 
-        String githubId = String.valueOf(idAttribute);
+           String githubId = String.valueOf(idAttribute);
 
-        User user = userRepository.findByGithubId(githubId)
-                .orElseGet(() -> createGitHubUser(attributes, githubId));
+    // Tìm hoặc tạo user trong CSDL (bỏ "User user =")
+           userRepository.findByGithubId(githubId)
+                   .orElseGet(() -> createGitHubUser(attributes, githubId));
 
-        return new org.springframework.security.oauth2.core.user.DefaultOAuth2User(
-                githubUser.getAuthorities(),
-                attributes,
-                "id");
-    }
+            return new org.springframework.security.oauth2.core.user.DefaultOAuth2User(
+                    githubUser.getAuthorities(),
+                    attributes,
+                    "id");
+}
 
     private User createGitHubUser(
             Map<String, Object> attributes,

@@ -3,7 +3,6 @@ package com.cnpm.backend;
 import com.cnpm.backend.controller.GitHubIntegrationBffController;
 import com.cnpm.backend.entity.User;
 import com.cnpm.backend.repository.UserRepository;
-import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
