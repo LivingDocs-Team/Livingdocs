@@ -111,7 +111,7 @@ Các bước:
 1. Lấy file thay đổi từ GitHub: `GET /repos/{owner}/{repo}/commits/{sha}` hoặc `GET /repos/{owner}/{repo}/pulls/{number}/files`. Chỉ giữ file Java/Python theo đúng quy tắc chọn file khi đồng bộ (`LanguageDetector`, `PathFilter`).
 2. Tải nội dung file sau thay đổi (blob). Nội dung trước thay đổi được dựng lại từ nội dung sau và `patch` của GitHub (`change/UnifiedDiff`), nên không cần gọi thêm GitHub.
 3. Gửi nội dung trước và sau sang Code Analyzer (`POST /api/v1/analyze-repo`), so khoảng dòng `lineno`–`end_lineno` của từng class, method, function, endpoint với các dòng được thêm/xoá trong diff (`change/ChangedEntityDetector`): entity chỉ có ở bản sau là `ADDED`, có ở cả hai bản là `MODIFIED`, chỉ có ở bản trước là `REMOVED`.
-4. Lưu thành **source change** trạng thái `PENDING` (bảng `source_changes`, `source_change_files`, `source_change_entities`, migration `V3`). Commit / Pull Request không có file mã nguồn nào thay đổi thì không lưu.
+4. Lưu thành **source change** trạng thái `PENDING` (bảng `source_changes`, `source_change_files`, `source_change_entities`, migration `V5`). Commit / Pull Request không có file mã nguồn nào thay đổi thì không lưu.
 
 Lỗi GitHub hoặc Code Analyzer được lưu thành `FAILED` kèm `errorCode` (`GITHUB_UNAVAILABLE`, `RATE_LIMITED`, `TOKEN_INVALID`, `ACCESS_DENIED`, `REPOSITORY_NOT_FOUND`, `ANALYZER_UNAVAILABLE`, `GITHUB_NOT_CONNECTED`...). Gọi `POST .../source-changes/{changeId}/retry` để chạy lại.
 
