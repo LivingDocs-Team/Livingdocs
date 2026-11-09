@@ -10,6 +10,7 @@ import GitHubConnection from './GitHubConnection';
 import RepositoryManagement from './RepositoryManagement';
 import DocumentationManagement from './DocumentationManagement';
 import DocumentationSearch from './DocumentationSearch';
+import DocumentationDrift from './DocumentationDrift';
 
 function App() {
   const [page, setPage] = useState('login');
@@ -252,6 +253,18 @@ function App() {
           </>
         );
 
+      case 'drift':
+        return (
+          <>
+            <DocumentationDrift userId={userId} />
+            <p className="switch-page">
+              <button type="button" onClick={() => setPage('documentation')}>
+                Back to Documentation Management
+              </button>
+            </p>
+          </>
+        );
+
       case 'login':
       default:
         return (
@@ -397,6 +410,18 @@ function App() {
                   </span>
                   <span className="quick-access-link">Open feature ↗</span>
                 </button>
+                <button
+                  className="quick-access-card"
+                  type="button"
+                  onClick={() => setPage('drift')}
+                >
+                  <span className="quick-access-icon" aria-hidden="true">⚠</span>
+                  <span className="quick-access-title">Documentation Drift</span>
+                  <span className="quick-access-description">
+                    Check a pull request for outdated documentation, ranked by severity.
+                  </span>
+                  <span className="quick-access-link">Open feature →</span>
+                </button>
               </div>
             </section>
           </main>
@@ -427,6 +452,10 @@ function App() {
 
             <button type="button" onClick={() => setPage('search')}>
               Documentation Search
+            </button>
+
+            <button type="button" onClick={() => setPage('drift')}>
+              Documentation Drift
             </button>
 
             <button type="button" onClick={() => setPage('profile')}>

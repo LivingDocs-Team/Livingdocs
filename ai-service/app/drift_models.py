@@ -6,6 +6,8 @@
 - LD-149  evidence behind every finding: code diff, documentation passage, commit, ticket
 - LD-151  finer classification: a `kind` inside each drift type, `breaking`, and the rules that
           fired (LD-152 referential, LD-153 signature, LD-154 semantic)
+- LD-156  severity assessment: the rules behind each level, a score, the evidence for each rule,
+          the level of each affected document and of the whole report
 """
 from datetime import datetime
 from enum import Enum
@@ -208,6 +210,8 @@ class AffectedDocument(BaseModel):
     """Changed source file this section was generated from (saved documents only)."""
     reasons: List[str] = Field(default_factory=list)
     matches: List[DocMatch] = Field(default_factory=list)
+    severity: Optional["Severity"] = None    # LD-158: most severe finding in this part
+    findings: int = 0
 
 
 # ---------- Findings (LD-147) and evidence (LD-149) ----------
@@ -267,6 +271,29 @@ class DriftEvidence(BaseModel):
     ticket: Optional[str] = None
 
 
+class SeverityAdjustment(BaseModel):
+    """LD-157: one rule that raised or lowered the level, with the evidence that proves it."""
+    rule: str                          # id in app.drift_severity.RULES
+    delta: int                         # +1 / -1 level
+    label: str
+    reason: str
+    evidence: List[str] = Field(default_factory=list)   # DriftEvidence ids (X1, D2, ...)
+
+
+class SeverityAssessment(BaseModel):
+    """LD-156: why a finding has its severity."""
+    level: Severity
+    score: int                         # 0-100, inside the level's band (LD-158)
+    base_rule: str
+    base_level: Severity
+    base_label: str
+    base_reason: str
+    base_evidence: List[str] = Field(default_factory=list)
+    adjustments: List[SeverityAdjustment] = Field(default_factory=list)
+    capped_at: Optional[Severity] = None
+    summary: str = ""                  # one line: "High: breaking change (medium), ... (+1)."
+
+
 class DriftFinding(BaseModel):
     id: str                            # F1, F2, ...
     type: DriftType
@@ -287,7 +314,7 @@ class DriftFinding(BaseModel):
     evidence: List[DriftEvidence] = Field(default_factory=list)
     factors: Dict[str, float] = Field(default_factory=dict)
     rules: List[str] = Field(default_factory=list)   # LD-151: classification rules that applied
-
+    severity_assessment: Optional[SeverityAssessment] = None   # LD-156
 
 class DriftStatus(str, Enum):
     no_drift = "no_drift"
@@ -301,6 +328,8 @@ class DriftSummary(BaseModel):
     by_kind: Dict[str, int] = Field(default_factory=dict)       # LD-151, only kinds found
     breaking: int = 0                                          # findings with breaking = True
     highest_severity: Optional[Severity] = None
+    severity_score: int = 0                                    # LD-158: highest finding score
+    recommendation: Optional[str] = None                       # action for highest_severity
     affected_documents: int = 0
     changed_files: int = 0
     entity_changes: int = 0
@@ -331,3 +360,6 @@ class DriftReportSummary(BaseModel):
     head_sha: Optional[str] = None
     summary: DriftSummary
     created_at: datetime
+
+
+AffectedDocument.model_rebuild()
