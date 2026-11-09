@@ -147,7 +147,7 @@ public class RepositorySyncService {
         return findOwned(userId, repositoryId, null, "OWNER");
     }
 
-    private ConnectedRepository findOwned(String userId, UUID repositoryId, String verifiedWorkspaceId) {
+    protected ConnectedRepository findOwned(String userId, UUID repositoryId, String verifiedWorkspaceId) {
         return findOwned(userId, repositoryId, verifiedWorkspaceId, "OWNER");
     }
 

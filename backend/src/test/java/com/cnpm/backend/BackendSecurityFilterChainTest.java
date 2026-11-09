@@ -95,6 +95,9 @@ class BackendSecurityFilterChainTest {
     @MockitoBean
     private GitHubOAuth2UserService gitHubOAuth2UserService;
 
+    @Autowired
+    private RoleRepository roleRepository;
+
     @Test
     void missingOrExpiredSessionCannotCallBffEvenWithForgedIdentity() throws Exception {
         mvc.perform(get("/api/github/connection")

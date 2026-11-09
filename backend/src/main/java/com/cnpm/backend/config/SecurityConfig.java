@@ -143,9 +143,7 @@ public class SecurityConfig {
                     .userService(gitHubOAuth2UserService)
                 )
                 .defaultSuccessUrl("/api/auth/oauth2/success", true)
-            );
-                .failureUrl("/?oauth=error")
-            );
+                .failureUrl("/?oauth=error"));
 
         http.addFilterBefore(accountStatusFilter, AuthorizationFilter.class);
 
