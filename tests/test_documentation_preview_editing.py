@@ -110,6 +110,11 @@ class FakeApi:
                 "id": "default", "name": "Standard technical docs", "description": "",
                 "instructions": "", "sections": ["Overview"], "built_in": True,
             }])
+        if (request.method, path) == ("GET", "/api/document-workflows/history-accessible"):
+            return route.fulfill(status=200, json={
+                "content": [], "page": 0, "size": 20, "totalElements": 0,
+                "totalPages": 0, "first": True, "last": True,
+            })
         if (request.method, path) == ("POST", f"/api/repositories/{REPOSITORY_ID}/documentation/generate"):
             if self.generate_error:
                 status, body = self.generate_error
@@ -153,6 +158,16 @@ def open_generated_document(page: Page, markdown: str = GENERATED_MARKDOWN) -> F
     generate(page)
     expect(page.get_by_role("heading", name="Generated Documentation")).to_be_visible(timeout=10_000)
     return api
+
+
+def test_approval_history_fixture_returns_empty_page_without_error(page: Page):
+    api = FakeApi()
+    open_documentation_page(page, api)
+
+    expect(page.get_by_role("heading", name="Approval History")).to_be_visible()
+    expect(page.get_by_role("heading", name="No accessible document workflows")).to_be_visible()
+    expect(page.get_by_role("alert")).to_have_count(0)
+    assert ("GET", "/api/document-workflows/history-accessible", None) in api.requests
 
 
 def editor(page: Page):
