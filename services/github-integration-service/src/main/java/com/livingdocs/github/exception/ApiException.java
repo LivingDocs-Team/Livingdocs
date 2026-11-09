@@ -30,6 +30,10 @@ public class ApiException extends RuntimeException {
         return new ApiException(HttpStatus.FORBIDDEN, "FORBIDDEN", message);
     }
 
+    public static ApiException repositoryConflict(String message) {
+        return new ApiException(HttpStatus.CONFLICT, "REPOSITORY_CONFLICT", message);
+    }
+
     public static ApiException githubNotConnected() {
         return new ApiException(HttpStatus.CONFLICT, "GITHUB_NOT_CONNECTED",
                 "Bạn chưa kết nối GitHub hoặc kết nối đã bị ngắt. Hãy kết nối lại.");

@@ -26,6 +26,7 @@ import com.livingdocs.github.dto.WorkflowDtos.ManagerDecisionRequest;
 import com.livingdocs.github.dto.WorkflowDtos.PageResponse;
 import com.livingdocs.github.dto.WorkflowDtos.ReassignRequest;
 import com.livingdocs.github.dto.WorkflowDtos.SaveGeneratedDocumentRequest;
+import com.livingdocs.github.dto.WorkflowDtos.RollbackRequest;
 import com.livingdocs.github.dto.WorkflowDtos.StaffReviewRequest;
 import com.livingdocs.github.dto.WorkflowDtos.WorkflowResponse;
 import com.livingdocs.github.entity.ManagerDecision;
@@ -33,6 +34,8 @@ import com.livingdocs.github.service.DocumentWorkflowService;
 import com.livingdocs.github.service.DocumentationGenerationService;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 
 @RestController
 @Validated
@@ -90,6 +93,13 @@ public class DocumentWorkflowController {
         return workflowService.managerQueue(parse(authorities), page, size);
     }
 
+    @GetMapping("/document-workflows/history-accessible")
+    public PageResponse<WorkflowResponse> historyAccessible(@RequestHeader(USER_HEADER) String userId,
+            @RequestHeader(AUTHORITIES_HEADER) String authorities,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        return workflowService.historyAccessible(userId, parse(authorities), page, size);
+    }
+
     @GetMapping("/document-workflows/{id}")
     public WorkflowResponse get(@RequestHeader(USER_HEADER) String userId,
             @RequestHeader(AUTHORITIES_HEADER) String authorities, @PathVariable UUID id) {
@@ -100,6 +110,13 @@ public class DocumentWorkflowController {
     public ContentResponse content(@RequestHeader(USER_HEADER) String userId,
             @RequestHeader(AUTHORITIES_HEADER) String authorities, @PathVariable UUID id) {
         return workflowService.content(userId, parse(authorities), id);
+    }
+    @GetMapping("/document-workflows/{id}/evidence")
+    public com.fasterxml.jackson.databind.JsonNode evidence(
+        @RequestHeader(USER_HEADER) String userId,
+        @RequestHeader(AUTHORITIES_HEADER) String authorities,
+        @PathVariable UUID id) {
+    return workflowService.evidence(userId, parse(authorities), id);
     }
 
     @GetMapping("/document-workflows/{id}/review-evidence")
@@ -165,7 +182,6 @@ public class DocumentWorkflowController {
             @Valid @RequestBody EditDocumentRequest request) {
         return workflowService.editAfterChanges(userId, parse(authorities), id, request);
     }
-
     @PostMapping("/document-workflows/{id}/approve")
     public WorkflowResponse approve(@RequestHeader(USER_HEADER) String userId,
             @RequestHeader(AUTHORITIES_HEADER) String authorities, @PathVariable UUID id,
@@ -181,7 +197,21 @@ public class DocumentWorkflowController {
         return workflowService.decide(userId, parse(authorities), id, ManagerDecision.REJECTED,
                 request == null ? null : request.comment());
     }
+    @PostMapping("/document-workflows/{id}/rollback")
+    public WorkflowResponse rollback(
+        @RequestHeader(USER_HEADER) String userId,
+        @RequestHeader(AUTHORITIES_HEADER) String authorities,
+        @PathVariable UUID id,
+        @Valid @RequestBody RollbackRequest request) {
 
+    return workflowService.rollback(
+            userId,
+            parse(authorities),
+            id,
+            request.sourceVersion(),
+            request.reason()
+    );
+}
     private Set<String> parse(String value) {
         if (value == null || value.isBlank()) return Set.of();
         return Arrays.stream(value.split(",")).map(String::trim).filter(s -> !s.isEmpty())

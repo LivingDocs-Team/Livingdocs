@@ -43,18 +43,26 @@ public class RoleCatalogInitializer implements ApplicationRunner {
             Map.entry("DOCUMENT_APPROVAL_QUEUE_VIEW", "View documents awaiting manager approval"),
             Map.entry("DOCUMENT_APPROVE", "Approve a business document"),
             Map.entry("DOCUMENT_REJECT", "Reject a business document"),
+            Map.entry("DOCUMENT_ROLLBACK", "Rollback an approved document to a previous version"),
             Map.entry("DOCUMENT_TECHNICAL_REVIEW", "Perform technical review of a document"));
 
     // Business workflow grants are enforced by the GitHub Integration document-workflow API.
     // TECHNICAL_LEAD is catalogued for the planned technical-review endpoint, which is not yet present.
     private static final Map<String, Set<String>> ROLE_PERMISSIONS = Map.of(
-            "DEVELOPER", Set.of("DOCUMENT_VIEW", "DOCUMENT_CREATE", "DOCUMENT_UPDATE", "DOCUMENT_SUBMIT"),
-            "STAFF", Set.of("DOCUMENT_REVIEW_QUEUE_VIEW", "DOCUMENT_CLAIM", "DOCUMENT_RELEASE", "DOCUMENT_REVIEW"),
-            "MANAGER", Set.of("DOCUMENT_APPROVAL_QUEUE_VIEW", "DOCUMENT_APPROVE", "DOCUMENT_REJECT"),
-            "TECHNICAL_LEAD", Set.of("DOCUMENT_TECHNICAL_REVIEW"));
-    private static final Set<String> ADMIN_DEFAULT_PERMISSIONS = PERMISSIONS.keySet().stream()
-            .filter(code -> !code.equals("DOCUMENT_APPROVE") && !code.equals("DOCUMENT_REJECT"))
-            .collect(Collectors.toUnmodifiableSet());
+        "DEVELOPER", Set.of("DOCUMENT_VIEW", "DOCUMENT_CREATE", "DOCUMENT_UPDATE", "DOCUMENT_SUBMIT"),
+        "STAFF", Set.of("DOCUMENT_REVIEW_QUEUE_VIEW", "DOCUMENT_CLAIM", "DOCUMENT_RELEASE", "DOCUMENT_REVIEW"),
+        "MANAGER", Set.of(
+                "DOCUMENT_APPROVAL_QUEUE_VIEW",
+                "DOCUMENT_APPROVE",
+                "DOCUMENT_REJECT",
+                "DOCUMENT_ROLLBACK"
+        ),
+        "TECHNICAL_LEAD", Set.of("DOCUMENT_TECHNICAL_REVIEW"));
+   private static final Set<String> ADMIN_DEFAULT_PERMISSIONS = PERMISSIONS.keySet().stream()
+        .filter(code -> !code.equals("DOCUMENT_APPROVE")
+                && !code.equals("DOCUMENT_REJECT")
+                && !code.equals("DOCUMENT_ROLLBACK"))
+        .collect(Collectors.toUnmodifiableSet());
 
     private final RoleRepository roles;
     private final PermissionRepository permissions;

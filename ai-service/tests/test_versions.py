@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.jobs import JobOutput  # noqa: E402
 from app.models import (
     ConfidenceLevel,
+    EntityReport,
     Evidence,
     EvidenceKind,
     FileReport,
@@ -136,10 +137,50 @@ def test_create_document_errors():
 def test_documents_survive_restart(tmp_path):
     path = tmp_path / "documents.json"
     store = DocumentStore(str(path))
-    out = JobOutput(scope=Scope.repository, target="acme", template_id="default",
-                    template_name="Standard technical docs", output_language="en",
-                    sections=[("a.py", "# a.py\n\nA.\n", "offline", 0.5)],
-                    skipped=[("b.py", "bad")], confidence=0.5)
+    evidence_report = JobReport(
+        job_id="job1",
+        template_id="default",
+        template_name="Standard technical docs",
+        confidence=0.5,
+        method="test",
+        files=[
+            FileReport(
+                path="a.py",
+                status=FileResultStatus.offline,
+                entities=[
+                    EntityReport(
+                        kind="class",
+                        name="Example",
+                        confidence=0.5,
+                        level=ConfidenceLevel.low,
+                        evidence=[
+                            Evidence(
+                                id="E1",
+                                kind=EvidenceKind.source,
+                                path="a.py",
+                                name="Example",
+                                line_start=1,
+                                line_end=3,
+                                excerpt="class Example:",
+                            )
+                        ],
+                    )
+                ],
+            )
+        ],
+    )
+
+    out = JobOutput(
+        scope=Scope.repository,
+        target="acme",
+        template_id="default",
+        template_name="Standard technical docs",
+        output_language="en",
+        sections=[("a.py", "# a.py\n\nA.\n", "offline", 0.5)],
+        skipped=[("b.py", "bad")],
+        confidence=0.5,
+        evidence_report=evidence_report,
+    )
     doc = store.create_from_job("job1", out, actor="linh")
 
     again = DocumentStore(str(path))
@@ -147,6 +188,12 @@ def test_documents_survive_restart(tmp_path):
     assert d.current_version == 1 and d.target == "acme"
     v = again.version(doc.id)
     assert "# a.py" in v.content and [s.path for s in v.skipped] == ["b.py"]
+    assert v.evidence_report is not None
+    assert v.evidence_report.job_id == "job1"
+    evidence = v.evidence_report.files[0].entities[0].evidence[0]
+    assert evidence.id == "E1"
+    assert evidence.path == "a.py"
+    assert evidence.line_start == 1
     assert [e.action.value for e in again.history(doc.id)] == ["created"]
 
     path.write_text("{not json", encoding="utf-8")
@@ -304,6 +351,7 @@ def test_document_versions_support_repeated_changes_and_final_decision():
     assert persisted.pending_version is None
     assert store.version(doc.id).status.value == "accepted"
     assert store.history(doc.id)[-1].actor == "84"
+
 def test_legacy_job_report_without_template_snapshot_remains_valid():
     report = JobReport(
         job_id="legacy-job",
@@ -478,3 +526,138 @@ def test_review_evidence_returns_404_when_report_is_missing(monkeypatch):
     )
 
     assert response.status_code == 404
+
+# ---------- Rollback approved document versions ----------
+
+def create_approved_owned_document():
+    store = DocumentStore()
+
+    out = JobOutput(
+        scope=Scope.file,
+        target="a.py",
+        template_id="default",
+        template_name="Standard technical docs",
+        output_language="en",
+        sections=[("a.py", "# Original document\n", "offline", 0.5)],
+    )
+
+    doc = store.create_from_job(
+        "rollback-job",
+        out,
+        actor="73",
+        owner_user_id="73",
+    )
+
+    store.resolve_workflow_version(
+        doc.id,
+        "73",
+        1,
+        "APPROVED",
+        "84",
+        "Initial approval",
+    )
+
+    return store, doc
+
+
+def test_rollback_creates_new_proposal_from_approved_version():
+    store, doc = create_approved_owned_document()
+
+    source = store.version(doc.id, 1)
+
+    rollback = store.rollback_owned(
+        doc.id,
+        "73",
+        1,
+        "manager-9",
+        "Restore the previously approved version",
+    )
+
+    assert rollback.number == 2
+    assert rollback.status.value == "proposed"
+    assert rollback.origin.value == "rollback"
+    assert rollback.restored_from == 1
+    assert rollback.base_version == 1
+    assert rollback.content == source.content
+    assert rollback.created_by == "manager-9"
+
+    persisted = store.get(doc.id)
+    assert persisted.current_version == 1
+    assert persisted.pending_version == 2
+    assert persisted.versions_total == 2
+
+    history = store.history(doc.id)
+    assert history[-1].action.value == "rolled_back"
+    assert history[-1].version == 2
+    assert history[-1].related_version == 1
+    assert history[-1].actor == "manager-9"
+
+
+def test_rollback_rejects_version_that_is_not_approved():
+    store = DocumentStore()
+
+    out = JobOutput(
+        scope=Scope.file,
+        target="a.py",
+        template_id="default",
+        template_name="Standard technical docs",
+        output_language="en",
+        sections=[("a.py", "# Draft document\n", "offline", 0.5)],
+    )
+
+    doc = store.create_from_job(
+        "rollback-job",
+        out,
+        actor="73",
+        owner_user_id="73",
+    )
+
+    with pytest.raises(VersionError) as error:
+        store.rollback_owned(doc.id, "73", 1, "manager-9", "Restore version")
+
+    assert error.value.status == 409
+    assert store.get(doc.id).pending_version == 1
+
+
+def test_rollback_rejects_when_another_version_is_pending():
+    store, doc = create_approved_owned_document()
+
+    proposal = store.edit_owned(
+        doc.id,
+        "73",
+        1,
+        "# New proposed document",
+        "New changes",
+    )
+
+    assert proposal.number == 2
+
+    with pytest.raises(VersionError) as error:
+        store.rollback_owned(doc.id, "73", 1, "manager-9", "Restore version")
+
+    assert error.value.status == 409
+    assert store.get(doc.id).pending_version == 2
+
+
+def test_rollback_retry_returns_existing_matching_proposal():
+    store, doc = create_approved_owned_document()
+
+    first = store.rollback_owned(
+        doc.id,
+        "73",
+        1,
+        "manager-9",
+        "Restore version 1",
+    )
+
+    retry = store.rollback_owned(
+        doc.id,
+        "73",
+        1,
+        "manager-9",
+        "Restore version 1",
+    )
+
+    assert retry.number == first.number
+    assert store.get(doc.id).versions_total == 2
+    assert len(store.history(doc.id)) == 3
