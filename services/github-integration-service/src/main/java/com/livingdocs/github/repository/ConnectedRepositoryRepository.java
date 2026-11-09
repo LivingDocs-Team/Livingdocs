@@ -19,4 +19,13 @@ public interface ConnectedRepositoryRepository extends JpaRepository<ConnectedRe
 
     boolean existsByWorkspaceIdAndConnectionIdAndGithubRepoId(
             String workspaceId, UUID connectionId, Long githubRepoId);
+
+    boolean existsByConnectionIdAndGithubRepoIdAndWorkspaceIdNot(
+            UUID connectionId, Long githubRepoId, String workspaceId);
+
+    List<ConnectedRepository> findAllByConnectionIdAndGithubRepoIdOrderByCreatedAtAsc(
+            UUID connectionId, Long githubRepoId);
+
+    boolean existsByWorkspaceIdAndGithubRepoIdAndIdNot(
+            String workspaceId, Long githubRepoId, UUID id);
 }

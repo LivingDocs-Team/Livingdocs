@@ -1,7 +1,8 @@
 """Generation jobs: run in the background, expose status, progress, warnings and result."""
 import threading
 import uuid
-from typing import Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
 
 from .confidence import METHOD, level_of
 from .generator import DocGenerator, get_generator
@@ -13,11 +14,28 @@ from .retrieval import build_index, retrieve
 from .templates import templates
 
 
+@dataclass
+class JobOutput:
+    """What a completed job produced, kept per file so the result can be saved as a versioned
+    document (LD-189) and later updated file by file (LD-128)."""
+    scope: Scope
+    target: str
+    template_id: str
+    template_name: Optional[str]
+    output_language: str
+    sections: List[Tuple[str, str, str, Optional[float]]] = field(default_factory=list)
+    """(path, markdown, status, confidence) for every documented file, in request order."""
+    skipped: List[Tuple[str, str]] = field(default_factory=list)   # (path, reason)
+    confidence: Optional[float] = None
+    evidence_report: Optional[JobReport] = None
+
+
 class JobStore:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._jobs: Dict[str, Job] = {}
         self._reports: Dict[str, JobReport] = {}
+        self._outputs: Dict[str, JobOutput] = {}
 
     def create(self, req: GenerateRequest, tpl: Optional[Template] = None) -> Job:
         job = Job(id=uuid.uuid4().hex, scope=req.scope, target=req.target,
@@ -37,6 +55,13 @@ class JobStore:
 
     def get_report(self, job_id: str) -> Optional[JobReport]:
         return self._reports.get(job_id)
+
+    def set_output(self, job_id: str, output: JobOutput) -> None:
+        with self._lock:
+            self._outputs[job_id] = output
+
+    def get_output(self, job_id: str) -> Optional[JobOutput]:
+        return self._outputs.get(job_id)
 
     def list(self) -> List[Job]:
         return sorted(self._jobs.values(), key=lambda j: j.created_at, reverse=True)
@@ -84,7 +109,7 @@ def run_job(job_id: str, req: GenerateRequest, generator: Optional[DocGenerator]
         jobs.update(job_id, status=JobStatus.running, message="Generating documentation",
                     template_name=tpl.name, template_sections=list(tpl.sections))
 
-        docs, documented, skipped = [], [], []
+        docs, documented, skipped, sections = [], [], [], []
         for i, f in enumerate(req.files, start=1):
             jobs.update(job_id, message=f"Documenting {f.path}")
             if f.status.value != "ok":
@@ -99,6 +124,7 @@ def run_job(job_id: str, req: GenerateRequest, generator: Optional[DocGenerator]
                     r = gen.document_file(f, tpl, req.output_language, retrieve(index, f))
                     docs.append(r.markdown)
                     documented.append((f.path, r.status.value, r.confidence))
+                    sections.append((f.path, r.markdown, r.status.value, r.confidence))
                     warnings.extend(r.warnings)
                     results.append(FileResult(path=f.path, status=r.status,
                                               message="; ".join(r.warnings) or None,
@@ -120,9 +146,16 @@ def run_job(job_id: str, req: GenerateRequest, generator: Optional[DocGenerator]
         # job confidence = mean over every documented entity (files weighted by size)
         scores = [e.confidence for fr in file_reports for e in fr.entities]
         overall = round(sum(scores) / len(scores), 2) if scores else None
-        jobs.set_report(JobReport(job_id=job_id, template_id=tpl.id, template_name=tpl.name,
-                                  confidence=overall, level=level_of(overall),
-                                  method=METHOD, files=file_reports))
+        report = JobReport(
+            job_id=job_id,
+            template_id=tpl.id,
+            template_name=tpl.name,
+            confidence=overall,
+            level=level_of(overall),
+            method=METHOD,
+            files=file_reports,
+        )
+        jobs.set_report(report)
 
         if req.scope == Scope.file and len(docs) == 1 and not skipped:
             result = docs[0]
@@ -131,6 +164,11 @@ def run_job(job_id: str, req: GenerateRequest, generator: Optional[DocGenerator]
                                        template_name=tpl.name)
             result = "\n\n---\n\n".join([overview, *docs])
 
+        jobs.set_output(job_id, JobOutput(
+            scope=req.scope, target=req.target, template_id=tpl.id, template_name=tpl.name,
+            output_language=req.output_language, sections=sections, skipped=list(skipped),
+            confidence=overall, evidence_report=report,
+        ))
         msg = "Completed" if not warnings else f"Completed with {len(warnings)} warning(s)"
         jobs.update(job_id, status=JobStatus.completed, progress=1.0, message=msg,
                     result=result, file_results=results, warnings=warnings,

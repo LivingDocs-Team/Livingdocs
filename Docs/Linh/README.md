@@ -9,6 +9,7 @@ Các chức năng do Nguyễn Thị Phương Linh thực hiện, mỗi chức n�
 | [FR-AI-03](FR3.md) | Truy xuất mã liên quan và tài liệu có sẵn làm ngữ cảnh | LD-340 |
 | [FR-AI-04](FR4.md) | Bằng chứng xác thực và điểm độ tin cậy | LD-340 |
 | [FR-AI-05](FR5.md) | Mẫu tài liệu (documentation templates) | LD-96 (LD-97 – LD-100) |
+| [FR-AI-06](FR6.md) | Quản lý phiên bản tài liệu (lưu tài liệu, phiên bản, lịch sử) | LD-195 |
 
 Mỗi file gồm: mô tả, danh sách yêu cầu (FR-AI-xx.y), API, dữ liệu, luồng chính, luồng lỗi, quy tắc nghiệp vụ, tiêu chí chấp nhận và test liên quan. Các con số (trọng số, giới hạn, ngưỡng) trong file là giá trị đang dùng trong code, để có thể dựng lại đúng hành vi.
 
@@ -17,6 +18,7 @@ Mỗi file gồm: mô tả, danh sách yêu cầu (FR-AI-xx.y), API, dữ liệu
     Đồng bộ repo (FR-GH-03) → dữ liệu cho phân tích (FR-GH-04) → Code Analyzer (LD-328)
       → FR-AI-01 tạo job → FR-AI-05 chọn mẫu → FR-AI-03 truy xuất ngữ cảnh
       → FR-AI-02 sinh tài liệu từng file → FR-AI-04 bằng chứng + độ tin cậy → kết quả Markdown + báo cáo
+      → FR-AI-06 lưu thành tài liệu, phiên bản 1
 
 ## Quy ước chung
 
@@ -24,6 +26,7 @@ Mỗi file gồm: mô tả, danh sách yêu cầu (FR-AI-xx.y), API, dữ liệu
 - Frontend không gọi trực tiếp: Backend (BFF) → GitHub Integration Service (`/api/repositories/{id}/documentation/generate`, `/api/documentation/...`) → AI Service. Xem `services/github-integration-service/docs/documentation-generation-contract.md`.
 - Định dạng dữ liệu nhận từ Code Analyzer: `ai-service/CONTRACT.md`.
 - Lỗi của AI Service theo FastAPI: `{"detail": "..."}` (404/403/409) hoặc `{"detail": [{"loc": [...], "msg": "..."}]}` (422).
+- Tài liệu và phiên bản lưu ở `DOCUMENTS_FILE` (mặc định `ai-service/data/documents.json`), giống cách lưu mẫu tài liệu (`TEMPLATES_FILE`).
 - Không có `ANTHROPIC_API_KEY` thì service chạy chế độ **offline**: vẫn sinh tài liệu từ dữ liệu phân tích, không gọi AI. Không bao giờ commit API key.
 
 ## Không thuộc yêu cầu chức năng

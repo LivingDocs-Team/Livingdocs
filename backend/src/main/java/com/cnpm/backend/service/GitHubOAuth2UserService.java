@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.security.authentication.AuthenticationServiceException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
@@ -15,18 +16,27 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.cnpm.backend.entity.User;
 import com.cnpm.backend.repository.UserRepository;
+import com.cnpm.backend.repository.RoleRepository;
 
 @Service
 public class GitHubOAuth2UserService extends DefaultOAuth2UserService {
 
     private final UserRepository userRepository;
 private final PasswordEncoder passwordEncoder;
+    private final RoleRepository roleRepository;
 
+    @Autowired
 public GitHubOAuth2UserService(
         UserRepository userRepository,
-        PasswordEncoder passwordEncoder) {
+        PasswordEncoder passwordEncoder,
+        RoleRepository roleRepository) {
     this.userRepository = userRepository;
     this.passwordEncoder = passwordEncoder;
+    this.roleRepository = roleRepository;
+}
+
+public GitHubOAuth2UserService(UserRepository userRepository, PasswordEncoder passwordEncoder) {
+    this(userRepository, passwordEncoder, null);
 }
 
     @Override

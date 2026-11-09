@@ -62,7 +62,7 @@ Lời gọi GitHub (`https://api.github.com`, header `X-GitHub-Api-Version: 2022
 
 ## 4. Dữ liệu
 
-Kết quả đồng bộ (`RepositorySnapshot`) chỉ giữ trong bộ nhớ của service, mỗi repo một bản mới nhất; mất khi service khởi động lại. Database chỉ lưu trạng thái và `last_synced_at` của repo (bảng `repositories`, xem FR-GH-02).
+Kết quả đồng bộ (`RepositorySnapshot`) chỉ giữ trong bộ nhớ của service, mỗi repo một bản mới nhất; mất khi service khởi động lại (khi đó bước sinh tài liệu tự đồng bộ lại, LD-77, xem FR-GH-04). Database chỉ lưu trạng thái và `last_synced_at` của repo (bảng `repositories`, xem FR-GH-02).
 
 | Thành phần | Nội dung |
 |---|---|
@@ -133,5 +133,5 @@ Test nằm trong `services/github-integration-service/src/test/java/com/livingdo
 | `sync/GitHubRepositoryFetcherTest` | 25 | GitHub giả lập bằng Mockito: lấy đúng repo, commit, file đã lọc và sắp xếp, nội dung (bỏ BOM), thống kê, ngôn ngữ, commit gần đây; `includeContent = false`; `maxFiles`; chọn nhánh; các cảnh báo (archived, đổi tên, cây bị cắt, không có file, đường dẫn bất thường, một file lỗi, không có thống kê ngôn ngữ); repo 404, 401, 403, repo bị vô hiệu hoá, rate limit (kể cả giữa lúc tải file), repo rỗng, nhánh không tồn tại, mất mạng, GitHub 5xx, dữ liệu sai bị chặn |
 | `sync/FileSelectionRulesTest` | 5 | Nhận diện ngôn ngữ theo đuôi; bỏ thư viện và thư mục build; giữ code thật trong `src`; chặn đường dẫn bất thường; chuẩn hoá tham số đồng bộ |
 | `client/GitHubClientRepositoryApiTest` | 8 | HTTP server giả: đọc đúng JSON của repo, commit, tree, blob, languages, danh sách commit; giữ mã lỗi 404; nhận diện rate limit, 401; 403 không kèm rate limit thì không phải rate limit; không đưa nội dung lỗi của GitHub vào thông báo; không có token thì không gửi `Authorization` |
-| `RepositorySyncApiTest` | 8 | `@SpringBootTest` + MockMvc + H2: đồng bộ thành công và cập nhật repo; xem lại kết quả và dữ liệu cho phân tích; người khác `403`, repo không có `404`; tham số sai `400` không gọi GitHub; sai nhánh `404` giữ trạng thái; repo bị xoá trên GitHub thì `ERROR`; token bị thu hồi thì kết nối `INVALID`; rate limit `429` kèm `Retry-After`, giữ trạng thái |
+| `RepositorySyncApiTest` | 9 | `@SpringBootTest` + MockMvc + H2: đồng bộ thành công và cập nhật repo; xem lại kết quả và dữ liệu cho phân tích; chưa có kết quả trong bộ nhớ thì bước sinh tài liệu tự đồng bộ lại, đã có thì không gọi GitHub; người khác `403`, repo không có `404`; tham số sai `400` không gọi GitHub; sai nhánh `404` giữ trạng thái; repo bị xoá trên GitHub thì `ERROR`; token bị thu hồi thì kết nối `INVALID`; rate limit `429` kèm `Retry-After`, giữ trạng thái |
 | `sync/GitHubRepositoryFetcherLiveTest` | 1 | Đồng bộ repo thật trên GitHub (25 file); chỉ chạy khi có `GITHUB_LIVE_TEST=true`, CI chạy ở mỗi lần push và pull request |

@@ -13,6 +13,8 @@ import com.livingdocs.github.entity.RepositoryStatus;
 import com.livingdocs.github.exception.GitHubApiException;
 import com.livingdocs.github.repository.ConnectedRepositoryRepository;
 import com.livingdocs.github.repository.GitHubConnectionRepository;
+import com.livingdocs.github.service.RepositorySyncService;
+import com.livingdocs.github.sync.RepositorySnapshot;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -34,8 +36,10 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -67,6 +71,7 @@ class RepositorySyncApiTest {
     @Autowired ObjectMapper json;
     @Autowired GitHubConnectionRepository connectionRepository;
     @Autowired ConnectedRepositoryRepository repositoryRepository;
+    @Autowired RepositorySyncService syncService;
 
     @MockitoBean GitHubClient gitHubClient;
 
@@ -128,6 +133,25 @@ class RepositorySyncApiTest {
                 .andExpect(jsonPath("$.files[0].path").value("src/App.java"))
                 .andExpect(jsonPath("$.files[0].language").value("java"))
                 .andExpect(jsonPath("$.files[0].content").value(APP_CODE));
+    }
+
+    /** LD-77: kết quả đồng bộ chỉ ở trong bộ nhớ; sinh tài liệu khi chưa có kết quả (service vừa khởi động lại) thì tự đồng bộ lại. */
+    @Test
+    void latestOrSync_syncsAgainWhenNoResultInMemory() throws Exception {
+        String user = "sync-again";
+        String repoId = connectAndAddRepo(user);
+        mockShopOnGitHub("main");
+
+        RepositorySnapshot first = syncService.latestOrSync(user, UUID.fromString(repoId));
+        assertThat(first.headCommit().sha()).isEqualTo(HEAD);
+        mvc.perform(get("/api/repositories/" + repoId).header(USER_HEADER, user))
+                .andExpect(jsonPath("$.status").value("CONNECTED"))
+                .andExpect(jsonPath("$.lastSyncedAt").exists());
+
+        // Đã có kết quả trong bộ nhớ thì dùng lại, không gọi GitHub nữa
+        clearInvocations(gitHubClient);
+        assertThat(syncService.latestOrSync(user, UUID.fromString(repoId))).isSameAs(first);
+        verifyNoInteractions(gitHubClient);
     }
 
     @Test

@@ -16,6 +16,7 @@ import org.springframework.web.client.RestClientResponseException;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.livingdocs.github.dto.DocumentationGenerationRequest;
 import com.livingdocs.github.exception.ApiException;
 import com.livingdocs.github.sync.AnalysisInput;
@@ -38,10 +39,20 @@ public class DocumentationGenerationService {
         this.aiServiceClient = aiServiceClient;
     }
 
-    /** Analyze the latest authorized repository snapshot and start an AI documentation job. */
+    /**
+     * Analyze the latest authorized repository snapshot and start an AI documentation job.
+     * The snapshot is kept in memory only: after a restart the repository is synchronized again (LD-77).
+     */
     public JsonNode generate(String userId, UUID repositoryId,
             DocumentationGenerationRequest request) {
-        RepositorySnapshot snapshot = repositorySyncService.latestOrSync(userId, repositoryId);
+        return generate(userId, repositoryId, request, null);
+    }
+
+    public JsonNode generate(String userId, UUID repositoryId,
+            DocumentationGenerationRequest request, String verifiedWorkspaceId) {
+        RepositorySnapshot snapshot = verifiedWorkspaceId == null
+                ? repositorySyncService.latestOrSync(userId, repositoryId)
+                : repositorySyncService.latestOrSync(userId, repositoryId, verifiedWorkspaceId);
         AnalysisInput input = AnalysisInput.from(snapshot);
         if (input.files().isEmpty()) {
             throw ApiException.badRequest("The latest repository sync contains no source files with content.");
@@ -156,6 +167,190 @@ public class DocumentationGenerationService {
                 "The AI service could not return the documentation report.");
     }
 
+    public JsonNode saveOwnedDocument(String userId, java.util.Set<String> authorities,
+            String jobId, String title) {
+        if (authorities == null || !authorities.contains("DOCUMENT_CREATE")) {
+            throw ApiException.forbidden("Missing permission: DOCUMENT_CREATE");
+        }
+        requireJobOwner(userId, jobId);
+        try {
+            JsonNode document = aiServiceClient.post().uri("/internal/documents/from-job")
+                    .header("X-User-Id", userId)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(java.util.Map.of("job_id", jobId, "title", title == null ? "" : title))
+                    .retrieve().body(JsonNode.class);
+            if (document == null || !document.path("id").isTextual()
+                    || !userId.equals(document.path("owner_user_id").asText())) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE",
+                        "The AI service did not return a document owned by the authenticated user.");
+            }
+            return document;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) throw ApiException.notFound("Documentation job not found.");
+            if (e.getStatusCode().value() == 409) throw new ApiException(HttpStatus.CONFLICT,
+                    "DOCUMENTATION_NOT_READY", "The documentation job is not complete yet.");
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not save the document.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not save the document.");
+        }
+    }
+
+    public JsonNode getDocument(String userId, String documentId) {
+        try {
+            JsonNode document = aiServiceClient.get().uri("/internal/documents/{id}", documentId)
+                    .header("X-User-Id", userId).retrieve().body(JsonNode.class);
+            if (document == null || !document.isObject()) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid document.");
+            }
+            return document;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) throw ApiException.notFound("Document not found.");
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not return the document.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not return the document.");
+        }
+    }
+
+    public String getDocumentContent(String userId, String documentId, int version) {
+        try {
+            String content = aiServiceClient.get().uri(uri -> uri.path("/internal/documents/{id}/content")
+                            .queryParam("version", version).build(documentId))
+                    .header("X-User-Id", userId).retrieve().body(String.class);
+            if (content == null) throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned no document content.");
+            return content;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) throw ApiException.notFound("Document version not found.");
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not return document content.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not return document content.");
+        }
+    }
+    public JsonNode getDocumentEvidence(String userId, String documentId, int version) {
+    try {
+        JsonNode evidence = aiServiceClient.get()
+                .uri(uri -> uri.path("/internal/documents/{id}/evidence")
+                        .queryParam("version", version)
+                        .build(documentId))
+                .header("X-User-Id", userId)
+                .retrieve()
+                .body(JsonNode.class);
+
+        if (evidence == null || !evidence.isObject()) {
+            throw integrationFailure(
+                    "AI_SERVICE_INVALID_RESPONSE",
+                    "The AI service returned invalid grounding evidence.");
+        }
+        return evidence;
+    } catch (RestClientResponseException e) {
+        if (e.getStatusCode().value() == 404) {
+            throw ApiException.notFound(
+                    "Grounding evidence not found for this document version.");
+        }
+        throw integrationFailure(
+                "AI_SERVICE_FAILED",
+                "The AI service could not return grounding evidence.");
+    } catch (RestClientException e) {
+        throw integrationFailure(
+                "AI_SERVICE_FAILED",
+                "The AI service could not return grounding evidence.");
+    }
+}
+
+    public JsonNode editOwnedDocument(String userId, String documentId, int expectedVersion,
+            String content, String note) {
+        try {
+            ObjectNode request = JsonNodeFactory.instance.objectNode().put("content", content)
+                    .put("expected_version", expectedVersion);
+            if (note != null) request.put("note", note);
+            JsonNode version = aiServiceClient.put().uri("/internal/documents/{id}/content", documentId)
+                    .header("X-User-Id", userId).contentType(MediaType.APPLICATION_JSON)
+                    .body(request).retrieve().body(JsonNode.class);
+            if (version == null || !version.isObject()) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid version.");
+            }
+            return version;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) throw ApiException.notFound("Owned document not found.");
+            if (e.getStatusCode().value() == 409) throw new ApiException(HttpStatus.CONFLICT,
+                    "DOCUMENT_VERSION_PENDING", "A document version is already awaiting review.");
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not save the edited version.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not save the edited version.");
+        }
+    }
+
+    public void resolveDocumentVersion(String actorUserId, String ownerUserId, String documentId,
+            int version, String decision, String note) {
+        try {
+            ObjectNode request = JsonNodeFactory.instance.objectNode()
+                    .put("version", version).put("decision", decision);
+            if (note != null) request.put("note", note);
+            aiServiceClient.post().uri("/internal/documents/{id}/review-decision", documentId)
+                    .header("X-User-Id", actorUserId)
+                    .header("X-Document-Owner-Id", ownerUserId)
+                    .contentType(MediaType.APPLICATION_JSON).body(request)
+                    .retrieve().toBodilessEntity();
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) throw ApiException.notFound("Owned document version not found.");
+            if (e.getStatusCode().value() == 409) throw new ApiException(HttpStatus.CONFLICT,
+                    "DOCUMENT_VERSION_CONFLICT", "The document version changed during review.");
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not record the document decision.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not record the document decision.");
+        }
+    }
+        public JsonNode rollbackDocumentVersion(
+            String actorUserId,
+            String ownerUserId,
+            String documentId,
+            int sourceVersion,
+            String reason) {
+        try {
+            ObjectNode request = JsonNodeFactory.instance.objectNode()
+                    .put("source_version", sourceVersion)
+                    .put("note", reason);
+
+            JsonNode version = aiServiceClient.post()
+                    .uri("/internal/documents/{id}/rollback", documentId)
+                    .header("X-User-Id", actorUserId)
+                    .header("X-Document-Owner-Id", ownerUserId)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(request)
+                    .retrieve()
+                    .body(JsonNode.class);
+
+            if (version == null || !version.isObject()
+                    || !version.hasNonNull("number")) {
+                throw integrationFailure(
+                        "AI_SERVICE_INVALID_RESPONSE",
+                        "The AI service returned an invalid rollback version.");
+            }
+
+            return version;
+
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                throw ApiException.notFound(
+                        "Owned document or source version not found.");
+            }
+
+            if (e.getStatusCode().value() == 409) {
+                throw new ApiException(
+                        HttpStatus.CONFLICT,
+                        "DOCUMENT_ROLLBACK_CONFLICT",
+                        "The document cannot be rolled back while another version is awaiting review, or the source version is not approved.");
+            }
+
+            throw integrationFailure(
+                    "AI_SERVICE_FAILED",
+                    "The AI service could not create the rollback version.");
+
+        } catch (RestClientException e) {
+            throw integrationFailure(
+                    "AI_SERVICE_FAILED",
+                    "The AI service could not create the rollback version.");
+        }
+    }
     private JsonNode getAiJson(String path, String code, String message) {
         try {
             JsonNode result = aiServiceClient.get().uri(path).retrieve().body(JsonNode.class);
