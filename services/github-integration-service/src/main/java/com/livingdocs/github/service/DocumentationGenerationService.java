@@ -45,7 +45,14 @@ public class DocumentationGenerationService {
      */
     public JsonNode generate(String userId, UUID repositoryId,
             DocumentationGenerationRequest request) {
-        RepositorySnapshot snapshot = repositorySyncService.latestOrSync(userId, repositoryId);
+        return generate(userId, repositoryId, request, null);
+    }
+
+    public JsonNode generate(String userId, UUID repositoryId,
+            DocumentationGenerationRequest request, String verifiedWorkspaceId) {
+        RepositorySnapshot snapshot = verifiedWorkspaceId == null
+                ? repositorySyncService.latestOrSync(userId, repositoryId)
+                : repositorySyncService.latestOrSync(userId, repositoryId, verifiedWorkspaceId);
         AnalysisInput input = AnalysisInput.from(snapshot);
         if (input.files().isEmpty()) {
             throw ApiException.badRequest("The latest repository sync contains no source files with content.");
