@@ -1,5 +1,6 @@
 package com.livingdocs.github;
 
+import org.springframework.test.json.JsonCompareMode;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.livingdocs.github.dto.DocumentationTemplateRequest;
 import com.livingdocs.github.exception.ApiException;
@@ -71,7 +72,7 @@ class DocumentationTemplateServiceTest {
         aiServer.expect(requestTo("http://ai.test/templates")).andExpect(method(POST))
                 .andExpect(content().json("""
                         {"name":"Onboarding","instructions":"Short.","sections":["Overview","Functions"]}
-                        """, true))
+                        """, JsonCompareMode.STRICT))
                 .andRespond(withStatus(HttpStatus.CREATED).contentType(MediaType.APPLICATION_JSON)
                         .body(TEMPLATE));
 
