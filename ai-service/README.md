@@ -1,4 +1,4 @@
-# LivingDocs AI Service (LD-90, LD-340, LD-195)
+# LivingDocs AI Service (LD-90, LD-340, LD-195, LD-128)
 
 AI-assisted documentation generation. Takes source code that has already been analyzed
 (classes, methods, endpoints, parameters, return values) and produces Markdown docs
@@ -52,6 +52,7 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | GET | `/documents/{id}/content?version=N` | Markdown of the current (or given) version |
 | GET | `/documents/{id}/versions`, `/versions/{n}` | Version history (newest first) / one version |
 | GET | `/documents/{id}/history` | Audit trail: created, proposed, accepted, edited, dismissed, ... |
+| POST | `/documents/{id}/updates` | Update from an LD-116 source change → proposal (LD-128) |
 
 Built-in templates: `default`, `api-reference`, `brief`.
 
@@ -73,12 +74,18 @@ for the AI) and an ordered list of `sections` taken from `Overview`, `Classes`, 
   the built-in templates.
 - Errors: `422` invalid template, `409` duplicate name, `403` built-in template, `404` unknown id.
 
-### Versioned documentation (LD-195)
+### Versioned documentation (LD-195, LD-128)
 
 - `POST /documents {"job_id": ...}` stores a completed job as **version 1** (accepted). Every later
   change adds a new, immutable version; nothing is edited in place or deleted (LD-195).
 - Saved to `DOCUMENTS_FILE` (default `data/documents.json`, atomic writes; empty = memory only).
-- Details: `Docs/Linh/` FR6.md.
+- `POST /documents/{id}/updates` (LD-128) takes a source change from LD-116 (`SourceChangeResponse`,
+  camelCase or snake_case) plus the analyzer output of the changed files. Only `ADDED` / `MODIFIED` /
+  `RENAMED` files are regenerated, `REMOVED` files are dropped, every other file keeps its text.
+  The result is a **proposal** (`201`); the current version changes only when it is accepted.
+  A second source change before review extends the pending proposal; sending the same change
+  again returns the pending proposal (`200`).
+- Details: `Docs/Linh/` FR6.md, FR7.md.
 
 ### Example request
 

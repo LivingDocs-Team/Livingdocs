@@ -1,4 +1,4 @@
-"""Data models for versioned documentation (LD-195).
+"""Data models for versioned documentation (LD-195, LD-128).
 
 A *document* is the saved result of a generation job. Every change to it is a new, immutable
 *version* (LD-195): the first one comes from the job, later ones from source changes (LD-128),
@@ -8,9 +8,70 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
-from .models import Scope, now
+from .models import ContextDocument, FileAnalysis, Scope, now
+
+
+def _alias(*names: str, default=None, **kw):
+    """LD-116 (Java) sends camelCase; Python callers may send snake_case. Accept both."""
+    return Field(default=default, validation_alias=AliasChoices(*names), **kw)
+
+
+# ---------- Input: a source change detected by LD-116 ----------
+
+class ChangeType(str, Enum):
+    ADDED = "ADDED"
+    MODIFIED = "MODIFIED"
+    REMOVED = "REMOVED"
+    RENAMED = "RENAMED"
+
+
+class ChangedEntity(BaseModel):
+    """A class / method / function / endpoint touched by the change (LD-116 EntityResponse)."""
+    model_config = ConfigDict(populate_by_name=True)
+    kind: str
+    name: str
+    change: str
+    start_line: Optional[int] = _alias("start_line", "startLine")
+    end_line: Optional[int] = _alias("end_line", "endLine")
+
+
+class ChangedFile(BaseModel):
+    """One file of a source change (LD-116 FileResponse)."""
+    model_config = ConfigDict(populate_by_name=True)
+    path: str = Field(min_length=1)
+    previous_path: Optional[str] = _alias("previous_path", "previousPath")
+    change: ChangeType
+    language: Optional[str] = None
+    additions: Optional[int] = None
+    deletions: Optional[int] = None
+    skipped_reason: Optional[str] = _alias("skipped_reason", "skippedReason")
+    entities: List[ChangedEntity] = Field(default_factory=list)
+
+    @field_validator("change", mode="before")
+    @classmethod
+    def _upper(cls, v):
+        return v.strip().upper() if isinstance(v, str) else v
+
+
+class SourceChange(BaseModel):
+    """A commit or Pull Request head detected by LD-116 (SourceChangeResponse)."""
+    model_config = ConfigDict(populate_by_name=True)
+    id: str = Field(min_length=1)
+    trigger: Optional[str] = None                     # COMMIT | PULL_REQUEST
+    commit_sha: Optional[str] = _alias("commit_sha", "commitSha")
+    pull_request_number: Optional[int] = _alias("pull_request_number", "pullRequestNumber")
+    files: List[ChangedFile] = Field(min_length=1)
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def _id_text(cls, v):
+        return str(v) if v is not None else v
+
+    def ref(self) -> "SourceChangeRef":
+        return SourceChangeRef(id=self.id, trigger=self.trigger, commit_sha=self.commit_sha,
+                               pull_request_number=self.pull_request_number)
 
 
 class SourceChangeRef(BaseModel):
@@ -31,6 +92,25 @@ class DocumentCreate(_Actor):
     """Save the result of a completed generation job as version 1 of a new document."""
     job_id: str = Field(min_length=1)
     title: Optional[str] = Field(default=None, max_length=200)
+
+
+class DocumentUpdateRequest(_Actor):
+    """LD-128: update a document after a source change.
+
+    `files` are the Code Analyzer results for the changed files *after* the change (ADDED,
+    MODIFIED and RENAMED files). REMOVED files need no analysis."""
+    source_change: SourceChange
+    files: List[FileAnalysis] = Field(default_factory=list)
+    context: List[ContextDocument] = Field(default_factory=list)
+
+    @field_validator("files")
+    @classmethod
+    def _unique_paths(cls, files: List[FileAnalysis]) -> List[FileAnalysis]:
+        paths = [f.path for f in files]
+        dupes = sorted({p for p in paths if paths.count(p) > 1})
+        if dupes:
+            raise ValueError(f"duplicate file paths: {', '.join(dupes)}")
+        return files
 
 
 # ---------- Stored data ----------
@@ -140,3 +220,11 @@ class HistoryEvent(BaseModel):
     related_version: Optional[int] = None
     actor: Optional[str] = None
     note: Optional[str] = None
+
+
+class UpdateResult(BaseModel):
+    """Response of LD-128. `proposal` is null when no documented file was affected."""
+    document_id: str
+    proposal: Optional[DocumentVersion] = None
+    message: str
+    warnings: List[str] = Field(default_factory=list)
