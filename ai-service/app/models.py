@@ -111,7 +111,13 @@ class Scope(str, Enum):
     module = "module"
     repository = "repository"
 
-
+class SourceSnapshot(BaseModel):
+    """Repository state used to generate a documentation version."""
+    repository_id: str
+    repository_full_name: str
+    branch: str
+    commit_sha: str
+    fetched_at: Optional[datetime] = None
 class GenerateRequest(BaseModel):
     scope: Scope
     target: str = Field(min_length=1)          # file path, module name or repository name
@@ -119,6 +125,8 @@ class GenerateRequest(BaseModel):
     template_id: str = "default"
     output_language: str = "vi"                # "vi" or "en"
     context: List[ContextDocument] = Field(default_factory=list)  # existing docs to ground on
+    source_snapshot: Optional[SourceSnapshot] = None
+
 
     @field_validator("output_language")
     @classmethod
@@ -259,15 +267,22 @@ class FileReport(BaseModel):
     context_used: List[Evidence] = Field(default_factory=list)  # retrieved C/D items cited
 
 
+
 class JobReport(BaseModel):
     job_id: str
     template_id: Optional[str] = None
     template_name: Optional[str] = None
+    # Snapshot of the template used when the document was generated.
+    template_instructions: Optional[str] = None
+    template_sections: List[str] = Field(default_factory=list)
     confidence: Optional[float] = None
     level: Optional[ConfidenceLevel] = None
-    method: str = ""                          # how the score is computed (human readable)
+    method: str = ""
     files: List[FileReport] = Field(default_factory=list)
 
+class ReviewEvidenceResponse(JobReport):
+    """Evidence report and source snapshot for a document version under review."""
+    source_snapshot: Optional[SourceSnapshot] = None
 
 class Job(BaseModel):
     id: str
