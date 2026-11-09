@@ -4,6 +4,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.time.Instant;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
@@ -21,6 +22,9 @@ import com.livingdocs.github.dto.DocumentationGenerationRequest;
 import com.livingdocs.github.exception.ApiException;
 import com.livingdocs.github.sync.AnalysisInput;
 import com.livingdocs.github.sync.RepositorySnapshot;
+import com.livingdocs.github.sync.RepositorySyncException;
+import com.livingdocs.github.sync.SyncOptions;
+
 
 @Service
 public class DocumentationGenerationService {
@@ -92,7 +96,13 @@ public class DocumentationGenerationService {
         if (request != null && request.outputLanguage() != null && !request.outputLanguage().isBlank()) {
             generationRequest.put("output_language", request.outputLanguage());
         }
+        ObjectNode sourceSnapshot = generationRequest.putObject("source_snapshot");
 
+        sourceSnapshot.put("repository_id", repositoryId.toString());
+        sourceSnapshot.put("repository_full_name", snapshot.repository().fullName());
+        sourceSnapshot.put("branch", snapshot.branch());
+        sourceSnapshot.put("commit_sha", snapshot.headCommit().sha());
+        sourceSnapshot.put("fetched_at", snapshot.fetchedAt().toString());
         JsonNode job;
         try {
             ResponseEntity<JsonNode> response = aiServiceClient.post()
@@ -232,36 +242,183 @@ public class DocumentationGenerationService {
             throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not return document content.");
         }
     }
-    public JsonNode getDocumentEvidence(String userId, String documentId, int version) {
-    try {
-        JsonNode evidence = aiServiceClient.get()
-                .uri(uri -> uri.path("/internal/documents/{id}/evidence")
-                        .queryParam("version", version)
-                        .build(documentId))
-                .header("X-User-Id", userId)
-                .retrieve()
-                .body(JsonNode.class);
 
-        if (evidence == null || !evidence.isObject()) {
+    public JsonNode getDocumentReviewEvidence(String userId, String documentId, int version) {
+        try {
+            JsonNode evidence = aiServiceClient.get()
+                    .uri(uri -> uri.path("/internal/documents/{id}/review-evidence")
+                            .queryParam("version", version)
+                            .build(documentId))
+                    .header("X-User-Id", userId)
+                    .retrieve()
+                    .body(JsonNode.class);
+
+            if (evidence == null || !evidence.isObject()) {
+                throw integrationFailure(
+                        "AI_SERVICE_INVALID_RESPONSE",
+                        "The AI service returned invalid review evidence.");
+            }
+
+            return evidence;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                throw ApiException.notFound(
+                        "Review evidence not found for this document version.");
+            }
+
             throw integrationFailure(
-                    "AI_SERVICE_INVALID_RESPONSE",
-                    "The AI service returned invalid grounding evidence.");
+                    "AI_SERVICE_FAILED",
+                    "The AI service could not return document review evidence.");
+        } catch (RestClientException e) {
+            throw integrationFailure(
+                    "AI_SERVICE_FAILED",
+                    "The AI service could not return document review evidence.");
         }
-        return evidence;
-    } catch (RestClientResponseException e) {
-        if (e.getStatusCode().value() == 404) {
-            throw ApiException.notFound(
-                    "Grounding evidence not found for this document version.");
-        }
-        throw integrationFailure(
-                "AI_SERVICE_FAILED",
-                "The AI service could not return grounding evidence.");
-    } catch (RestClientException e) {
-        throw integrationFailure(
-                "AI_SERVICE_FAILED",
-                "The AI service could not return grounding evidence.");
     }
-}
+
+    /**
+     * Verify whether the repository source has changed since the document
+     * version was generated.
+     *
+     * A fresh GitHub synchronization is required; cached snapshots must not
+     * be used for this verification.
+     */
+    public JsonNode verifySourceSnapshot(String ownerUserId, JsonNode evidence) {
+        ObjectNode result = evidence.deepCopy();
+        ObjectNode verification = JsonNodeFactory.instance.objectNode();
+
+        verification.put("checked_at", Instant.now().toString());
+
+        JsonNode sourceSnapshot = evidence.path("source_snapshot");
+        String repositoryId = sourceSnapshot.path("repository_id").asText("");
+        String expectedSha = sourceSnapshot.path("commit_sha").asText("");
+
+        verification.put("expected_commit_sha", expectedSha);
+
+        if (repositoryId.isBlank() || !expectedSha.matches("(?i)[0-9a-f]{40}")) {
+            verification.put("status", "UNVERIFIABLE");
+            verification.put("current_commit_sha", (String) null);
+            verification.put("message", "The original source snapshot is missing or invalid.");
+            result.set("source_verification", verification);
+            return result;
+        }
+
+        final UUID parsedRepositoryId;
+        try {
+            parsedRepositoryId = UUID.fromString(repositoryId);
+        } catch (IllegalArgumentException e) {
+            verification.put("status", "UNVERIFIABLE");
+            verification.put("current_commit_sha", (String) null);
+            verification.put("message", "The original repository identifier is invalid.");
+            result.set("source_verification", verification);
+            return result;
+        }
+
+        try {
+            RepositorySnapshot currentSnapshot = repositorySyncService.sync(
+                    ownerUserId,
+                    parsedRepositoryId,
+                    SyncOptions.defaults());
+
+            String currentSha = currentSnapshot == null || currentSnapshot.headCommit() == null
+                    ? null
+                    : currentSnapshot.headCommit().sha();
+
+            if (currentSha == null || !currentSha.matches("(?i)[0-9a-f]{40}")) {
+                verification.put("status", "UNVERIFIABLE");
+                verification.put("current_commit_sha", (String) null);
+                verification.put("message", "The current repository snapshot has no valid commit SHA.");
+            } else {
+                verification.put("current_commit_sha", currentSha);
+
+                if (expectedSha.equalsIgnoreCase(currentSha)) {
+                    verification.put("status", "MATCH");
+                    verification.put("message", "The repository source has not changed.");
+                } else {
+                    verification.put("status", "CHANGED");
+                    verification.put("message", "The repository source has changed since document generation.");
+                }
+            }
+        } catch (RepositorySyncException | ApiException e) {
+            verification.put("status", "UNVERIFIABLE");
+            verification.put("current_commit_sha", (String) null);
+            verification.put("message", "The current repository source could not be verified.");
+        }
+
+        result.set("source_verification", verification);
+        return result;
+    }
+
+    public JsonNode getDocumentReviewComparison(String userId, String documentId) {
+        try {
+            JsonNode comparison = aiServiceClient.get()
+                    .uri("/internal/documents/{id}/review-comparison", documentId)
+                    .header("X-User-Id", userId)
+                    .retrieve()
+                    .body(JsonNode.class);
+
+            if (comparison == null || !comparison.isObject()
+                    || !comparison.path("pending_version").isObject()) {
+                throw integrationFailure(
+                        "AI_SERVICE_INVALID_RESPONSE",
+                        "The AI service returned invalid review comparison.");
+            }
+
+            return comparison;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                throw ApiException.notFound("Document not found.");
+            }
+            if (e.getStatusCode().value() == 409) {
+                throw new ApiException(
+                        HttpStatus.CONFLICT,
+                        "DOCUMENT_VERSION_NOT_PENDING",
+                        "No document version is awaiting review.");
+            }
+
+            throw integrationFailure(
+                    "AI_SERVICE_FAILED",
+                    "The AI service could not return document version comparison.");
+        } catch (RestClientException e) {
+            throw integrationFailure(
+                    "AI_SERVICE_FAILED",
+                    "The AI service could not return document version comparison.");
+        }
+    }
+
+    public JsonNode getDocumentEvidence(String userId, String documentId, int version) {
+        try {
+            JsonNode evidence = aiServiceClient.get()
+                    .uri(uri -> uri.path("/internal/documents/{id}/evidence")
+                            .queryParam("version", version)
+                            .build(documentId))
+                    .header("X-User-Id", userId)
+                    .retrieve()
+                    .body(JsonNode.class);
+
+            if (evidence == null || !evidence.isObject()) {
+                throw integrationFailure(
+                        "AI_SERVICE_INVALID_RESPONSE",
+                        "The AI service returned invalid grounding evidence.");
+            }
+
+            return evidence;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                throw ApiException.notFound(
+                        "Grounding evidence not found for this document version.");
+            }
+
+            throw integrationFailure(
+                    "AI_SERVICE_FAILED",
+                    "The AI service could not return grounding evidence.");
+        } catch (RestClientException e) {
+            throw integrationFailure(
+                    "AI_SERVICE_FAILED",
+                    "The AI service could not return grounding evidence.");
+        }
+    }
+
 
     public JsonNode editOwnedDocument(String userId, String documentId, int expectedVersion,
             String content, String note) {

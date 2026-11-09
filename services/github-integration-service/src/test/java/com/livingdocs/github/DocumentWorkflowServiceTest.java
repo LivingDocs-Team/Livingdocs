@@ -421,32 +421,103 @@ class DocumentWorkflowServiceTest {
                 .isInstanceOf(ApiException.class)
                 .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(403));
     }
+
+    @Test
+    void assignedStaffCanViewReviewEvidenceForSubmittedVersion() throws Exception {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+
+        when(documents.getDocument(REVIEWER, "doc-1")).thenReturn(
+                new ObjectMapper().readTree(
+                        "{\"id\":\"doc-1\",\"owner_user_id\":\"73\",\"current_version\":1}"));
+
+        var evidence = new ObjectMapper().readTree(
+                "{\"job_id\":\"job-1\",\"template_name\":\"Default\",\"files\":[]}");
+
+        when(documents.getDocumentReviewEvidence(REVIEWER, "doc-1", 1))
+                .thenReturn(evidence);
+        when(documents.verifySourceSnapshot(OWNER, evidence))
+                .thenReturn(evidence);
+
+        var result = service.reviewEvidence(
+                REVIEWER,
+                Set.of("ROLE_STAFF", "DOCUMENT_REVIEW"),
+                ID);
+
+        assertThat(result).isEqualTo(evidence);
+        verify(documents).verifySourceSnapshot(OWNER, evidence);
+        verify(documents).getDocumentReviewEvidence(REVIEWER, "doc-1", 1);
+    }
+
+    @Test
+    void unassignedStaffCannotViewReviewEvidence() {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+
+        assertThatThrownBy(() -> service.reviewEvidence(
+                "82",
+                Set.of("ROLE_STAFF", "DOCUMENT_REVIEW"),
+                ID))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> assertThat(
+                        ((ApiException) error).getStatus().value()).isEqualTo(403));
+
+        verify(documents, never()).getDocumentReviewEvidence(any(), any(), any(Integer.class));
+    }
+
+    @Test
+    void assignedStaffCanViewReviewComparisonForSubmittedVersion() throws Exception {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+
+        when(documents.getDocument(REVIEWER, "doc-1")).thenReturn(
+                new ObjectMapper().readTree(
+                        "{\"id\":\"doc-1\",\"owner_user_id\":\"73\",\"current_version\":1}"));
+
+        var comparison = new ObjectMapper().readTree(
+                "{\"pending_version\":{\"number\":1},\"changes\":[]}");
+
+        when(documents.getDocumentReviewComparison(REVIEWER, "doc-1"))
+                .thenReturn(comparison);
+
+        var result = service.reviewComparison(
+                REVIEWER,
+                Set.of("ROLE_STAFF", "DOCUMENT_REVIEW"),
+                ID);
+
+        assertThat(result).isEqualTo(comparison);
+        verify(documents).getDocumentReviewComparison(REVIEWER, "doc-1");
+    }
+
     @Test
     void managerCanReadEvidenceForTheExactSubmittedVersion() throws Exception {
-    DocumentWorkflow workflow = pendingStaffWorkflow();
-    workflow.review(StaffReviewResult.PASSED, "All checks passed");
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+        workflow.review(StaffReviewResult.PASSED, "All checks passed");
 
-    when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
-    when(documents.getDocument(MANAGER, "doc-1")).thenReturn(
-            new ObjectMapper().readTree(
-                    "{\"id\":\"doc-1\",\"owner_user_id\":\"73\","
-                    + "\"current_version\":0,\"pending_version\":1}"));
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+        when(documents.getDocument(MANAGER, "doc-1")).thenReturn(
+                new ObjectMapper().readTree(
+                        "{\"id\":\"doc-1\",\"owner_user_id\":\"73\","
+                                + "\"current_version\":0,\"pending_version\":1}"));
 
-    var expectedEvidence = new ObjectMapper().readTree(
-            "{\"job_id\":\"job-1\",\"files\":[]}");
+        var expectedEvidence = new ObjectMapper().readTree(
+                "{\"job_id\":\"job-1\",\"files\":[]}");
 
-    when(documents.getDocumentEvidence(MANAGER, "doc-1", 1))
-            .thenReturn(expectedEvidence);
+        when(documents.getDocumentEvidence(MANAGER, "doc-1", 1))
+                .thenReturn(expectedEvidence);
 
-    var result = service.evidence(
-            MANAGER,
-            Set.of("ROLE_MANAGER", "DOCUMENT_APPROVAL_QUEUE_VIEW"),
-            ID);
+        var result = service.evidence(
+                MANAGER,
+                Set.of("ROLE_MANAGER", "DOCUMENT_APPROVAL_QUEUE_VIEW"),
+                ID);
 
-    assertThat(result).isEqualTo(expectedEvidence);
+        assertThat(result).isEqualTo(expectedEvidence);
+        verify(documents).getDocumentEvidence(MANAGER, "doc-1", 1);
+    }
 
-    verify(documents).getDocumentEvidence(MANAGER, "doc-1", 1);
-}
 
 @Test
 void managerCannotReadEvidenceBeforeStaffReviewPasses() {
@@ -477,6 +548,31 @@ void nonManagerCannotReadGroundingEvidence() {
     verify(workflows, never()).findById(ID);
 }
     @Test
+    void staffCannotViewReviewComparisonWhenPendingVersionDiffersFromSubmittedVersion()
+            throws Exception {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+
+        when(documents.getDocument(REVIEWER, "doc-1")).thenReturn(
+                new ObjectMapper().readTree(
+                        "{\"id\":\"doc-1\",\"owner_user_id\":\"73\",\"current_version\":1}"));
+
+        var comparison = new ObjectMapper().readTree(
+                "{\"pending_version\":{\"number\":2},\"changes\":[]}");
+
+        when(documents.getDocumentReviewComparison(REVIEWER, "doc-1"))
+                .thenReturn(comparison);
+
+        assertThatThrownBy(() -> service.reviewComparison(
+                REVIEWER,
+                Set.of("ROLE_STAFF", "DOCUMENT_REVIEW"),
+                ID))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> assertThat(
+                        ((ApiException) error).getStatus().value()).isEqualTo(409));
+    }
+@Test
     void historyIsReturnedOnlyToAuthorizedOwner() {
         DocumentWorkflow workflow = submittedWorkflow();
         when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
@@ -505,7 +601,7 @@ void nonManagerCannotReadGroundingEvidence() {
         verify(audit, org.mockito.Mockito.times(1)).findByWorkflowIdOrderByCreatedAtAsc(ID);
     }
 
-    @Test
+@Test
     void historyAccessibleUsesPermissionAuthoritiesAndStablePagination() {
         when(workflows.findHistoryAccessible(any(), org.mockito.ArgumentMatchers.anyBoolean(),
                 org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.anyBoolean(),
@@ -680,6 +776,7 @@ void managerCanReadAuditTrailForPendingApprovalWorkflow() {
         verify(audit).save(any(DocumentWorkflowAudit.class));
     }
     @Test
+
     void persistenceDeclaresUniqueDocumentKeyAndPessimisticClaimDecisionLock() throws Exception {
         Lock lock = DocumentWorkflowRepository.class.getMethod("lockById", UUID.class).getAnnotation(Lock.class);
         Field version = DocumentWorkflow.class.getDeclaredField("optimisticVersion");

@@ -122,27 +122,90 @@ public class DocumentWorkflowService {
                 documents.getDocumentContent(actor, workflow.getDocumentId(), version));
     }
     @Transactional(readOnly = true)
-    public JsonNode evidence(String actor, Set<String> authorities, UUID workflowId) {
-      require(authorities, "DOCUMENT_APPROVAL_QUEUE_VIEW");
-      requireRole(authorities, "MANAGER");
+    public JsonNode reviewEvidence(String actor, Set<String> authorities, UUID workflowId) {
+        require(authorities, "DOCUMENT_REVIEW");
+        requireRole(authorities, "STAFF");
 
-      DocumentWorkflow workflow = find(workflowId);
-      requireReadable(workflow, actor, authorities);
+        DocumentWorkflow workflow = find(workflowId);
 
-      if (workflow.getStaffReviewResult() != StaffReviewResult.PASSED) {
-        throw ApiException.forbidden(
-                "Grounding evidence is available only after a successful staff review.");
+        if (workflow.getStatus() != DocumentWorkflowStatus.STAFF_REVIEWING
+                || !actor.equals(workflow.getReviewerUserId())) {
+            throw ApiException.forbidden(
+                    "Only the assigned staff reviewer can view review evidence.");
+        }
+
+        JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
+        requireDocumentOwner(document, workflow.getOwnerUserId());
+
+        Integer submittedVersion = workflow.getSubmittedDocumentVersion();
+
+        if (submittedVersion == null || submittedVersion < 1) {
+            throw conflict("The workflow has no submitted document version.");
+        }
+
+        JsonNode evidence = documents.getDocumentReviewEvidence(
+                actor, workflow.getDocumentId(), submittedVersion);
+
+        return documents.verifySourceSnapshot(workflow.getOwnerUserId(), evidence);
     }
 
-    JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
-    requireDocumentOwner(document, workflow.getOwnerUserId());
+    @Transactional(readOnly = true)
+    public JsonNode reviewComparison(String actor, Set<String> authorities, UUID workflowId) {
+        require(authorities, "DOCUMENT_REVIEW");
+        requireRole(authorities, "STAFF");
 
-    int version = workflow.getSubmittedDocumentVersion() == null
-            ? visibleDocumentVersion(workflow, document)
-            : workflow.getSubmittedDocumentVersion();
+        DocumentWorkflow workflow = find(workflowId);
 
-    return documents.getDocumentEvidence(actor, workflow.getDocumentId(), version);
-}
+        if (workflow.getStatus() != DocumentWorkflowStatus.STAFF_REVIEWING
+                || !actor.equals(workflow.getReviewerUserId())) {
+            throw ApiException.forbidden(
+                    "Only the assigned staff reviewer can compare document versions.");
+        }
+
+        JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
+        requireDocumentOwner(document, workflow.getOwnerUserId());
+
+        Integer submittedVersion = workflow.getSubmittedDocumentVersion();
+
+        if (submittedVersion == null || submittedVersion < 1) {
+            throw conflict("The workflow has no submitted document version.");
+        }
+
+        JsonNode comparison = documents.getDocumentReviewComparison(
+                actor, workflow.getDocumentId());
+
+        int comparedPendingVersion = comparison.path("pending_version")
+                .path("number").asInt(-1);
+
+        if (comparedPendingVersion != submittedVersion) {
+            throw conflict("The pending document version does not match the submitted workflow version.");
+        }
+
+        return comparison;
+    }
+
+    @Transactional(readOnly = true)
+    public JsonNode evidence(String actor, Set<String> authorities, UUID workflowId) {
+        require(authorities, "DOCUMENT_APPROVAL_QUEUE_VIEW");
+        requireRole(authorities, "MANAGER");
+
+        DocumentWorkflow workflow = find(workflowId);
+        requireReadable(workflow, actor, authorities);
+
+        if (workflow.getStaffReviewResult() != StaffReviewResult.PASSED) {
+            throw ApiException.forbidden(
+                    "Grounding evidence is available only after a successful staff review.");
+        }
+
+        JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
+        requireDocumentOwner(document, workflow.getOwnerUserId());
+
+        int version = workflow.getSubmittedDocumentVersion() == null
+                ? visibleDocumentVersion(workflow, document)
+                : workflow.getSubmittedDocumentVersion();
+
+        return documents.getDocumentEvidence(actor, workflow.getDocumentId(), version);
+    }
     @Transactional(readOnly = true)
     public List<AuditResponse> history(String actor, Set<String> authorities, UUID workflowId) {
         DocumentWorkflow workflow = find(workflowId);

@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.Set;
 
+import static org.mockito.Mockito.lenient;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,6 +28,9 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 import org.springframework.web.client.RestClient;
 
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.livingdocs.github.sync.SyncOptions;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.livingdocs.github.dto.DocumentationGenerationRequest;
 import com.livingdocs.github.exception.ApiException;
@@ -46,10 +50,30 @@ class DocumentationGenerationServiceTest {
             ]}
             """;
     private static final String EXPECTED_AI_REQUEST = """
-            {"scope":"repository","target":"acme/shop","template_id":"default","output_language":"en","files":[
-              {"path":"src/App.java","language":"java","status":"ok","classes":[],"functions":[],"endpoints":[]}
-            ]}
-            """;
+        {
+          "scope": "repository",
+          "target": "acme/shop",
+          "template_id": "default",
+          "output_language": "en",
+          "source_snapshot": {
+            "repository_id": "11111111-1111-1111-1111-111111111111",
+            "repository_full_name": "acme/shop",
+            "branch": "main",
+            "commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "fetched_at": "2026-01-01T00:00:00Z"
+          },
+          "files": [
+            {
+              "path": "src/App.java",
+              "language": "java",
+              "status": "ok",
+              "classes": [],
+              "functions": [],
+              "endpoints": []
+            }
+          ]
+        }
+        """;
 
     @Mock
     private RepositorySyncService repositorySyncService;
@@ -71,12 +95,18 @@ class DocumentationGenerationServiceTest {
         aiServiceServer = MockRestServiceServer.bindTo(aiBuilder).build();
         RestClient aiClient = aiBuilder.baseUrl("http://ai.test").build();
 
-        generationService = new DocumentationGenerationService(
+         generationService = new DocumentationGenerationService(
                 repositorySyncService, analyzerClient, aiClient, relationshipService);
-        when(repositorySyncService.latestOrSync(USER_ID, REPOSITORY_ID)).thenReturn(snapshot());
-        org.mockito.Mockito.lenient().when(relationshipService.recordGeneration(org.mockito.ArgumentMatchers.eq(USER_ID),
-                org.mockito.ArgumentMatchers.eq(REPOSITORY_ID), org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+
+        lenient().when(repositorySyncService.latestOrSync(USER_ID, REPOSITORY_ID))
+                .thenReturn(snapshot());
+
+        org.mockito.Mockito.lenient().when(relationshipService.recordGeneration(
+                org.mockito.ArgumentMatchers.eq(USER_ID),
+                org.mockito.ArgumentMatchers.eq(REPOSITORY_ID),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
                 .thenReturn(UUID.fromString("22222222-2222-2222-2222-222222222222"));
     }
 
@@ -269,7 +299,59 @@ class DocumentationGenerationServiceTest {
         analyzerServer.verify();
         aiServiceServer.verify();
     }
+    @Test
+    void verifiesSourceSnapshotWhenCommitMatches() {
+        String commitSha = "a".repeat(40);
 
+        when(repositorySyncService.sync(USER_ID, REPOSITORY_ID, SyncOptions.defaults()))
+                .thenReturn(snapshot());
+
+        JsonNode result = generationService.verifySourceSnapshot(
+                USER_ID, reviewEvidence(REPOSITORY_ID.toString(), commitSha));
+
+        assertEquals("MATCH", result.path("source_verification").path("status").asText());
+        assertEquals(commitSha,
+                result.path("source_verification").path("current_commit_sha").asText());
+    }
+
+    @Test
+    void detectsChangedSourceSnapshotWhenCommitDiffers() {
+        String originalSha = "b".repeat(40);
+        String currentSha = "a".repeat(40);
+
+        when(repositorySyncService.sync(USER_ID, REPOSITORY_ID, SyncOptions.defaults()))
+                .thenReturn(snapshot());
+
+        JsonNode result = generationService.verifySourceSnapshot(
+                USER_ID, reviewEvidence(REPOSITORY_ID.toString(), originalSha));
+
+        assertEquals("CHANGED", result.path("source_verification").path("status").asText());
+        assertEquals(originalSha,
+                result.path("source_verification").path("expected_commit_sha").asText());
+        assertEquals(currentSha,
+                result.path("source_verification").path("current_commit_sha").asText());
+    }
+
+    @Test
+    void marksSourceSnapshotUnverifiableWhenOriginalCommitShaIsInvalid() {
+        JsonNode result = generationService.verifySourceSnapshot(
+                USER_ID, reviewEvidence(REPOSITORY_ID.toString(), "invalid-sha"));
+
+        assertEquals("UNVERIFIABLE",
+                result.path("source_verification").path("status").asText());
+        assertEquals("invalid-sha",
+                result.path("source_verification").path("expected_commit_sha").asText());
+    }
+
+    private static JsonNode reviewEvidence(String repositoryId, String commitSha) {
+        ObjectNode evidence = JsonNodeFactory.instance.objectNode();
+        ObjectNode sourceSnapshot = evidence.putObject("source_snapshot");
+
+        sourceSnapshot.put("repository_id", repositoryId);
+        sourceSnapshot.put("commit_sha", commitSha);
+
+        return evidence;
+    }
     private static RepositorySnapshot snapshot() {
         return new RepositorySnapshot(
                 new RepositorySnapshot.RepositoryInfo(42L, "acme/shop", "acme", "shop", null,
@@ -282,6 +364,6 @@ class DocumentationGenerationServiceTest {
                         "src/App.java", "b".repeat(40), 12, "java", "class App {}", null)),
                 List.of(),
                 new RepositorySnapshot.SyncStats(1, 1, 1, 0, false, false),
-                List.of(), Instant.now());
+                List.of(), Instant.parse("2026-01-01T00:00:00Z"));
     }
 }
