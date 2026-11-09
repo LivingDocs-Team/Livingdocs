@@ -1,5 +1,5 @@
 """LivingDocs AI service - AI-assisted documentation generation (LD-90, LD-340) and versioned
-documentation (LD-195, LD-128, LD-134).
+documentation (LD-195, LD-128, LD-134, LD-189).
 
 Run:  uvicorn main:app --reload --port 8001
 Docs: http://localhost:8001/docs
@@ -16,7 +16,7 @@ from app.models import (SECTION_KINDS, SECTION_NAMES, GenerateRequest, Job, JobR
 from app.templates import TemplateNameTaken, templates
 from app.version_models import (CompareResult, Document, DocumentCreate, DocumentUpdateRequest,
                                 DocumentVersion, EditRequest, HistoryEvent, ReviewRequest,
-                                UpdateResult, VersionSummary)
+                                RollbackRequest, UpdateResult, VersionSummary)
 from app.versions import VersionError, documents
 
 app = FastAPI(title="LivingDocs AI Service", version="0.1.0")
@@ -132,7 +132,7 @@ def delete_template(template_id: str):
         raise HTTPException(403, str(e))
 
 
-# ---------- Versioned documentation (LD-195, LD-128, LD-134) ----------
+# ---------- Versioned documentation (LD-195, LD-128, LD-134, LD-189) ----------
 
 def _call(fn, *args, **kwargs):
     try:
@@ -229,3 +229,9 @@ def regenerate_version(doc_id: str, number: int, data: Optional[ReviewRequest] =
           status_code=201)
 def edit_version(doc_id: str, number: int, data: EditRequest):
     return _call(documents.edit, doc_id, number, data.content, data.accept, data.actor, data.note)
+
+
+@app.post("/documents/{doc_id}/rollback", response_model=DocumentVersion, status_code=201)
+def rollback_document(doc_id: str, data: RollbackRequest):
+    """LD-189: restore an earlier accepted version as a new version (history is kept)."""
+    return _call(documents.rollback, doc_id, data.version, data.actor, data.note)

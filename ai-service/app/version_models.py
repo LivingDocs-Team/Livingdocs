@@ -1,4 +1,4 @@
-"""Data models for versioned documentation (LD-195, LD-128, LD-134).
+"""Data models for versioned documentation (LD-195, LD-128, LD-134, LD-189).
 
 A *document* is the saved result of a generation job. Every change to it is a new, immutable
 *version* (LD-195): the first one comes from the job, later ones from source changes (LD-128),
@@ -121,6 +121,11 @@ class EditRequest(_Actor):
     """Replace the content of a proposed or the current version (LD-134)."""
     content: str = Field(min_length=1, max_length=2_000_000)
     accept: bool = True            # True: the edited text becomes the current version at once
+
+
+class RollbackRequest(_Actor):
+    """Make an earlier accepted version current again (LD-189). History is kept."""
+    version: int = Field(ge=1)
 
 
 # ---------- Stored data ----------

@@ -3,6 +3,7 @@
 - LD-195  version management: save a job as a document, immutable versions, audit trail
 - LD-128  automatic update after a source change (only the changed files are regenerated)
 - LD-134  review an update: compare versions, accept / edit / dismiss / regenerate a proposal
+- LD-189  rollback to an earlier version, history kept
 
 Documents are saved to a JSON file (DOCUMENTS_FILE, default data/documents.json, written
 atomically) so they survive a restart. Set DOCUMENTS_FILE= (empty) to keep them in memory only.
@@ -606,6 +607,36 @@ class DocumentStore:
                 if other and other.number != v.number:
                     self._supersede(doc, other, v.number, actor, "Replaced by an edited proposal")
                 doc.pending_version = v.number
+            self._save()
+            return v
+
+    # ---------- LD-189: rollback ----------
+
+    def rollback(self, doc_id: str, to_version: int, actor: Optional[str] = None,
+                 note: Optional[str] = None) -> DocumentVersion:
+        """Make an earlier accepted version current again by copying it into a new version;
+        nothing in the history is deleted."""
+        with self._lock:
+            doc = self.get(doc_id)
+            target = self.version(doc.id, to_version)
+            if target.status != VersionStatus.accepted:
+                raise VersionError(409, f"Version {to_version} was never accepted "
+                                        f"({target.status.value}); only accepted versions can be restored")
+            if target.number == doc.current_version:
+                raise VersionError(409, f"Version {to_version} is already the current version")
+            current = self.version(doc.id)
+            v = DocumentVersion(number=0, status=VersionStatus.accepted, origin=VersionOrigin.rollback,
+                                base_version=current.number, restored_from=target.number,
+                                content=target.content, sections=list(target.sections),
+                                skipped=list(target.skipped),
+                                sections_match_content=target.sections_match_content,
+                                manual=target.manual, confidence=target.confidence,
+                                note=note, created_by=actor, decided_by=actor, decided_at=now())
+            self._add_version(doc, v)
+            doc.current_version = v.number
+            self._event(doc.id, HistoryAction.rolled_back, v.number, actor,
+                        note or f"Restored version {target.number}", related=target.number)
+            self._rebase_pending(doc, actor, f"rollback to version {target.number}")
             self._save()
             return v
 
