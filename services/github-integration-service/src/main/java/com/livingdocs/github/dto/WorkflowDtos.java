@@ -33,7 +33,7 @@ public final class WorkflowDtos {
             Instant submittedAt, Instant reviewedAt, Instant decidedAt, long optimisticVersion) { }
 
     public record ContentResponse(String documentId, int version, String content) { }
-    public record AuditResponse(UUID id, String actorUserId, String action, String previousStatus,
+    public record AuditResponse(UUID id, String actorUserId, String actorRole, String action, String previousStatus,
             String newStatus, String previousReviewerUserId, String newReviewerUserId,
             String comment, Instant createdAt) { }
     public record PageResponse<T>(List<T> content, int page, int size, long totalElements,

@@ -63,6 +63,30 @@ public class DocumentWorkflowService {
     }
 
     @Transactional(readOnly = true)
+    public PageResponse<WorkflowResponse> historyAccessible(String actor, Set<String> authorities,
+            int page, int size) {
+        // Keep discovery permission-only, matching requireReadable exactly. The current role's
+        // permission set is supplied by the authenticated BFF; customized roles remain supported.
+        boolean includeOwned = authorities.contains("DOCUMENT_VIEW");
+        boolean includeStaffQueue = authorities.contains("DOCUMENT_REVIEW_QUEUE_VIEW");
+        boolean includeAssignedReviews = authorities.contains("DOCUMENT_REVIEW");
+        boolean includeManagerDecisions = authorities.contains("DOCUMENT_APPROVAL_QUEUE_VIEW");
+        if (!includeOwned && !includeStaffQueue && !includeAssignedReviews && !includeManagerDecisions) {
+            throw ApiException.forbidden("Missing permission to discover accessible workflow history.");
+        }
+
+        PageRequest validated = page(page, size);
+        PageRequest stableOrder = PageRequest.of(validated.getPageNumber(), validated.getPageSize(),
+                Sort.by(Sort.Order.desc("createdAt"), Sort.Order.asc("id")));
+        Page<DocumentWorkflow> result = workflows.findHistoryAccessible(actor, includeOwned,
+                includeStaffQueue, includeAssignedReviews, includeManagerDecisions,
+                DocumentWorkflowStatus.PENDING_STAFF_REVIEW, DocumentWorkflowStatus.STAFF_REVIEWING,
+                List.of(DocumentWorkflowStatus.PENDING_MANAGER_APPROVAL,
+                        DocumentWorkflowStatus.APPROVED, DocumentWorkflowStatus.REJECTED), stableOrder);
+        return page(result.map(DocumentWorkflowService::toResponse));
+    }
+
+    @Transactional(readOnly = true)
     public PageResponse<WorkflowResponse> staffQueue(String actor, Set<String> authorities, int page, int size) {
         require(authorities, "DOCUMENT_REVIEW_QUEUE_VIEW");
         requireRole(authorities, "STAFF");
@@ -103,7 +127,7 @@ public class DocumentWorkflowService {
         DocumentWorkflow workflow = find(workflowId);
         requireReadable(workflow, actor, authorities);
         return audit.findByWorkflowIdOrderByCreatedAtAsc(workflowId).stream()
-                .map(e -> new AuditResponse(e.getId(), e.getActorUserId(), e.getAction(),
+                .map(e -> new AuditResponse(e.getId(), e.getActorUserId(), e.getActorRole(), e.getAction(),
                         e.getPreviousStatus(), e.getNewStatus(), e.getPreviousReviewerUserId(),
                         e.getNewReviewerUserId(), e.getComment(), e.getCreatedAt()))
                 .toList();
@@ -237,7 +261,7 @@ public class DocumentWorkflowService {
     public WorkflowResponse decide(String actor, Set<String> authorities, UUID workflowId,
             ManagerDecision decision, String comment) {
         require(authorities, decision == ManagerDecision.APPROVED ? "DOCUMENT_APPROVE" : "DOCUMENT_REJECT");
-        requireRole(authorities, "MANAGER");
+        String actorRole = requireRole(authorities, "MANAGER");
         DocumentWorkflow workflow = lock(workflowId);
         if (workflow.getStatus() != DocumentWorkflowStatus.PENDING_MANAGER_APPROVAL
                 || workflow.getStaffReviewResult() != StaffReviewResult.PASSED) {
@@ -274,7 +298,8 @@ public class DocumentWorkflowService {
         }
         workflow.decide(actor, decision, normalizeComment(comment));
         workflows.saveAndFlush(workflow);
-        record(workflow, actor, decision.name(), previous, workflow.getStatus(), comment);
+        record(workflow, actor, decision.name(), previous, workflow.getStatus(), comment,
+                null, null, actorRole);
         return toResponse(workflow);
     }
 
@@ -348,10 +373,11 @@ public class DocumentWorkflowService {
         }
     }
 
-    private void requireRole(Set<String> authorities, String role) {
+    private String requireRole(Set<String> authorities, String role) {
         if (!authorities.contains("ROLE_" + role)) {
             throw ApiException.forbidden("The authenticated primary role cannot perform this workflow action.");
         }
+        return role;
     }
 
     private void requireAdministrator(Set<String> authorities) {
@@ -368,9 +394,15 @@ public class DocumentWorkflowService {
     private void record(DocumentWorkflow w, String actor, String action,
             DocumentWorkflowStatus previous, DocumentWorkflowStatus next, String comment,
             String previousReviewer, String newReviewer) {
+        record(w, actor, action, previous, next, comment, previousReviewer, newReviewer, null);
+    }
+
+    private void record(DocumentWorkflow w, String actor, String action,
+            DocumentWorkflowStatus previous, DocumentWorkflowStatus next, String comment,
+            String previousReviewer, String newReviewer, String actorRole) {
         audit.save(new DocumentWorkflowAudit(w.getId(), actor, action,
                 previous == null ? null : previous.name(), next.name(), normalizeComment(comment),
-                previousReviewer, newReviewer));
+                previousReviewer, newReviewer, actorRole));
     }
 
     private static String normalizeComment(String comment) {
