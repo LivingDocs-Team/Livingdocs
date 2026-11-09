@@ -14,7 +14,7 @@ import time
 import httpx
 import pytest
 
-from conftest import FIXTURES, live_url
+from conftest import DRIFT_FILE, DRIFT_PR, FIXTURES, cart_head_version, live_url
 
 ANALYZER = live_url("ANALYZER_URL")
 AI = live_url("AI_SERVICE_URL")
@@ -80,6 +80,35 @@ def test_analyzer_to_ai_service_pipeline():
     cart = next(f for f in rep["files"] if f["path"] == "shop/cart_service.py")
     total = next(e for e in cart["entities"] if e["name"] == "CartService.total")
     assert total["evidence"][0]["line_start"] is not None, "line numbers lost between services"
+
+
+@pytest.mark.live
+@live
+def test_analyzer_output_to_drift_detection(shop_readme):
+    """LD-150: analyzer result -> saved document -> Pull Request -> drift findings (LD-145)."""
+    a = httpx.post(f"{ANALYZER}/api/v1/analyze-repo", json=analyzer_body(), timeout=30)
+    assert a.status_code == 200, a.text
+    analysis = a.json()
+    g = httpx.post(f"{AI}/generate", json=analysis, timeout=30)
+    job = wait_for(g.json()["id"])
+    assert job["status"] == "completed", job
+    d = httpx.post(f"{AI}/documents", json={"job_id": job["id"], "actor": "ci"}, timeout=10)
+    assert d.status_code == 201, d.text
+
+    before = next(f for f in analysis["files"] if f["path"] == DRIFT_FILE)
+    body = {"repository": "acme/shop", "pull_request": DRIFT_PR,
+            "files": [{"path": DRIFT_FILE, "before": before, "after": cart_head_version(before)}],
+            "docs": [shop_readme], "document_ids": [d.json()["id"]]}
+    r = httpx.post(f"{AI}/drift/analyze", json=body, timeout=30)
+    assert r.status_code == 201, r.text
+    rep = r.json()
+    assert rep["status"] == "drift_detected"
+    found = {(f["entity"], f["type"]) for f in rep["findings"]}
+    assert {("CartService.add_item", "signature"), ("CartService.grand_total", "referential"),
+            ("CartService", "semantic")} <= found
+    assert all(f["evidence"][0]["kind"] == "code_diff" for f in rep["findings"])
+    got = httpx.get(f"{AI}/drift/reports/{rep['id']}", timeout=10)
+    assert got.status_code == 200 and got.json()["summary"] == rep["summary"]
 
 
 @pytest.mark.llm

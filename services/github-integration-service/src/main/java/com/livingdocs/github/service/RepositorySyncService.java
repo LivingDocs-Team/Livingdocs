@@ -137,6 +137,11 @@ public class RepositorySyncService {
                 : sync(userId, repositoryId, SyncOptions.defaults(), verifiedWorkspaceId, verifiedAccess);
     }
 
+    /** Repo đã kết nối của người dùng (404 nếu không có, 403 nếu thuộc người khác). Dùng cho LD-145. */
+    public ConnectedRepository requireOwned(String userId, UUID repositoryId) {
+        return findOwned(userId, repositoryId);
+    }
+
     /** Repo phải tồn tại và thuộc kết nối GitHub của người dùng (kết quả đồng bộ có cả nội dung code). */
     private ConnectedRepository findOwned(String userId, UUID repositoryId) {
         return findOwned(userId, repositoryId, null, "OWNER");
