@@ -39,6 +39,7 @@ class JobOutput:
     skipped: List[Tuple[str, str]] = field(default_factory=list)   # (path, reason)
     confidence: Optional[float] = None
     source_snapshot: Optional[SourceSnapshot] = None
+    evidence_report: Optional[JobReport] = None
 
 
 class JobStore:
@@ -157,17 +158,18 @@ def run_job(job_id: str, req: GenerateRequest, generator: Optional[DocGenerator]
         # job confidence = mean over every documented entity (files weighted by size)
         scores = [e.confidence for fr in file_reports for e in fr.entities]
         overall = round(sum(scores) / len(scores), 2) if scores else None
-        jobs.set_report(JobReport(
-    job_id=job_id,
-    template_id=tpl.id,
-    template_name=tpl.name,
-    template_instructions=tpl.instructions,
-    template_sections=list(tpl.sections),
-    confidence=overall,
-    level=level_of(overall),
-    method=METHOD,
-    files=file_reports,
-))
+        report = JobReport(
+            job_id=job_id,
+            template_id=tpl.id,
+            template_name=tpl.name,
+            template_instructions=tpl.instructions,
+            template_sections=list(tpl.sections),
+            confidence=overall,
+            level=level_of(overall),
+            method=METHOD,
+            files=file_reports,
+        )
+        jobs.set_report(report)
 
         if req.scope == Scope.file and len(docs) == 1 and not skipped:
             result = docs[0]
@@ -175,8 +177,7 @@ def run_job(job_id: str, req: GenerateRequest, generator: Optional[DocGenerator]
             overview = render_overview(req.target, documented, skipped, req.output_language, overall,
                                        template_name=tpl.name)
             result = "\n\n---\n\n".join([overview, *docs])
-
-            jobs.set_output(job_id, JobOutput(
+        jobs.set_output(job_id, JobOutput(
             scope=req.scope,
             target=req.target,
             template_id=tpl.id,
@@ -186,6 +187,7 @@ def run_job(job_id: str, req: GenerateRequest, generator: Optional[DocGenerator]
             skipped=list(skipped),
             confidence=overall,
             source_snapshot=req.source_snapshot,
+            evidence_report=report,
         ))
         msg = "Completed" if not warnings else f"Completed with {len(warnings)} warning(s)"
         jobs.update(job_id, status=JobStatus.completed, progress=1.0, message=msg,

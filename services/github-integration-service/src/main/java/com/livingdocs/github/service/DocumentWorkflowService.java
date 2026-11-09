@@ -63,6 +63,30 @@ public class DocumentWorkflowService {
     }
 
     @Transactional(readOnly = true)
+    public PageResponse<WorkflowResponse> historyAccessible(String actor, Set<String> authorities,
+            int page, int size) {
+        // Keep discovery permission-only, matching requireReadable exactly. The current role's
+        // permission set is supplied by the authenticated BFF; customized roles remain supported.
+        boolean includeOwned = authorities.contains("DOCUMENT_VIEW");
+        boolean includeStaffQueue = authorities.contains("DOCUMENT_REVIEW_QUEUE_VIEW");
+        boolean includeAssignedReviews = authorities.contains("DOCUMENT_REVIEW");
+        boolean includeManagerDecisions = authorities.contains("DOCUMENT_APPROVAL_QUEUE_VIEW");
+        if (!includeOwned && !includeStaffQueue && !includeAssignedReviews && !includeManagerDecisions) {
+            throw ApiException.forbidden("Missing permission to discover accessible workflow history.");
+        }
+
+        PageRequest validated = page(page, size);
+        PageRequest stableOrder = PageRequest.of(validated.getPageNumber(), validated.getPageSize(),
+                Sort.by(Sort.Order.desc("createdAt"), Sort.Order.asc("id")));
+        Page<DocumentWorkflow> result = workflows.findHistoryAccessible(actor, includeOwned,
+                includeStaffQueue, includeAssignedReviews, includeManagerDecisions,
+                DocumentWorkflowStatus.PENDING_STAFF_REVIEW, DocumentWorkflowStatus.STAFF_REVIEWING,
+                List.of(DocumentWorkflowStatus.PENDING_MANAGER_APPROVAL,
+                        DocumentWorkflowStatus.APPROVED, DocumentWorkflowStatus.REJECTED), stableOrder);
+        return page(result.map(DocumentWorkflowService::toResponse));
+    }
+
+    @Transactional(readOnly = true)
     public PageResponse<WorkflowResponse> staffQueue(String actor, Set<String> authorities, int page, int size) {
         require(authorities, "DOCUMENT_REVIEW_QUEUE_VIEW");
         requireRole(authorities, "STAFF");
@@ -97,7 +121,7 @@ public class DocumentWorkflowService {
         return new ContentResponse(workflow.getDocumentId(), version,
                 documents.getDocumentContent(actor, workflow.getDocumentId(), version));
     }
-            @Transactional(readOnly = true)
+    @Transactional(readOnly = true)
     public JsonNode reviewEvidence(String actor, Set<String> authorities, UUID workflowId) {
         require(authorities, "DOCUMENT_REVIEW");
         requireRole(authorities, "STAFF");
@@ -159,12 +183,35 @@ public class DocumentWorkflowService {
 
         return comparison;
     }
+
+    @Transactional(readOnly = true)
+    public JsonNode evidence(String actor, Set<String> authorities, UUID workflowId) {
+        require(authorities, "DOCUMENT_APPROVAL_QUEUE_VIEW");
+        requireRole(authorities, "MANAGER");
+
+        DocumentWorkflow workflow = find(workflowId);
+        requireReadable(workflow, actor, authorities);
+
+        if (workflow.getStaffReviewResult() != StaffReviewResult.PASSED) {
+            throw ApiException.forbidden(
+                    "Grounding evidence is available only after a successful staff review.");
+        }
+
+        JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
+        requireDocumentOwner(document, workflow.getOwnerUserId());
+
+        int version = workflow.getSubmittedDocumentVersion() == null
+                ? visibleDocumentVersion(workflow, document)
+                : workflow.getSubmittedDocumentVersion();
+
+        return documents.getDocumentEvidence(actor, workflow.getDocumentId(), version);
+    }
     @Transactional(readOnly = true)
     public List<AuditResponse> history(String actor, Set<String> authorities, UUID workflowId) {
         DocumentWorkflow workflow = find(workflowId);
         requireReadable(workflow, actor, authorities);
         return audit.findByWorkflowIdOrderByCreatedAtAsc(workflowId).stream()
-                .map(e -> new AuditResponse(e.getId(), e.getActorUserId(), e.getAction(),
+                .map(e -> new AuditResponse(e.getId(), e.getActorUserId(), e.getActorRole(), e.getAction(),
                         e.getPreviousStatus(), e.getNewStatus(), e.getPreviousReviewerUserId(),
                         e.getNewReviewerUserId(), e.getComment(), e.getCreatedAt()))
                 .toList();
@@ -298,7 +345,7 @@ public class DocumentWorkflowService {
     public WorkflowResponse decide(String actor, Set<String> authorities, UUID workflowId,
             ManagerDecision decision, String comment) {
         require(authorities, decision == ManagerDecision.APPROVED ? "DOCUMENT_APPROVE" : "DOCUMENT_REJECT");
-        requireRole(authorities, "MANAGER");
+        String actorRole = requireRole(authorities, "MANAGER");
         DocumentWorkflow workflow = lock(workflowId);
         if (workflow.getStatus() != DocumentWorkflowStatus.PENDING_MANAGER_APPROVAL
                 || workflow.getStaffReviewResult() != StaffReviewResult.PASSED) {
@@ -335,10 +382,92 @@ public class DocumentWorkflowService {
         }
         workflow.decide(actor, decision, normalizeComment(comment));
         workflows.saveAndFlush(workflow);
-        record(workflow, actor, decision.name(), previous, workflow.getStatus(), comment);
+        record(workflow, actor, decision.name(), previous, workflow.getStatus(), comment,
+                null, null, actorRole);
         return toResponse(workflow);
     }
+    @Transactional
+    public WorkflowResponse rollback(
+        String actor,
+        Set<String> authorities,
+        UUID workflowId,
+        Integer sourceVersion,
+        String reason) {
 
+    // Chỉ Manager có quyền rollback.
+    require(authorities, "DOCUMENT_ROLLBACK");
+    requireRole(authorities, "MANAGER");
+
+    DocumentWorkflow workflow = lock(workflowId);
+
+    // Chỉ cho phép rollback tài liệu đã được duyệt.
+    if (workflow.getStatus() != DocumentWorkflowStatus.APPROVED) {
+        throw conflict("Only an approved document can be rolled back.");
+    }
+
+    if (sourceVersion == null || sourceVersion <= 0) {
+        throw ApiException.badRequest("A valid source version is required.");
+    }
+
+    String comment = normalizeComment(reason);
+
+    if (comment == null) {
+        throw ApiException.badRequest("A rollback reason is required.");
+    }
+
+    // Không cho chọn chính phiên bản đang được duyệt.
+    if (workflow.getSubmittedDocumentVersion() != null
+            && sourceVersion.equals(workflow.getSubmittedDocumentVersion())) {
+        throw ApiException.badRequest(
+                "The source version must be different from the currently approved version.");
+    }
+
+    JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
+    requireDocumentOwner(document, workflow.getOwnerUserId());
+
+    int pendingVersion = document.path("pending_version").asInt(0);
+    int currentVersion = document.path("current_version").asInt(0);
+
+    // Không rollback nếu tài liệu đang có phiên bản chờ xử lý
+    // hoặc phiên bản hiện tại không khớp workflow.
+    if (pendingVersion != 0
+            || currentVersion != workflow.getSubmittedDocumentVersion()) {
+        throw conflict("The document version changed. Reload and retry.");
+    }
+
+    // Yêu cầu AI service tạo phiên bản mới từ phiên bản đã duyệt.
+    JsonNode rollbackVersion = documents.rollbackDocumentVersion(
+            actor,
+            workflow.getOwnerUserId(),
+            workflow.getDocumentId(),
+            sourceVersion,
+            comment
+    );
+
+    int newVersion = rollbackVersion.path("number").asInt(0);
+
+    if (newVersion <= 0) {
+        throw conflict("The rollback service returned an invalid version.");
+    }
+
+    DocumentWorkflowStatus previous = workflow.getStatus();
+
+    // Phiên bản rollback phải được Staff Review lại.
+    workflow.startRollbackReview(newVersion);
+
+    workflows.saveAndFlush(workflow);
+
+    record(
+            workflow,
+            actor,
+            "ROLLBACK_REQUESTED",
+            previous,
+            workflow.getStatus(),
+            "Restored from version " + sourceVersion + ". Reason: " + comment
+    );
+
+    return toResponse(workflow);
+}
     private DocumentWorkflow lock(UUID id) {
         try {
             return workflows.lockById(id).orElseThrow(() -> ApiException.notFound("Document workflow not found."));
@@ -409,10 +538,11 @@ public class DocumentWorkflowService {
         }
     }
 
-    private void requireRole(Set<String> authorities, String role) {
+    private String requireRole(Set<String> authorities, String role) {
         if (!authorities.contains("ROLE_" + role)) {
             throw ApiException.forbidden("The authenticated primary role cannot perform this workflow action.");
         }
+        return role;
     }
 
     private void requireAdministrator(Set<String> authorities) {
@@ -429,9 +559,15 @@ public class DocumentWorkflowService {
     private void record(DocumentWorkflow w, String actor, String action,
             DocumentWorkflowStatus previous, DocumentWorkflowStatus next, String comment,
             String previousReviewer, String newReviewer) {
+        record(w, actor, action, previous, next, comment, previousReviewer, newReviewer, null);
+    }
+
+    private void record(DocumentWorkflow w, String actor, String action,
+            DocumentWorkflowStatus previous, DocumentWorkflowStatus next, String comment,
+            String previousReviewer, String newReviewer, String actorRole) {
         audit.save(new DocumentWorkflowAudit(w.getId(), actor, action,
                 previous == null ? null : previous.name(), next.name(), normalizeComment(comment),
-                previousReviewer, newReviewer));
+                previousReviewer, newReviewer, actorRole));
     }
 
     private static String normalizeComment(String comment) {
