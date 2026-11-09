@@ -140,6 +140,19 @@ function renderMarkdown(markdown) {
   return output.join('\n');
 }
 
+function formatAuditTimestamp(value) {
+  if (!value) return 'Timestamp unavailable';
+  const timestamp = new Date(value);
+  return Number.isNaN(timestamp.getTime()) ? value : timestamp.toLocaleString();
+}
+
+function workflowRequestError(error, resource) {
+  if (error?.status === 401) return 'Your session has expired. Sign in again to view approval history.';
+  if (error?.status === 403) return `You do not have permission to view ${resource}.`;
+  if (error?.status === 404) return 'The requested workflow could not be found.';
+  return error?.message || `Could not load ${resource}. Please try again.`;
+}
+
 export default function DocumentationManagement({ userId }) {
 
   const workspaceId = userId ? `ws-${userId}` : '';
@@ -175,6 +188,118 @@ export default function DocumentationManagement({ userId }) {
 
   const [jobId, setJobId] = useState('');
   const [job, setJob] = useState(null);
+
+  const [workflowPageIndex, setWorkflowPageIndex] = useState(0);
+  const [workflowPage, setWorkflowPage] = useState({
+    content: [], page: 0, size: 20, totalElements: 0, totalPages: 0, first: true, last: true,
+  });
+  const [isLoadingWorkflows, setIsLoadingWorkflows] = useState(Boolean(userId));
+  const [workflowsError, setWorkflowsError] = useState('');
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
+  const [history, setHistory] = useState([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+
+  useEffect(() => {
+    if (!userId) {
+      let cancelled = false;
+      Promise.resolve().then(() => {
+        if (cancelled) return;
+        setWorkflowPage({
+          content: [], page: 0, size: 20, totalElements: 0, totalPages: 0, first: true, last: true,
+        });
+        setSelectedWorkflowId('');
+        setIsLoadingWorkflows(false);
+      });
+      return () => { cancelled = true; };
+    }
+
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return undefined;
+      setIsLoadingWorkflows(true);
+      setWorkflowsError('');
+      return githubApi(`/api/document-workflows/history-accessible?page=${workflowPageIndex}&size=20`, { userId });
+    })
+      .then((result) => {
+        if (cancelled) return;
+        const content = Array.isArray(result?.content) ? result.content : [];
+        const totalPages = Number.isInteger(result?.totalPages)
+          ? result.totalPages
+          : (content.length ? 1 : 0);
+        if (workflowPageIndex > 0 && workflowPageIndex >= totalPages) {
+          setWorkflowPageIndex(Math.max(0, totalPages - 1));
+          return;
+        }
+        setWorkflowPage({
+          content,
+          page: Number.isInteger(result?.page) ? result.page : workflowPageIndex,
+          size: Number.isInteger(result?.size) ? result.size : 20,
+          totalElements: Number.isFinite(result?.totalElements) ? result.totalElements : content.length,
+          totalPages,
+          first: result?.first ?? workflowPageIndex === 0,
+          last: result?.last ?? true,
+        });
+        setSelectedWorkflowId((current) => (
+          content.some((workflow) => String(workflow.id) === current)
+            ? current
+            : String(content[0]?.id || '')
+        ));
+      })
+      .catch((requestError) => {
+        if (cancelled) return;
+        setWorkflowPage({
+          content: [], page: workflowPageIndex, size: 20, totalElements: 0,
+          totalPages: 0, first: true, last: true,
+        });
+        setSelectedWorkflowId('');
+        setWorkflowsError(workflowRequestError(requestError, 'your document workflows'));
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingWorkflows(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [userId, workflowPageIndex]);
+
+  useEffect(() => {
+    if (!userId || !selectedWorkflowId) {
+      let cancelled = false;
+      Promise.resolve().then(() => {
+        if (cancelled) return;
+        setHistory([]);
+        setHistoryError('');
+        setIsLoadingHistory(false);
+      });
+      return () => { cancelled = true; };
+    }
+
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return undefined;
+      setIsLoadingHistory(true);
+      setHistoryError('');
+      return githubApi(`/api/document-workflows/${encodeURIComponent(selectedWorkflowId)}/history`, { userId });
+    })
+      .then((events) => {
+        if (!cancelled) setHistory(Array.isArray(events) ? events : []);
+      })
+      .catch((requestError) => {
+        if (cancelled) return;
+        setHistory([]);
+        setHistoryError(workflowRequestError(requestError, 'this approval history'));
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingHistory(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [userId, selectedWorkflowId]);
+
+  const selectedWorkflow = workflowPage.content.find(
+    (workflow) => String(workflow.id) === selectedWorkflowId
+  );
+
   useEffect(() => {
 
     if (!userId) return undefined;
@@ -626,6 +751,126 @@ export default function DocumentationManagement({ userId }) {
           </div>
 
         </form>
+
+        <section className="documentation-panel" aria-labelledby="approval-history-heading">
+          <h3 id="approval-history-heading">Approval History</h3>
+          <p className="documentation-hint">
+            Review audit history for document workflows available to your role.
+          </p>
+
+          {!userId && (
+            <p className="documentation-empty" role="status">
+              Sign in to view your document workflows.
+            </p>
+          )}
+
+          {userId && isLoadingWorkflows && (
+            <p role="status" aria-live="polite">Loading your document workflows…</p>
+          )}
+
+          {userId && !isLoadingWorkflows && workflowsError && (
+            <p className="documentation-error" role="alert">{workflowsError}</p>
+          )}
+
+          {userId && !isLoadingWorkflows && !workflowsError && workflowPage.content.length === 0 && (
+            <div className="documentation-empty">
+              <h3>No accessible document workflows</h3>
+              <p>Approval history appears here for workflows you own or can review.</p>
+            </div>
+          )}
+
+          {userId && !isLoadingWorkflows && !workflowsError && workflowPage.content.length > 0 && (
+            <>
+              <label htmlFor="approval-history-workflow">Select a document workflow</label>
+              <select
+                id="approval-history-workflow"
+                value={selectedWorkflowId}
+                onChange={(event) => {
+                  setHistory([]);
+                  setHistoryError('');
+                  setSelectedWorkflowId(event.target.value);
+                }}
+              >
+                {workflowPage.content.map((workflow) => (
+                  <option key={workflow.id} value={workflow.id}>
+                    {workflow.documentTitle || 'Untitled document'} — document {workflow.documentId}
+                  </option>
+                ))}
+              </select>
+
+              {workflowPage.totalPages > 1 && (
+                <div className="documentation-actions" role="group" aria-label="Workflow list pagination">
+                  <button
+                    type="button"
+                    className="documentation-secondary-button"
+                    disabled={isLoadingWorkflows || workflowPage.first || workflowPageIndex === 0}
+                    onClick={() => {
+                      setHistory([]);
+                      setSelectedWorkflowId('');
+                      setWorkflowPageIndex((page) => Math.max(0, page - 1));
+                    }}
+                  >
+                    Previous workflows
+                  </button>
+                  <span role="status" aria-live="polite">
+                    Page {workflowPage.page + 1} of {workflowPage.totalPages} · {workflowPage.totalElements} workflows
+                  </span>
+                  <button
+                    type="button"
+                    className="documentation-secondary-button"
+                    disabled={isLoadingWorkflows || workflowPage.last
+                      || workflowPageIndex >= workflowPage.totalPages - 1}
+                    onClick={() => {
+                      setHistory([]);
+                      setSelectedWorkflowId('');
+                      setWorkflowPageIndex((page) => Math.min(workflowPage.totalPages - 1, page + 1));
+                    }}
+                  >
+                    Next workflows
+                  </button>
+                </div>
+              )}
+
+              {selectedWorkflow && (
+                <p className="documentation-hint">
+                  Document ID: {selectedWorkflow.documentId} · Workflow ID: {selectedWorkflow.id}
+                </p>
+              )}
+
+              {isLoadingHistory && (
+                <p role="status" aria-live="polite">Loading approval history…</p>
+              )}
+
+              {!isLoadingHistory && historyError && (
+                <p className="documentation-error" role="alert">{historyError}</p>
+              )}
+
+              {!isLoadingHistory && !historyError && selectedWorkflowId && history.length === 0 && (
+                <div className="documentation-empty">
+                  <p>No approval history events are available for this workflow.</p>
+                </div>
+              )}
+
+              {!isLoadingHistory && !historyError && selectedWorkflowId && history.length > 0 && (
+                <ol className="documentation-approval-history">
+                  {history.map((event, index) => (
+                    <li key={event.id || `${event.createdAt}-${index}`}>
+                      <article className="documentation-version-card">
+                        <strong>{event.action || 'Action unavailable'}</strong>
+                        <p>Actor user ID: {event.actorUserId || 'Unavailable'}</p>
+                        <p>Actor role: {event.actorRole || 'Not recorded'}</p>
+                        <p>Timestamp: {formatAuditTimestamp(event.createdAt)}</p>
+                        <p>Previous status: {event.previousStatus || '—'}</p>
+                        <p>New status: {event.newStatus || '—'}</p>
+                        {event.comment && <p>Comment / reason: {event.comment}</p>}
+                      </article>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </>
+          )}
+        </section>
 
         {isManagingTemplates && (
           <TemplateManager
