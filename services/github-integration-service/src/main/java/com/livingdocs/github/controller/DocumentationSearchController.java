@@ -29,7 +29,8 @@ public class DocumentationSearchController {
     @GetMapping(path = "/api/repositories/{id}/documentation/search", produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "Search analyzed documentation and code entities in an authorized repository")
     public DocumentationSearchResponse search(@RequestHeader(USER_HEADER) String userId,
-            @PathVariable UUID id, @RequestParam("q") String query) {
-        return searchService.search(userId, id, query);
+            @PathVariable UUID id, @RequestParam("q") String query,
+            @RequestHeader(value = "X-Verified-Workspace-Id", required = false) String verifiedWorkspaceId) {
+        return searchService.search(userId, id, query, verifiedWorkspaceId);
     }
 }
