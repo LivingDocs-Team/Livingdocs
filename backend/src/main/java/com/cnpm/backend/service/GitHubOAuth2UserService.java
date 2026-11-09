@@ -1,14 +1,20 @@
 package com.cnpm.backend.service;
 
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.AuthenticationServiceException;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
+import org.springframework.security.oauth2.core.OAuth2Error;
+import org.springframework.security.oauth2.core.user.DefaultOAuth2User;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -55,11 +61,31 @@ public class GitHubOAuth2UserService extends DefaultOAuth2UserService {
 
         String githubId = String.valueOf(idAttribute);
 
-        userRepository.findByGithubId(githubId)
+        User user = userRepository.findByGithubId(githubId)
                 .orElseGet(() -> createGitHubUser(attributes, githubId));
 
-        return new org.springframework.security.oauth2.core.user.DefaultOAuth2User(
-                githubUser.getAuthorities(),
+        if (!user.isActive()) {
+            throw new OAuth2AuthenticationException(
+                    new OAuth2Error("account_disabled"),
+                    "This account has been disabled");
+        }
+
+        Set<GrantedAuthority> authorities = new HashSet<>(githubUser.getAuthorities());
+
+        String roleName = user.getRole();
+        if (roleName != null && !roleName.isBlank()) {
+            authorities.add(new SimpleGrantedAuthority("ROLE_" + roleName));
+            if (roleRepository != null) {
+                roleRepository.findWithPermissionsByName(roleName).ifPresent(role -> {
+                    role.getPermissions().forEach(permission ->
+                        authorities.add(new SimpleGrantedAuthority(permission.getCode()))
+                    );
+                });
+            }
+        }
+
+        return new DefaultOAuth2User(
+                authorities,
                 attributes,
                 "id");
     }

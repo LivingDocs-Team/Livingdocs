@@ -9,6 +9,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.cnpm.backend.controller.GitHubOAuthController;
+import com.cnpm.backend.repository.UserRepository;
 import com.cnpm.backend.service.GitHubOAuthService;
 
 import static org.mockito.Mockito.times;
@@ -19,7 +20,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(GitHubOAuthController.class)
-@AutoConfigureMockMvc(addFilters = false) // Tắt Security Filters để loại bỏ lỗi 302 Redirect
+@AutoConfigureMockMvc(addFilters = false)
 class GitHubOAuthControllerTest {
 
     @Autowired
@@ -27,6 +28,9 @@ class GitHubOAuthControllerTest {
 
     @MockitoBean
     private GitHubOAuthService gitHubOAuthService;
+
+    @MockitoBean
+    private UserRepository userRepository;
 
     public record AuthTokenResponse(String accessToken) {}
 
