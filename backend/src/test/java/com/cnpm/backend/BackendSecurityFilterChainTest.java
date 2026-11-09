@@ -1,9 +1,12 @@
 package com.cnpm.backend;
 
 import com.cnpm.backend.config.SecurityConfig;
+import com.cnpm.backend.config.AccountStatusFilter;
 import com.cnpm.backend.config.SpaCsrfTokenRequestHandler;
 import com.cnpm.backend.entity.User;
 import com.cnpm.backend.repository.UserRepository;
+import com.cnpm.backend.repository.RoleRepository;
+import com.cnpm.backend.repository.PermissionRepository;
 import com.cnpm.backend.service.CustomUserDetailsService;
 import com.cnpm.backend.service.GitHubOAuth2UserService;
 import jakarta.servlet.http.Cookie;
@@ -32,6 +35,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.core.userdetails.User.withUsername;
@@ -42,14 +46,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(controllers = {
         com.cnpm.backend.controller.GitHubIntegrationBffController.class,
         com.cnpm.backend.controller.CsrfTokenController.class,
-        com.cnpm.backend.controller.UserLoginController.class
+        com.cnpm.backend.controller.UserLoginController.class,
+        com.cnpm.backend.controller.AdminUserController.class,
+        com.cnpm.backend.controller.AdminRoleController.class
 }, properties = {
         "services.github-integration.base-url=http://127.0.0.1:1",
         "services.github-integration.internal-secret=filter-chain-test-credential",
         "SESSION_COOKIE_SECURE=false",
         "SESSION_COOKIE_SAME_SITE=Lax"
 })
-@Import({SecurityConfig.class, SpaCsrfTokenRequestHandler.class,
+@Import({SecurityConfig.class, AccountStatusFilter.class, SpaCsrfTokenRequestHandler.class,
         BackendSecurityFilterChainTest.TestBeans.class})
 class BackendSecurityFilterChainTest {
 
@@ -66,7 +72,12 @@ class BackendSecurityFilterChainTest {
     private UserRepository userRepository;
 
     @Autowired
+    private RoleRepository roleRepository;
+
+    @Autowired
     private PasswordEncoder passwordEncoder;
+
+    private User testUser;
 
     @BeforeEach
     void setUp() {
@@ -76,10 +87,10 @@ class BackendSecurityFilterChainTest {
                 .build();
         when(userDetailsService.loadUserByUsername(EMAIL)).thenReturn(details);
 
-        User user = new User(EMAIL, "test-encoded-password", "Bff", "User", "DEVELOPER", true);
-        user.setUsername("bff-user");
-        ReflectionTestUtils.setField(user, "id", 73L);
-        when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
+        testUser = new User(EMAIL, "test-encoded-password", "Bff", "User", "DEVELOPER", true);
+        testUser.setUsername("bff-user");
+        ReflectionTestUtils.setField(testUser, "id", 73L);
+        when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(testUser));
     }
 
     @Test
@@ -121,7 +132,7 @@ class BackendSecurityFilterChainTest {
                         .content("{\"githubRepoIds\":[]}"))
                 .andExpect(status().isBadGateway());
 
-        verify(userRepository).findByEmail(EMAIL);
+        verify(userRepository, atLeastOnce()).findByEmail(EMAIL);
     }
 
     @Test
@@ -140,6 +151,52 @@ class BackendSecurityFilterChainTest {
         mvc.perform(get("/api/github/connection")
                         .cookie(new Cookie("JSESSIONID", sessionId)))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void developerCannotAccessAdminUserManagementApi() throws Exception {
+        Csrf csrf = fetchCsrf();
+        MockHttpSession session = login(csrf);
+
+        mvc.perform(get("/api/admin/users").session(session))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void administratorAndLegacyAdminNeedBothAdminRoleAndPermissionAuthority() throws Exception {
+        Csrf csrf = fetchCsrf();
+        when(roleRepository.findAll()).thenReturn(java.util.List.of());
+
+        MockHttpSession administrator = loginWithAuthorities(csrf, "ROLE_ADMINISTRATOR", "ROLE_VIEW");
+        mvc.perform(get("/api/admin/roles").session(administrator)).andExpect(status().isOk());
+
+        MockHttpSession legacyAdmin = loginWithAuthorities(csrf, "ROLE_ADMIN", "ROLE_VIEW");
+        mvc.perform(get("/api/admin/roles").session(legacyAdmin)).andExpect(status().isOk());
+
+        MockHttpSession missingPermission = loginWithAuthorities(csrf, "ROLE_ADMIN");
+        mvc.perform(get("/api/admin/roles").session(missingPermission)).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void staffAndManagerPermissionsDoNotGrantSystemAdministration() throws Exception {
+        Csrf csrf = fetchCsrf();
+        MockHttpSession staff = loginWithAuthorities(csrf, "ROLE_STAFF", "DOCUMENT_REVIEW_QUEUE_VIEW");
+        mvc.perform(get("/api/admin/roles").session(staff)).andExpect(status().isForbidden());
+
+        MockHttpSession manager = loginWithAuthorities(csrf, "ROLE_MANAGER", "DOCUMENT_APPROVAL_QUEUE_VIEW");
+        mvc.perform(get("/api/admin/roles").session(manager)).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void disabledAccountSessionIsRejectedAndInvalidatedOnNextRequest() throws Exception {
+        Csrf csrf = fetchCsrf();
+        MockHttpSession session = login(csrf);
+        testUser.setActive(false);
+
+        mvc.perform(get("/api/github/connection").session(session))
+                .andExpect(status().isUnauthorized());
+
+        assertThat(session.isInvalid()).isTrue();
     }
 
     @Test
@@ -190,6 +247,15 @@ class BackendSecurityFilterChainTest {
         return (MockHttpSession) result.getRequest().getSession(false);
     }
 
+    private MockHttpSession loginWithAuthorities(Csrf csrf, String... authorities) throws Exception {
+        UserDetails details = withUsername(EMAIL)
+                .password(passwordEncoder.encode(PASSWORD))
+                .authorities(authorities)
+                .build();
+        when(userDetailsService.loadUserByUsername(EMAIL)).thenReturn(details);
+        return login(csrf);
+    }
+
     private record Csrf(String token, Cookie cookie) {
     }
 
@@ -205,6 +271,18 @@ class BackendSecurityFilterChainTest {
         @Primary
         UserRepository testUserRepository() {
             return mock(UserRepository.class);
+        }
+
+        @Bean
+        @Primary
+        RoleRepository testRoleRepository() {
+            return mock(RoleRepository.class);
+        }
+
+        @Bean
+        @Primary
+        PermissionRepository testPermissionRepository() {
+            return mock(PermissionRepository.class);
         }
 
         @Bean
