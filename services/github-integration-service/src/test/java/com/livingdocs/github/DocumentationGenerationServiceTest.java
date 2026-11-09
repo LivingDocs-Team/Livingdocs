@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -202,6 +203,46 @@ class DocumentationGenerationServiceTest {
                 () -> generationService.getJob("different-user", "job-owned"));
 
         assertEquals(HttpStatus.FORBIDDEN, error.getStatus());
+        aiServiceServer.verify();
+    }
+
+    @Test
+    void savesOwnedDocumentOnlyForTheAuthenticatedJobOwner() throws Exception {
+        analyzerServer.expect(requestTo("http://analyzer.test/api/v1/analyze-repo"))
+                .andRespond(withSuccess(ANALYSIS, MediaType.APPLICATION_JSON));
+        aiServiceServer.expect(requestTo("http://ai.test/generate"))
+                .andRespond(withStatus(HttpStatus.ACCEPTED).contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"id\":\"job-doc\",\"status\":\"pending\"}"));
+        aiServiceServer.expect(requestTo("http://ai.test/internal/documents/from-job"))
+                .andExpect(method(POST))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.header("X-User-Id", USER_ID))
+                .andExpect(content().json("{\"job_id\":\"job-doc\",\"title\":\"Review me\"}"))
+                .andRespond(withSuccess("{\"id\":\"owned-doc\",\"owner_user_id\":\"integration-user\"}",
+                        MediaType.APPLICATION_JSON));
+
+        generationService.generate(USER_ID, REPOSITORY_ID, null);
+        JsonNode document = generationService.saveOwnedDocument(USER_ID,
+                Set.of("DOCUMENT_CREATE"), "job-doc", "Review me");
+
+        assertEquals("owned-doc", document.path("id").asText());
+        assertEquals(USER_ID, document.path("owner_user_id").asText());
+        analyzerServer.verify();
+        aiServiceServer.verify();
+    }
+
+    @Test
+    void cannotSaveAnotherUsersJobOrSaveWithoutDocumentCreatePermission() {
+        analyzerServer.expect(requestTo("http://analyzer.test/api/v1/analyze-repo"))
+                .andRespond(withSuccess(ANALYSIS, MediaType.APPLICATION_JSON));
+        aiServiceServer.expect(requestTo("http://ai.test/generate"))
+                .andRespond(withStatus(HttpStatus.ACCEPTED).contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"id\":\"job-protected\",\"status\":\"pending\"}"));
+        generationService.generate(USER_ID, REPOSITORY_ID, null);
+
+        assertEquals(403, assertThrows(ApiException.class, () -> generationService.saveOwnedDocument(
+                USER_ID, Set.of(), "job-protected", null)).getStatus().value());
+        assertEquals(403, assertThrows(ApiException.class, () -> generationService.saveOwnedDocument(
+                "another-user", Set.of("DOCUMENT_CREATE"), "job-protected", null)).getStatus().value());
         aiServiceServer.verify();
     }
 
