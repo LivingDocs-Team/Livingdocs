@@ -81,7 +81,7 @@ Chạy thử với GitHub thật (repo public, không cần token): chạy `GitH
 
 ## Nhận Pull Request và commit (LD-68)
 
-Hai nguồn, cùng ghi vào bảng `github_pull_requests` và `github_commits` (migration `V2`):
+Hai nguồn, cùng ghi vào bảng `github_pull_requests` và `github_commits` (migration `V4`):
 
 - **Webhook** `POST /api/github/webhook`: kiểm chữ ký bằng `GITHUB_WEBHOOK_SECRET`, chỉ nhận event `push` và `pull_request` của repo đã thêm vào workspace. GitHub gửi lại cùng `X-GitHub-Delivery` thì trả `DUPLICATE`, không ghi lần hai. Push tag hoặc xoá nhánh không tạo commit.
 - **Lấy bù khi đồng bộ**: mỗi lần `POST /api/repositories/{id}/sync` thành công thì lưu các commit gần nhất của nhánh và 30 Pull Request cập nhật gần nhất, để không mất dữ liệu khi webhook bị lỡ (service tắt, mạng lỗi). Không lấy được danh sách PR thì chỉ ghi log, lần đồng bộ vẫn thành công.
