@@ -194,7 +194,17 @@ class BackendSecurityFilterChainTest {
 
     @Test
     void disabledAccountSessionIsRejectedAndInvalidatedOnNextRequest() throws Exception {
-        Csrf csrf = fetchCsrf();
+        if (this.testUser == null) {
+            this.testUser = userRepository.findByEmail("bff-user@example.test").orElseGet(() -> {
+                User u = new User("bff-user@example.test", "test-password", "First", "Last", "DEVELOPER", true);
+                return userRepository.save(u);
+           });
+    }
+
+    this.testUser.setActive(false);
+    userRepository.save(this.testUser);
+    
+    Csrf csrf = fetchCsrf();
         MockHttpSession session = login(csrf);
         testUser.setActive(false);
 
