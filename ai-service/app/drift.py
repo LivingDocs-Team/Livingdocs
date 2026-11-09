@@ -7,24 +7,21 @@ Pipeline for one Pull Request:
     LD-147  classify (this module)               -> findings: type + severity + confidence
     LD-149  drift_evidence.build_evidence        -> code diff, doc passage, commit, ticket
 
-Classification (BR-49):
+Classification (BR-49, LD-151): each finding has a `type`, a `kind` inside it (DRIFT_KINDS),
+`breaking` and the `rules` that set its severity (Low < Medium < High < Critical):
 
-    Referential  the documentation names code that is gone: a removed or renamed entity, an
-                 endpoint path that moved, a deleted or moved source file
-    Signature    the documentation describes an entity whose parameters, return type, fields or
-                 endpoint contract changed
-    Semantic     the entity keeps its signature but its body or docstring changed, or a new
-                 entity was added to a documented file and is not described
+    Referential  LD-152 app/drift_referential.py  the documentation names code that is gone:
+                 removed / renamed entity, moved endpoint, deleted or moved file or module,
+                 line references (`path:12-30`) that no longer point to the same code
+    Signature    LD-153 app/drift_signature.py    the documented contract changed: parameters
+                 (removed, renamed, added, type, default, order), return type, class fields,
+                 HTTP method, request body / response; breaking or not
+    Semantic     LD-154 app/drift_semantic.py     same signature, other behaviour: status codes,
+                 exceptions, values, docstring, implementation; new code not documented
 
-Severity (Low < Medium < High < Critical):
-
-    removed / renamed entity            High    (endpoint: Critical)
-    signature changed                   Medium  (endpoint +1; the doc names a removed parameter +1)
-    behaviour changed                   Low     (docstring changed +1; >= 15 changed lines +1)
-    new entity not documented           Low
-    section of a deleted file           High;   other mention of a deleted file: Medium
-    moved file named in the docs        Medium; the moved file's own section: Low
-    private names (_name)               -1      (never below Low)
+The documentation is also checked for what it still says (old parameter, type, default,
+exception, status code, value, docstring sentence): such passages raise the severity by one level
+and are listed as evidence.
 
 Confidence (0-1, same levels as LD-340: high >= 0.75, medium >= 0.50):
 
@@ -40,138 +37,58 @@ import uuid
 from collections import Counter, OrderedDict
 from typing import List, Optional, Tuple
 
+from . import drift_referential, drift_semantic, drift_signature
 from .confidence import level_of
-from .drift_affected import FILE_REMOVED, FILE_RENAMED, DocText, Hit, collect_docs, entity_terms, \
-    find_affected, search
+from .drift_affected import DocText, Hit, collect_docs, find_affected
 from .drift_changes import analyze_pull_request
 from .drift_evidence import build_evidence
-from .drift_models import (SEVERITY_ORDER, AffectedDocument, DriftAnalyzeRequest, DriftFinding,
-                           DriftReport, DriftReportSummary, DriftStatus, DriftSummary, DriftType,
-                           EntityChangeType, PullRequestAnalysis, Severity)
+from .drift_models import (DRIFT_KINDS, SEVERITY_ORDER, AffectedDocument, DriftAnalyzeRequest,
+                           DriftFinding, DriftReport, DriftReportSummary, DriftStatus, DriftSummary,
+                           DriftType, EntityChangeType, PullRequestAnalysis)
+from .drift_rules import Classified
 
 METHOD = ("Entity changes from the analyzer's before/after results (or the diff), matched against "
-          "saved documents and repository Markdown. Referential: removed/renamed code or moved "
-          "files still named; Signature: documented parameters/contract changed; Semantic: "
-          "behaviour changed or new code undocumented. Confidence = match x method x location x "
-          "certainty; levels: high >= 0.75, medium >= 0.50, low < 0.50.")
-
-BIG_CHANGE_LINES = 15
-
-
-def _bump(sev: Severity, steps: int, cap: Severity = Severity.critical) -> Severity:
-    i = max(0, min(SEVERITY_ORDER.index(sev) + steps, SEVERITY_ORDER.index(cap)))
-    return SEVERITY_ORDER[i]
+          "saved documents and repository Markdown. Referential: removed/renamed code, moved files "
+          "or modules, stale line references; Signature: parameters, types, defaults, return type, "
+          "HTTP method or contract changed (breaking or not); Semantic: status codes, exceptions, "
+          "values, docstring or implementation changed, or new code undocumented. A passage that "
+          "still states the old detail raises the severity. Confidence = match x method x location "
+          "x certainty; levels: high >= 0.75, medium >= 0.50, low < 0.50.")
 
 
-def _private(name: Optional[str]) -> bool:
-    if not name or " " in name:
-        return False
-    short = name.rsplit(".", 1)[-1]
-    return short.startswith("_") and not short.startswith("__")
 
+# ---------- LD-151: classify one hit (LD-152 / LD-153 / LD-154) ----------
 
-def _code(s: Optional[str]) -> str:
-    return f"`{s}`" if s else "-"
-
-
-# ---------- LD-147: classify one hit ----------
-
-class Classified:
-    def __init__(self, type_: DriftType, severity: Severity, change: str, message: str,
-                 suggestion: str, before: Optional[str] = None, after: Optional[str] = None,
-                 certainty: float = 1.0) -> None:
-        self.type, self.severity, self.change = type_, severity, change
-        self.message, self.suggestion = message, suggestion
-        self.before, self.after, self.certainty = before, after, certainty
-
-
-def classify(hit: Hit) -> Optional[Classified]:
-    t, f, c = hit.target, hit.target.file, hit.target.change
-    where = "this section" if hit.documents_file else "the documentation"
-
-    if t.file_event == FILE_REMOVED:
-        if hit.documents_file:
-            return Classified(DriftType.referential, Severity.high, FILE_REMOVED,
-                              f"{where} documents {_code(f.path)}, which the Pull Request deletes.",
-                              "Remove the section or move its content to the code that replaces it.",
-                              before=f.path)
-        return Classified(DriftType.referential, Severity.medium, FILE_REMOVED,
-                          f"The documentation links or names {_code(f.path)}, "
-                          "which the Pull Request deletes.",
-                          f"Remove or replace the reference to {_code(f.path)}.", before=f.path)
-    if t.file_event == FILE_RENAMED:
-        if not hit.matches:
-            return None
-        sev = Severity.low if hit.documents_file else Severity.medium
-        return Classified(DriftType.referential, sev, FILE_RENAMED,
-                          f"{where.capitalize()} still names {_code(f.previous_path)}, "
-                          f"moved to {_code(f.path)}.",
-                          f"Replace {_code(f.previous_path)} with {_code(f.path)}.",
-                          before=f.previous_path, after=f.path)
-    if c is None:
-        return None
-
-    private = -1 if _private(c.name) else 0
-    endpoint = c.kind == "endpoint"
-
-    if c.change == EntityChangeType.added:
-        if not hit.documents_file or private or f.status.value == "added":
-            return None
-        if search(hit.doc, entity_terms(c.kind, c.name), own_file=True):
-            return None  # already described (e.g. the section was edited by hand)
-        return Classified(DriftType.semantic, Severity.low, "added",
-                          f"New {c.kind} {_code(c.name)} in {_code(f.path)} "
-                          "is not described in this section.",
-                          f"Document {_code(c.new_signature or c.name)}.", after=c.new_signature or c.name,
-                          certainty=0.8)
-
-    if not hit.matches:
-        return None
-    if c.change == EntityChangeType.removed:
-        if f.status.value == "removed" and hit.documents_file:
-            return None  # covered by the file-level finding of the deleted file
-        sev = _bump(Severity.critical if endpoint else Severity.high, private)
-        return Classified(DriftType.referential, sev, "removed",
-                          f"{where.capitalize()} describes {c.kind} {_code(c.name)}, "
-                          "which the Pull Request removes.",
-                          f"Remove the description of {_code(c.name)} or point to its replacement.",
-                          before=c.old_signature or c.name)
-    if c.change == EntityChangeType.renamed:
-        sev = _bump(Severity.critical if endpoint else Severity.high, private)
-        return Classified(DriftType.referential, sev, "renamed",
-                          f"{where.capitalize()} names {_code(c.old_name)}, renamed to {_code(c.name)}.",
-                          f"Replace {_code(c.old_name)} with {_code(c.name)}.",
-                          before=c.old_name, after=c.name)
-    if c.change == EntityChangeType.signature_changed:
-        sev = Severity.high if endpoint else Severity.medium
-        if hit.param_matches:
-            sev = _bump(sev, 1)
-        sev = _bump(sev, private)
-        detail = "; ".join(c.details)
-        named = ""
-        if hit.param_matches:
-            named = " It still names removed parameter(s) " + ", ".join(
-                _code(m.term) for m in hit.param_matches) + "."
-        return Classified(DriftType.signature, sev, "signature_changed",
-                          f"Signature of {c.kind} {_code(c.name)} changed ({detail}).{named}",
-                          f"Update the documented signature to {_code(c.new_signature)}.",
-                          before=c.old_signature, after=c.new_signature)
-    if c.change == EntityChangeType.behavior_changed:
-        steps = (1 if "docstring changed" in c.details else 0) \
-            + (1 if c.changed_lines >= BIG_CHANGE_LINES else 0) + private
-        sev = _bump(Severity.low, steps, cap=Severity.high)
-        return Classified(DriftType.semantic, sev, "behavior_changed",
-                          f"Behaviour of {c.kind} {_code(c.name)} changed ({'; '.join(c.details)}); "
-                          f"{where} may describe the old behaviour.",
-                          f"Check the description of {_code(c.name)} against the new code.",
-                          before=c.old_signature, after=c.new_signature, certainty=0.7)
-    return None
+def classify(hit: Hit) -> List[Classified]:
+    """Findings for one hit: usually one; a signature change whose body also changed in a way
+    the documentation may describe (status codes, exceptions, values, docstring) gets a second,
+    semantic finding."""
+    t, c = hit.target, hit.target.change
+    if t.file_event is not None:
+        out = [drift_referential.classify(hit)]
+    elif c is None:
+        out = []
+    elif c.change == EntityChangeType.added:
+        out = [drift_semantic.classify_added(hit)]
+    elif not hit.matches:
+        out = []
+    elif c.change in (EntityChangeType.removed, EntityChangeType.renamed):
+        out = [drift_referential.classify(hit)]
+    elif c.change == EntityChangeType.signature_changed:
+        out = [drift_signature.classify(hit)]
+        if c.signals:
+            out.append(drift_semantic.classify(hit))
+    elif c.change == EntityChangeType.behavior_changed:
+        out = [drift_semantic.classify(hit)]
+    else:
+        out = []
+    return [x for x in out if x is not None]
 
 
 def _confidence(hit: Hit, cl: Classified) -> Tuple[float, dict]:
     t = hit.target
     exact = [m for m in hit.matches if m.exact]
-    if hit.param_matches or any(m.in_code for m in exact):
+    if hit.param_matches or cl.details or any(m.in_code for m in exact):
         match = 1.0
     elif exact:
         match = 0.8
@@ -186,34 +103,35 @@ def _confidence(hit: Hit, cl: Classified) -> Tuple[float, dict]:
                    "certainty": cl.certainty}
 
 
-def _part(hit: Hit) -> AffectedDocument:
+def _part(hit: Hit, cl: Classified) -> AffectedDocument:
     """The affected document part, with only this finding's matches."""
     d: DocText = hit.doc
     reasons = []
     if hit.documents_file:
         reasons.append(f"documents changed file {hit.target.file.path}")
     reasons += list(dict.fromkeys(f"mentions `{m.target}`" for m in hit.matches))
+    reasons += list(dict.fromkeys(f"still shows {m.kind} `{m.term}`"
+                                  for m in hit.param_matches + cl.details))
     return AffectedDocument(source=d.source, path=d.path, document_id=d.document_id, title=d.title,
                             version=d.version, documents_file=d.documents_file, reasons=reasons,
-                            matches=sorted(hit.matches + hit.param_matches, key=lambda m: m.line))
+                            matches=sorted(hit.matches + hit.param_matches + cl.details,
+                                           key=lambda m: m.line))
 
 
 def detect(analysis: PullRequestAnalysis, hits: List[Hit]) -> List[DriftFinding]:
     findings: List[DriftFinding] = []
-    for hit in hits:
-        cl = classify(hit)
-        if cl is None:
-            continue
+    for hit, cl in ((h, x) for h in hits for x in classify(h)):
         score, factors = _confidence(hit, cl)
         c = hit.target.change
         findings.append(DriftFinding(
-            id="", type=cl.type, severity=cl.severity, confidence=score,
+            id="", type=cl.type, kind=cl.kind, breaking=cl.breaking, rules=cl.rules,
+            severity=cl.severity, confidence=score,
             confidence_level=level_of(score).value,
             entity=c.name if c else None, entity_kind=c.kind if c else None,
-            change=cl.change, file=hit.target.file.path, document=_part(hit), message=cl.message,
-            before=cl.before, after=cl.after, suggestion=cl.suggestion,
-            evidence=build_evidence(hit, analysis), factors=factors))
-    findings.sort(key=lambda x: (-SEVERITY_ORDER.index(x.severity), -x.confidence,
+            change=cl.change, file=hit.target.file.path, document=_part(hit, cl),
+            message=cl.message, before=cl.before, after=cl.after, suggestion=cl.suggestion,
+            evidence=build_evidence(hit, analysis, cl.details), factors=factors))
+    findings.sort(key=lambda x: (-SEVERITY_ORDER.index(x.severity), not x.breaking, -x.confidence,
                                  x.document.document_id or "", x.document.path, x.entity or ""))
     for n, x in enumerate(findings, start=1):
         x.id = f"F{n}"
@@ -224,10 +142,14 @@ def summarize(analysis: PullRequestAnalysis, findings: List[DriftFinding],
               affected: List[AffectedDocument]) -> DriftSummary:
     by_type = Counter(x.type.value for x in findings)
     by_sev = Counter(x.severity.value for x in findings)
+    by_kind = Counter(x.kind for x in findings)
+    order = [k for t in DriftType for k in DRIFT_KINDS[t.value]]
     highest = max((x.severity for x in findings), key=SEVERITY_ORDER.index, default=None)
     return DriftSummary(findings=len(findings),
                         by_type={t.value: by_type.get(t.value, 0) for t in DriftType},
                         by_severity={s.value: by_sev.get(s.value, 0) for s in SEVERITY_ORDER},
+                        by_kind={k: by_kind[k] for k in order if by_kind.get(k)},
+                        breaking=sum(1 for x in findings if x.breaking),
                         highest_severity=highest, affected_documents=len(affected),
                         changed_files=len(analysis.files), entity_changes=analysis.entity_changes)
 
