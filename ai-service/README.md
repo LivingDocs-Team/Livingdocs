@@ -1,4 +1,4 @@
-# LivingDocs AI Service (LD-90, LD-340, LD-195, LD-128)
+# LivingDocs AI Service (LD-90, LD-340, LD-195, LD-128, LD-134)
 
 AI-assisted documentation generation. Takes source code that has already been analyzed
 (classes, methods, endpoints, parameters, return values) and produces Markdown docs
@@ -53,6 +53,8 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | GET | `/documents/{id}/versions`, `/versions/{n}` | Version history (newest first) / one version |
 | GET | `/documents/{id}/history` | Audit trail: created, proposed, accepted, edited, dismissed, ... |
 | POST | `/documents/{id}/updates` | Update from an LD-116 source change → proposal (LD-128) |
+| GET | `/documents/{id}/compare?from=&to=` | Per-file changes and unified diff of two versions (LD-134) |
+| POST | `/documents/{id}/versions/{n}/accept`, `/dismiss`, `/regenerate`, `/edit` | Review a proposal (LD-134) |
 
 Built-in templates: `default`, `api-reference`, `brief`.
 
@@ -74,7 +76,7 @@ for the AI) and an ordered list of `sections` taken from `Overview`, `Classes`, 
   the built-in templates.
 - Errors: `422` invalid template, `409` duplicate name, `403` built-in template, `404` unknown id.
 
-### Versioned documentation (LD-195, LD-128)
+### Versioned documentation (LD-195, LD-128, LD-134)
 
 - `POST /documents {"job_id": ...}` stores a completed job as **version 1** (accepted). Every later
   change adds a new, immutable version; nothing is edited in place or deleted (LD-195).
@@ -85,7 +87,11 @@ for the AI) and an ordered list of `sections` taken from `Overview`, `Classes`, 
   The result is a **proposal** (`201`); the current version changes only when it is accepted.
   A second source change before review extends the pending proposal; sending the same change
   again returns the pending proposal (`200`).
-- Details: `Docs/Linh/` FR6.md, FR7.md.
+- Review (LD-134): `compare` (default: current version → pending proposal), `accept`, `dismiss`,
+  `regenerate` (same source changes, current template), `edit` (`{"content": ..., "accept": true}`;
+  the text is split back per file on `---` + `# <path>` so hand edits survive later updates of other
+  files). A change already accepted is `409`.
+- Details: `Docs/Linh/` FR6.md, FR7.md, FR8.md.
 
 ### Example request
 

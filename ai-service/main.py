@@ -1,5 +1,5 @@
 """LivingDocs AI service - AI-assisted documentation generation (LD-90, LD-340) and versioned
-documentation (LD-195, LD-128).
+documentation (LD-195, LD-128, LD-134).
 
 Run:  uvicorn main:app --reload --port 8001
 Docs: http://localhost:8001/docs
@@ -14,8 +14,9 @@ from app.jobs import jobs, run_job
 from app.models import (SECTION_KINDS, SECTION_NAMES, GenerateRequest, Job, JobReport, JobStatus,
                         Template, TemplateIn, TemplateSections)
 from app.templates import TemplateNameTaken, templates
-from app.version_models import (Document, DocumentCreate, DocumentUpdateRequest, DocumentVersion,
-                                HistoryEvent, UpdateResult, VersionSummary)
+from app.version_models import (CompareResult, Document, DocumentCreate, DocumentUpdateRequest,
+                                DocumentVersion, EditRequest, HistoryEvent, ReviewRequest,
+                                UpdateResult, VersionSummary)
 from app.versions import VersionError, documents
 
 app = FastAPI(title="LivingDocs AI Service", version="0.1.0")
@@ -131,7 +132,7 @@ def delete_template(template_id: str):
         raise HTTPException(403, str(e))
 
 
-# ---------- Versioned documentation (LD-195, LD-128) ----------
+# ---------- Versioned documentation (LD-195, LD-128, LD-134) ----------
 
 def _call(fn, *args, **kwargs):
     try:
@@ -188,6 +189,13 @@ def get_history(doc_id: str):
     return _call(documents.history, doc_id)
 
 
+@app.get("/documents/{doc_id}/compare", response_model=CompareResult)
+def compare_versions(doc_id: str, from_version: Optional[int] = Query(None, alias="from", ge=1),
+                     to_version: Optional[int] = Query(None, alias="to", ge=1)):
+    """LD-134: differences between two versions (for review). Default: current version -> pending proposal."""
+    return _call(documents.compare, doc_id, from_version, to_version)
+
+
 @app.post("/documents/{doc_id}/updates", response_model=UpdateResult)
 def update_document(doc_id: str, req: DocumentUpdateRequest, response: Response):
     """LD-128: regenerate the documentation of the files changed by a source change (LD-116).
@@ -196,3 +204,28 @@ def update_document(doc_id: str, req: DocumentUpdateRequest, response: Response)
     result, created = _call(documents.update, doc_id, req)
     response.status_code = 201 if created else 200
     return result
+
+
+@app.post("/documents/{doc_id}/versions/{number}/accept", response_model=DocumentVersion)
+def accept_version(doc_id: str, number: int, data: Optional[ReviewRequest] = None):
+    data = data or ReviewRequest()
+    return _call(documents.accept, doc_id, number, data.actor, data.note)
+
+
+@app.post("/documents/{doc_id}/versions/{number}/dismiss", response_model=DocumentVersion)
+def dismiss_version(doc_id: str, number: int, data: Optional[ReviewRequest] = None):
+    data = data or ReviewRequest()
+    return _call(documents.dismiss, doc_id, number, data.actor, data.note)
+
+
+@app.post("/documents/{doc_id}/versions/{number}/regenerate", response_model=DocumentVersion,
+          status_code=201)
+def regenerate_version(doc_id: str, number: int, data: Optional[ReviewRequest] = None):
+    data = data or ReviewRequest()
+    return _call(documents.regenerate, doc_id, number, data.actor, data.note)
+
+
+@app.post("/documents/{doc_id}/versions/{number}/edit", response_model=DocumentVersion,
+          status_code=201)
+def edit_version(doc_id: str, number: int, data: EditRequest):
+    return _call(documents.edit, doc_id, number, data.content, data.accept, data.actor, data.note)
