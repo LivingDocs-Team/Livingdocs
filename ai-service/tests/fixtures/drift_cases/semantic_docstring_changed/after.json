@@ -1,0 +1,138 @@
+{
+  "path": "shop/cart.py",
+  "language": "python",
+  "module": "shop.cart",
+  "status": "ok",
+  "error": null,
+  "classes": [],
+  "functions": [
+    {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+        {
+          "name": "cart_id",
+          "type": "int",
+          "default": null,
+          "description": null
+        },
+        {
+          "name": "discount",
+          "type": "float",
+          "default": "0.0",
+          "description": null
+        }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in USD, without VAT.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in USD, without VAT.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+    },
+    {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+        {
+          "name": "cart_id",
+          "type": "int",
+          "default": null,
+          "description": null
+        },
+        {
+          "name": "timeout",
+          "type": "int",
+          "default": "30",
+          "description": null
+        }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+    },
+    {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+        {
+          "name": "cart_id",
+          "type": "int",
+          "default": null,
+          "description": null
+        },
+        {
+          "name": "timeout",
+          "type": "int",
+          "default": "30",
+          "description": null
+        }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+    },
+    {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+        {
+          "name": "cart_id",
+          "type": "int",
+          "default": null,
+          "description": null
+        }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+    },
+    {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+        {
+          "name": "cart_id",
+          "type": "int",
+          "default": null,
+          "description": null
+        }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+    }
+  ],
+  "endpoints": [
+    {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+        {
+          "name": "cart_id",
+          "type": "int",
+          "default": null,
+          "description": null
+        },
+        {
+          "name": "discount",
+          "type": "float",
+          "default": "0.0",
+          "description": null
+        }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+    }
+  ]
+}

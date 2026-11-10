@@ -1,0 +1,13 @@
+{
+  "description": "An optional parameter is added: not breaking, the docs are only incomplete.",
+  "path": "shop/cart.py",
+  "status": "modified",
+  "expected": [
+    [
+      "signature",
+      "parameter_added",
+      "count_items",
+      "docs/api.md"
+    ]
+  ]
+}

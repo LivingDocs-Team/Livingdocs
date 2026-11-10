@@ -1,0 +1,13 @@
+{
+  "description": "An endpoint moves to another path (same handler); the docs show the old path.",
+  "path": "shop/cart.py",
+  "status": "modified",
+  "expected": [
+    [
+      "referential",
+      "endpoint_moved",
+      "GET /api/v2/carts/{cart_id}",
+      "docs/api.md"
+    ]
+  ]
+}

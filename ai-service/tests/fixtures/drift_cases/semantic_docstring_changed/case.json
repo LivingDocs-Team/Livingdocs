@@ -1,0 +1,13 @@
+{
+  "description": "The docstring changes; the docs still quote the old one.",
+  "path": "shop/cart.py",
+  "status": "modified",
+  "expected": [
+    [
+      "semantic",
+      "docstring_changed",
+      "get_total",
+      "docs/api.md"
+    ]
+  ]
+}

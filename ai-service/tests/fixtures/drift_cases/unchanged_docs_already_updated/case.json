@@ -1,0 +1,6 @@
+{
+  "description": "The signature changes and the same Pull Request updates the docs: nothing is outdated.",
+  "path": "shop/cart.py",
+  "status": "modified",
+  "expected": []
+}

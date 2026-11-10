@@ -173,28 +173,54 @@ def finding_kind(entity_kind: str, aspects: Sequence[str], changes: Sequence[Par
     return "signature_changed"
 
 
-def stale_details(doc, near: List[DocMatch], changes: Sequence[ParameterChange],
-                  window: int) -> List[DocMatch]:
-    """What the documentation still shows after the entity is mentioned: removed / renamed
-    parameter names, parameters with their old type or default (on the same line)."""
-    out: List[DocMatch] = []
-    lines = doc.lines
-    starts = sorted({m.line - 1 for m in near})
+def _unquote(value: str) -> str:
+    v = value.strip()
+    return v[1:-1] if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"" else v
 
-    def scan(name: str, extra: Optional[str], kind: str, note: str) -> None:
+
+def _finder(doc, near: List[DocMatch], window: int):
+    """find(name, extra): first line of the entity's section(s) where `name` is written in code
+    and `extra` (a type or default, quotes optional) follows it on the same line."""
+    lines = doc.lines
+    sections = [doc.section(s, window) for s in sorted({m.line - 1 for m in near})]
+
+    def find(name: str, extra: Optional[str] = None, need_code: bool = True):
         pat = re.compile(r"(?<![\w$])" + re.escape(name) + r"(?![\w$])")
-        xpat = re.compile(r"(?<![\w$.])" + re.escape(extra) + r"(?![\w$])") if extra else None
-        for start in starts:
-            for i in range(start, min(len(lines), start + window)):
+        xpat = None
+        if extra:
+            core = re.escape(_unquote(extra))
+            xpat = re.compile(r"(?<![\w$.])['\"`]?" + core + r"['\"`]?(?![\w$])")
+        for rows in sections:
+            for i in rows:
                 m = pat.search(lines[i])
-                if not m or not doc.in_code(i, m.start()):
+                if not m or (need_code and not doc.in_code(i, m.start())):
                     continue
                 if xpat is not None and not xpat.search(lines[i][m.end():]):
                     continue
-                out.append(DocMatch(term=name if extra is None else f"{name} {extra}", target=name,
-                                    line=i + 1, excerpt=lines[i].strip()[:200], in_code=True,
-                                    kind=kind, note=note))
-                return
+                return i
+        return None
+
+    return find
+
+
+def _match(doc, i: int, term: str, target: str, kind: str, note: str) -> DocMatch:
+    return DocMatch(term=term, target=target, line=i + 1, excerpt=doc.lines[i].strip()[:200],
+                    in_code=True, kind=kind, note=note)
+
+
+def stale_details(doc, near: List[DocMatch], changes: Sequence[ParameterChange],
+                  window: int, old_return: Optional[str] = None,
+                  new_return: Optional[str] = None) -> List[DocMatch]:
+    """What the documentation still shows inside the entity's section: removed / renamed
+    parameter names, parameters with their old type or default (on the same line), and the old
+    return type on a line about what it returns."""
+    out: List[DocMatch] = []
+    find = _finder(doc, near, window)
+
+    def scan(name: str, extra: Optional[str], kind: str, note: str) -> None:
+        i = find(name, extra)
+        if i is not None:
+            out.append(_match(doc, i, name if extra is None else f"{name} {extra}", name, kind, note))
 
     for c in changes:
         if c.change in (ParameterChangeKind.removed, ParameterChangeKind.renamed):
@@ -207,7 +233,44 @@ def stale_details(doc, near: List[DocMatch], changes: Sequence[ParameterChange],
                 and c.old_default:
             scan(c.name, c.old_default, "default",
                  f"default is now `{c.new_default}`" if c.new_default else "no default any more")
+    if old_return and old_return != new_return:          # "Returns: `float`", "-> float"
+        rpat = re.compile(r"(?<![\w$.])" + re.escape(old_return) + r"(?![\w$])")
+        for rows in [doc.section(s, window) for s in sorted({m.line - 1 for m in near})]:
+            hit = next((i for i in rows if re.search(r"return|->|\breturns?\b", doc.lines[i], re.I)
+                        and rpat.search(doc.lines[i])), None)
+            if hit is not None:
+                out.append(_match(doc, hit, old_return, old_return, "type",
+                                  f"returns `{new_return or '-'}` now"))
+                break
     return sorted({(m.line, m.term): m for m in out}.values(), key=lambda m: m.line)
+
+
+VERIFIABLE = {"parameters", "return_type", "fields"}
+
+
+def documented_as_new(doc, near: List[DocMatch], change, window: int) -> bool:
+    """LD-347: the documentation already describes the code *after* the change (it was updated
+    in the same Pull Request): every new parameter name, new type, new default and new return
+    type is shown in the entity's section. Only checked when there is no stale detail, and only
+    for what can be checked exactly (parameters, fields, return type)."""
+    if set(change.aspects) - VERIFIABLE or not (change.parameter_changes or "return_type" in change.aspects):
+        return False
+    find = _finder(doc, near, window)
+    for p in change.parameter_changes:
+        if p.change in (ParameterChangeKind.added, ParameterChangeKind.renamed):
+            if find(p.name) is None:
+                return False
+        elif p.change == ParameterChangeKind.type_changed and p.new_type:
+            if find(p.name, p.new_type) is None:
+                return False
+        elif p.change in (ParameterChangeKind.default_changed, ParameterChangeKind.default_added) \
+                and p.new_default:
+            if find(p.name, p.new_default) is None:
+                return False
+    if "return_type" in change.aspects and change.new_return_type:
+        if find(change.new_return_type, need_code=False) is None:
+            return False
+    return True
 
 
 def describe(c: ParameterChange) -> str:
@@ -238,9 +301,12 @@ def classify(hit):
     breaking = True if c.breaking is None else c.breaking
     kind = finding_kind(c.kind, c.aspects, c.parameter_changes)
     seen = {(m.line, m.term) for m in hit.param_matches}
-    details = [m for m in stale_details(hit.doc, hit.matches, c.parameter_changes, PARAM_WINDOW)
+    details = [m for m in stale_details(hit.doc, hit.matches, c.parameter_changes, PARAM_WINDOW,
+                                        c.old_return_type, c.new_return_type)
                if (m.line, m.term) not in seen]
     stale = hit.param_matches + details
+    if not stale and documented_as_new(hit.doc, hit.matches, c, PARAM_WINDOW):
+        return None      # LD-347: the documentation was already updated to the new signature
 
     adjust = []
     if endpoint:

@@ -1,0 +1,20 @@
+{
+  "description": "The module moves to shop/basket.py without code changes; docs name the old module and path.",
+  "path": "shop/basket.py",
+  "status": "renamed",
+  "expected": [
+    [
+      "referential",
+      "module_moved",
+      null,
+      "docs/dev.md"
+    ],
+    [
+      "referential",
+      "file_moved",
+      null,
+      "README.md"
+    ]
+  ],
+  "previous_path": "shop/cart.py"
+}

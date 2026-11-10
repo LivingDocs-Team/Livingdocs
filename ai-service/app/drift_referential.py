@@ -130,6 +130,25 @@ def stale_line_refs(doc, path: str, old_path: str, hunks: List[DiffHunk]) -> Lis
 
 # ---------- classification ----------
 
+ACKNOWLEDGED = re.compile(r"\b(removed|deleted|deprecated|no longer|renamed|replaced|moved|"
+                          r"obsolete|dropped|superseded)\b", re.I)
+
+
+def acknowledged(hit: Hit, new_name: Optional[str] = None) -> bool:
+    """LD-347: every mention already says the code is gone or moved ("`legacy_total` was
+    removed", "`count_items` was renamed to `count_cart_items`") or names the new name on the
+    same line: the documentation is not outdated."""
+    if not hit.matches:
+        return False
+    for m in hit.matches:
+        line = hit.doc.lines[m.line - 1]
+        if new_name and new_name in line:
+            continue
+        if not ACKNOWLEDGED.search(line.replace(m.term, " ")):   # not the name itself
+            return False
+    return True
+
+
 def _file_kind(hit: Hit, removed: bool) -> str:
     kinds = {m.kind for m in hit.matches}
     if kinds and kinds <= {"module"}:
@@ -156,6 +175,9 @@ def classify(hit: Hit) -> Optional[Classified]:
             + " (regenerating the section does both).",
             certainty=1.0)
 
+    if t.file_event in (FILE_REMOVED, FILE_RENAMED) and acknowledged(
+            hit, f.path if t.file_event == FILE_RENAMED else None):
+        return None
     if t.file_event == FILE_REMOVED:
         kind = _file_kind(hit, removed=True)
         if hit.documents_file:
@@ -189,6 +211,8 @@ def classify(hit: Hit) -> Optional[Classified]:
                           before=f.previous_path, after=f.path, breaking=True)
 
     if c is None or not hit.matches:
+        return None
+    if acknowledged(hit, c.name if c.change == EntityChangeType.renamed else None):
         return None
     endpoint = c.kind == "endpoint"
     base = "endpoint_gone" if endpoint else "entity_gone"

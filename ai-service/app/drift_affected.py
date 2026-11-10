@@ -28,6 +28,10 @@ from .drift_models import (AffectedDocument, ChangeStatus, DocMatch, DocSource, 
                            EntityChangeType, FileChangeSummary, PullRequestAnalysis)
 
 EXCERPT_CHARS = 200
+HEADING = re.compile(r"^\s{0,3}#{1,6}\s")
+CHANGE_LOG = re.compile(r"(^|/)(change[-_ ]?log|changes|history|news|release[-_ ]?notes|releases)"
+                        r"(\.[a-z]+)?$", re.I)
+"""History files (CHANGELOG.md, ...) describe old code on purpose: they never drift (LD-347)."""
 PARAM_WINDOW = 25        # a removed parameter must be named this many lines after the entity
 VERB_BEFORE = re.compile(r"\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)`?\s*`?$", re.I)
 
@@ -55,8 +59,9 @@ class DocText:
     def _index(self) -> None:
         self._lines = self.text.splitlines()
         self._code = []
+        self._headings = set()
         fence: Optional[str] = None
-        for line in self._lines:
+        for i, line in enumerate(self._lines):
             s = line.strip()
             if fence:
                 self._code.append(True)
@@ -69,8 +74,23 @@ class DocText:
                 self._code.append(True)
             elif s.startswith("#"):
                 self._code.append(True)          # headings name the documented element
+                if HEADING.match(line):
+                    self._headings.add(i)
             else:
                 self._code.append([(m.start(), m.end()) for m in re.finditer(r"(`+)(.+?)\1", line)])
+
+    def section(self, start: int, window: int) -> List[int]:
+        """LD-347: line indexes from `start` (a mention of an entity) to the next heading, at most
+        `window` lines: what follows a mention describes that entity only until the next section
+        begins (headings inside code blocks do not count)."""
+        if self._code is None:
+            self._index()
+        rows = []
+        for i in range(start, min(len(self._lines), start + window)):
+            if i > start and i in self._headings:
+                break
+            rows.append(i)
+        return rows
 
     def in_code(self, line_no: int, col: int) -> bool:
         if self._code is None:
@@ -242,9 +262,8 @@ def search_params(doc: DocText, params: List[str], near: List[DocMatch]) -> List
     for p in params:
         pat = re.compile(r"(?<![\w$])" + re.escape(p) + r"(?![\w$])")
         for m0 in near:
-            start, stop = m0.line - 1, min(len(doc.lines), m0.line - 1 + PARAM_WINDOW)
             hit = None
-            for i in range(start, stop):
+            for i in doc.section(m0.line - 1, PARAM_WINDOW):
                 for m in pat.finditer(doc.lines[i]):
                     if doc.in_code(i, m.start()):
                         hit = DocMatch(term=p, target=p, line=i + 1, excerpt=excerpt(doc.lines[i]),
@@ -330,5 +349,8 @@ def collect_docs(store, document_ids: Optional[List[str]], repo_docs) -> Tuple[L
             out.append(DocText(DocSource.document, d.target, v.content, d.id, d.title, v.number,
                                documents_file=single))
     for rd in repo_docs:
+        if CHANGE_LOG.search(rd.path):
+            warnings.append(f"{rd.path}: change log, not checked (it describes earlier versions on purpose).")
+            continue
         out.append(DocText(DocSource.repository, rd.path, rd.content, title=rd.title))
     return out, warnings

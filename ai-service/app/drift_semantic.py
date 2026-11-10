@@ -65,10 +65,64 @@ TRIVIAL_VALUES = {"0", "1", "-1", "0.0", "1.0", "2", "utf-8", "UTF-8"}
 
 # ---------- signals from code ----------
 
-def _code_only(text: str) -> str:
-    text = TRIPLE.sub(" ", text or "")
-    text = BLOCK_COMMENT.sub(" ", text)
-    return COMMENT.sub(" ", text)
+def _strip_line_comment(line: str, lang: Optional[str] = None) -> str:
+    """The line without its trailing comment, quotes respected: `#` in Python, `//` in Java
+    (`//` is integer division in Python); unknown language: `#`, and `//` only at the start."""
+    if lang is None and line.lstrip().startswith("//"):
+        return ""
+    marker = "//" if lang == "java" else "#"
+    quote = None
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if quote:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+        elif line.startswith(marker, i):
+            return line[:i]
+        i += 1
+    return line
+
+
+def _code_only(text: str, lang: Optional[str] = None) -> str:
+    """Code without docstrings and comments."""
+    text = TRIPLE.sub(" ", text or "") if lang != "java" else (text or "")
+    if lang != "python":
+        text = BLOCK_COMMENT.sub(" ", text)
+    return "\n".join(_strip_line_comment(line, lang) for line in text.splitlines())
+
+
+def code_key(text: Optional[str], lang: Optional[str] = None) -> str:
+    """LD-347: what must differ for a real code change - comments, docstrings, blank lines and
+    whitespace / formatting are ignored."""
+    return re.sub(r"\s+", "", _code_only(text or "", lang))
+
+
+def line_key(line: str, lang: Optional[str] = None) -> str:
+    """One diff line without its comment and whitespace; docstring text is kept (a docstring
+    change is a real change, LD-154)."""
+    return re.sub(r"\s+", "", _strip_line_comment(line, lang))
+
+
+HEADER = re.compile(r"^\s*(?:@[\w.]+(?:\([^)]*\))?\s*)*(?:async\s+)?def\s+\w+\s*\(.*?\)\s*(?:->[^:]*)?:",
+                    re.S)
+JAVA_HEADER = re.compile(r"^\s*(?:@[\w.]+(?:\([^)]*\))?\s*)*[\w<>\[\],.?\s]*\(.*?\)\s*(?:throws[\w.,\s]+)?\{",
+                         re.S)
+
+
+def _body_only(text: str) -> str:
+    """The code without its declaration (decorators, parameters and defaults belong to the
+    signature, LD-153, not to the behaviour)."""
+    for pat in (HEADER, JAVA_HEADER):
+        m = pat.match(text)
+        if m:
+            return text[m.end():]
+    return text
 
 
 def _docstring_in(text: Optional[str]) -> Optional[str]:
@@ -106,11 +160,12 @@ def values_of(text: str, status_codes: Set[str]) -> Set[str]:
 
 
 def extract_signals(old_code: Optional[str], new_code: Optional[str],
-                    old_doc: Optional[str] = None, new_doc: Optional[str] = None) -> List[SemanticSignal]:
+                    old_doc: Optional[str] = None, new_doc: Optional[str] = None,
+                    lang: Optional[str] = None) -> List[SemanticSignal]:
     """What differs between the old and the new code of one entity (whole source, or only the
     removed / added diff lines)."""
     out: List[SemanticSignal] = []
-    old_c, new_c = _code_only(old_code or ""), _code_only(new_code or "")
+    old_c, new_c = _code_only(old_code or "", lang), _code_only(new_code or "", lang)
     old_status, new_status = status_codes_of(old_c), status_codes_of(new_c)
 
     def add(kind: str, old: Set[str], new: Set[str]) -> None:
@@ -120,7 +175,7 @@ def extract_signals(old_code: Optional[str], new_code: Optional[str],
 
     add("status_codes", old_status, new_status)
     add("exceptions", exceptions_of(old_c) - {"HTTPException"}, exceptions_of(new_c) - {"HTTPException"})
-    add("values", values_of(old_c, old_status), values_of(new_c, new_status))
+    add("values", values_of(_body_only(old_c), old_status), values_of(_body_only(new_c), new_status))
     if old_doc is None and new_doc is None:      # diff only: docstrings among the changed lines
         old_doc, new_doc = _docstring_in(old_code), _docstring_in(new_code)
     if (old_doc or None) != (new_doc or None):
@@ -129,16 +184,18 @@ def extract_signals(old_code: Optional[str], new_code: Optional[str],
     return out
 
 
-def without_renames(signals: List[SemanticSignal], renames: Sequence[tuple]) -> List[SemanticSignal]:
-    """Drop value changes that only follow a renamed parameter or entity
-    ("quantity must be positive" -> "qty must be positive")."""
-    if not renames:
+def without_renames(signals: List[SemanticSignal], renames: Sequence[tuple],
+                    names: Sequence[str] = ()) -> List[SemanticSignal]:
+    """Drop value changes that only follow the signature change: a renamed parameter or entity
+    ("quantity must be positive" -> "qty must be positive") or the name of a parameter that was
+    added or removed ({"timeout": timeout} -> {}, LD-347)."""
+    if not renames and not names:
         return signals
     out = []
     for s in signals:
         if s.kind == "values":
             added = set(s.added)
-            explained = set()
+            explained = {v for v in list(s.removed) + list(s.added) if v in set(names)}
             for v in s.removed:
                 for old, new in renames:
                     w = re.sub(r"(?<![\w$])" + re.escape(old) + r"(?![\w$])", new, v)
@@ -173,7 +230,7 @@ def stale_details(doc, near: List[DocMatch], signals: Sequence[SemanticSignal],
     lines = doc.lines
     rows: Set[int] = set()
     for m in near:
-        rows.update(range(m.line - 1, min(len(lines), m.line - 1 + window)))
+        rows.update(doc.section(m.line - 1, window))       # LD-347: stay in the section
     rows_sorted = sorted(rows)
     out: Dict[tuple, DocMatch] = {}
 
@@ -216,6 +273,38 @@ def stale_details(doc, near: List[DocMatch], signals: Sequence[SemanticSignal],
     return sorted(out.values(), key=lambda m: m.line)
 
 
+def documented_as_new(doc, near: List[DocMatch], signals: Sequence[SemanticSignal],
+                      window: int) -> List[DocMatch]:
+    """LD-347: passages in the entity's section that already state the *new* behaviour (a new
+    status code, exception, value or docstring sentence)."""
+    lines = doc.lines
+    rows = sorted({i for m in near for i in doc.section(m.line - 1, window)})
+    out: List[DocMatch] = []
+
+    def look(pattern: "re.Pattern", term: str, kind: str, normalize: bool = False) -> None:
+        for i in rows:
+            text = re.sub(r"\s+", " ", lines[i]) if normalize else lines[i]
+            if pattern.search(text):
+                out.append(DocMatch(term=term, target=term, line=i + 1,
+                                    excerpt=lines[i].strip()[:200], kind=kind, note="new behaviour"))
+                return
+
+    for s in signals:
+        for a in s.added:
+            if s.kind == "exceptions":
+                look(re.compile(r"(?<![\w$])" + re.escape(a) + r"(?![\w$])"), a, "exception")
+            elif s.kind == "status_codes":
+                look(re.compile(r"(?<![\w.])" + re.escape(a) + r"(?![\w.])"), a, "status_code")
+            elif s.kind == "values" and not re.fullmatch(r"-?\d", a):
+                look(re.compile(r"(?<![\w.$])" + re.escape(a) + r"(?![\w$]|\.\d)"), a, "value")
+            elif s.kind == "docstring":
+                old_text = re.sub(r"\s+", " ", " ".join(s.removed)).lower()
+                for sentence in _sentences(a):
+                    if sentence.lower() not in old_text:
+                        look(re.compile(re.escape(sentence), re.I), sentence, "docstring", normalize=True)
+    return out
+
+
 def classify(hit):
     """LD-154: a hit on an entity whose behaviour changed (EntityChangeType.behavior_changed)."""
     from .drift_models import DriftType
@@ -225,6 +314,8 @@ def classify(hit):
     where = "this section" if hit.documents_file else "the documentation"
     kind = semantic_kind(c.signals)
     details = stale_details(hit.doc, hit.matches, c.signals, PARAM_WINDOW)
+    if not details and documented_as_new(hit.doc, hit.matches, c.signals, PARAM_WINDOW):
+        return None      # LD-347: the documentation already describes the new behaviour
     adjust = []
     contract = {s.kind for s in c.signals} & {"status_codes", "exceptions", "docstring"}
     if contract or "docstring changed" in c.details:

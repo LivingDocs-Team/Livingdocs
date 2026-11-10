@@ -1,4 +1,4 @@
-# LivingDocs AI Service (LD-90, LD-340, LD-195, LD-145, LD-151, LD-156)
+# LivingDocs AI Service (LD-90, LD-340, LD-195, LD-145, LD-151, LD-156, LD-347)
 
 AI-assisted documentation generation. Takes source code that has already been analyzed
 (classes, methods, endpoints, parameters, return values) and produces Markdown docs
@@ -153,13 +153,30 @@ PR files (patch + analyzer result at base/head)
 - Matching avoids false positives: whole identifiers only, common words (`add`, `run`) only in
   code / headings, bare method names only in the section of their own file, endpoint paths match
   any placeholder style (`{id}`, `:id`, `<id>`).
+- **Source-documentation comparison (LD-347)**, no finding when the documentation is not outdated:
+  - *documentation already updated*: no stale detail and every new parameter, type, default and
+    return type (signature) or the new status code, exception, value or docstring sentence
+    (semantic) is shown in the entity's section;
+  - *change acknowledged*: each mention already says it was removed / renamed / deprecated /
+    moved, or names the new name on the same line; change logs (`CHANGELOG.md`, `HISTORY.md`,
+    `RELEASE_NOTES.md`, ...) are skipped with a warning, they describe old versions on purpose;
+  - *no real code change*: comments, blank lines, docstring-free formatting and whitespace are
+    ignored (Python `#`, Java `//` and `/* */`; `//` in Python is division);
+  - *one change, one finding*: defaults on the `def` line are a signature change, not also a
+    semantic "values" change; values that only follow an added / removed / renamed parameter are
+    ignored; an endpoint whose parameters changed only because its handler's did is reported on
+    the handler;
+  - stale details (old parameter, type, default, value...) are searched from the mention of the
+    entity to the next heading only, never in the next entity's section;
+  - affected documentation lists only parts with at least one finding.
 - **Manual analysis from the app:** github-integration-service `POST /api/repositories/{id}/drift/analyze`
   `{"pullRequestNumber": 7}` reads the PR from GitHub, runs the analyzer on both commits and calls
   `/drift/analyze` with the saved documents of that repository only. Details:
   [github-integration-service README](../services/github-integration-service/README.md).
 - Reports are kept in memory (last 500); history and resolution of drift are LD-167.
-- Tests (LD-150, LD-155, LD-160): `tests/test_drift.py`, `tests/test_drift_classification.py`,
-  `tests/test_drift_severity.py`, `tests/test_drift_api.py`,
+- Tests (LD-150, LD-155, LD-160, LD-347): `tests/test_drift.py`, `tests/test_drift_classification.py`,
+  `tests/test_drift_severity.py`, `tests/test_drift_cases.py` (fixture corpus, see
+  [`tests/fixtures/drift_cases/README.md`](tests/fixtures/drift_cases/README.md)), `tests/test_drift_api.py`,
   `tests/integration/test_drift_integration.py`, live: `test_live_pipeline.py`; UI:
   `tests/test_frontend_drift.py` (repository root).
 

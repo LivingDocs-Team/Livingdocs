@@ -1,0 +1,9 @@
+{
+  "description": "The docs already say what was removed or renamed; the change log is history.",
+  "path": "shop/cart.py",
+  "status": "modified",
+  "expected": [],
+  "warnings": [
+    "CHANGELOG.md: change log, not checked (it describes earlier versions on purpose)."
+  ]
+}

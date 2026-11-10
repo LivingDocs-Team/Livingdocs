@@ -1,0 +1,19 @@
+{
+  "description": "A function is removed and another renamed; the docs still name both.",
+  "path": "shop/cart.py",
+  "status": "modified",
+  "expected": [
+    [
+      "referential",
+      "entity_renamed",
+      "count_cart_items",
+      "README.md"
+    ],
+    [
+      "referential",
+      "entity_removed",
+      "legacy_total",
+      "README.md"
+    ]
+  ]
+}

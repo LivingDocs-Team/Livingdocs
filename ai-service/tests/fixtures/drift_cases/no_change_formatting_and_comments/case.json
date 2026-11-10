@@ -1,0 +1,6 @@
+{
+  "description": "Only comments, blank lines and spacing change: the behaviour is the same.",
+  "path": "shop/cart.py",
+  "status": "modified",
+  "expected": []
+}

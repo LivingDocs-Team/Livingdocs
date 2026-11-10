@@ -23,7 +23,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 from .drift_models import (ChangedFile, ChangeStatus, DiffHunk, EntityChange, EntityChangeType,
                            FileChangeSummary, PullRequestAnalysis, PullRequestInfo)
-from .drift_semantic import extract_signals, without_renames
+from .drift_semantic import code_key, extract_signals, line_key, without_renames
 from .drift_signature import assess, parameter_changes, parse_java_param, parse_python_param
 from .evidence import entities
 from .models import AnalysisStatus, ClassInfo, Endpoint, FileAnalysis, Function, Parameter
@@ -135,7 +135,7 @@ class Shape:
     handler: Optional[str] = None     # endpoints
 
 
-def _function_shape(kind: str, key: str, fn: Function) -> Shape:
+def _function_shape(kind: str, key: str, fn: Function, lang: Optional[str] = None) -> Shape:
     if fn.parameters:
         params = [_param(p) for p in fn.parameters]
         sig = f"{fn.name}({', '.join(params)})" + (f" -> {fn.return_type}" if fn.return_type else "")
@@ -146,8 +146,9 @@ def _function_shape(kind: str, key: str, fn: Function) -> Shape:
         contract = (_norm(fn.signature).split("(", 1)[-1] if fn.signature else "",
                     _norm(fn.return_type))
     body = fn.source
-    if body:  # a renamed function keeps its body: compare it without the name
-        body = _norm(re.sub(rf"\b{re.escape(fn.name)}\b", "<name>", body))
+    if body:  # a renamed function keeps its body: compare it without the name (LD-347: and
+        # without comments / formatting, which change nothing)
+        body = code_key(re.sub(rf"\b{re.escape(fn.name)}\b", "<name>", body), lang)
     return Shape(kind, key, sig, [p.name for p in fn.parameters], contract, body,
                  _norm(fn.docstring) or None, fn.line_start, fn.line_end,
                  rename_key=(kind, contract, body or ""),
@@ -191,7 +192,7 @@ def shapes(f: Optional[FileAnalysis]) -> Dict[str, Shape]:
     out: Dict[str, Shape] = {}
     for ent in entities(f):
         if ent.kind in ("function", "method"):
-            out[ent.key] = _function_shape(ent.kind, ent.key, ent.obj)
+            out[ent.key] = _function_shape(ent.kind, ent.key, ent.obj, _lang(f.language, f.path))
         elif ent.kind == "class":
             out[ent.key] = _class_shape(ent.obj)
         else:
@@ -327,8 +328,32 @@ def _pair_renames(removed: Dict[str, Shape], added: Dict[str, Shape]) -> List[Tu
     return pairs
 
 
+def _lang(language: Optional[str], path: str) -> Optional[str]:
+    lang = (language or "").lower() or language_of(path)
+    return lang if lang in ("python", "java") else None
+
+
+def _without_handler_duplicates(changes: List[EntityChange], after: Dict[str, Shape]) -> List[EntityChange]:
+    """LD-347: an endpoint whose only change is its parameters, when its handler function's
+    signature changed too, is the same change seen twice: keep it on the handler (whose
+    parameters the documentation lists) and drop the endpoint's copy."""
+    changed = {c.name for c in changes if c.change == EntityChangeType.signature_changed
+               and c.kind in ("function", "method")}
+    out = []
+    for c in changes:
+        shape = after.get(c.name)
+        handler = shape.handler if shape is not None else None
+        if (c.kind == "endpoint" and c.change == EntityChangeType.signature_changed
+                and c.aspects == ["parameters"] and handler
+                and any(name == handler or name.endswith("." + handler) for name in changed)):
+            continue
+        out.append(c)
+    return out
+
+
 def compare_analyses(cf: ChangedFile, hunks: List[DiffHunk]) -> List[EntityChange]:
     before, after = shapes(cf.before), shapes(cf.after)
+    lang = _lang((cf.after or cf.before).language, cf.path)
     path, prev = cf.path, cf.previous_path if cf.previous_path != cf.path else None
     changes: List[EntityChange] = []
 
@@ -400,9 +425,10 @@ def compare_analyses(cf: ChangedFile, hunks: List[DiffHunk]) -> List[EntityChang
         if o.contract != n.contract:
             # the body may change too: those signals give a second, semantic finding (LD-151)
             info = signature_change(o, n)
-            signals = without_renames(extract_signals(old_code, new_code, o.docstring, n.docstring),
+            signals = without_renames(extract_signals(old_code, new_code, o.docstring, n.docstring, lang),
                                       _renames(info["parameter_changes"], info["removed_parameters"],
-                                               info["added_parameters"]))
+                                               info["added_parameters"]),
+                                      info["removed_parameters"] + info["added_parameters"])
             changes.append(EntityChange(change=EntityChangeType.signature_changed, signals=signals,
                                         **info, **common))
             continue
@@ -416,16 +442,18 @@ def compare_analyses(cf: ChangedFile, hunks: List[DiffHunk]) -> List[EntityChang
             own = lines
             if n.kind == "class":  # lines of its methods are reported on the methods
                 own = 0 if any(k.startswith(key + ".") for k in after) else lines
+            if own and code_key(old_code, lang) == code_key(new_code, lang):
+                own = 0            # LD-347: only comments / whitespace changed
             if own and n.kind != "endpoint":
                 details.append(f"{own} changed line(s) in the body")
         if details:
             docs = {}
             if o.docstring != n.docstring:   # shown as evidence (LD-149) when there is no diff
                 docs = dict(old_docstring=o.docstring, new_docstring=n.docstring)
-            signals = extract_signals(old_code, new_code, o.docstring, n.docstring)
+            signals = extract_signals(old_code, new_code, o.docstring, n.docstring, lang)
             changes.append(EntityChange(change=EntityChangeType.behavior_changed, details=details,
                                         signals=signals, **docs, **common))
-    return changes
+    return _without_handler_duplicates(changes, after)
 
 
 # ---------- patch-only mode ----------
@@ -689,8 +717,8 @@ def scan_patch(path: str, prev: Optional[str], hunks: List[DiffHunk], lang: str)
                 details.append(f"signature: {o.signature} -> {d.signature}")
             ret = "return_type" in aspects
             texts = body_lines.get(k, {"-": [], "+": []})
-            signals = without_renames(extract_signals("\n".join(texts["-"]), "\n".join(texts["+"])),
-                                      _renames(params, removed, added))
+            signals = without_renames(extract_signals("\n".join(texts["-"]), "\n".join(texts["+"]), lang=lang),
+                                      _renames(params, removed, added), removed + added)
             changes.append(EntityChange(kind=d.kind, name=k, change=EntityChangeType.signature_changed,
                                         signals=signals,
                                         old_signature=o.signature, new_signature=d.signature,
@@ -708,11 +736,14 @@ def scan_patch(path: str, prev: Optional[str], hunks: List[DiffHunk], lang: str)
         if k in reported or kind in ("class", "endpoint"):
             continue
         texts = body_lines.get(k, {"-": [], "+": []})
+        if sorted(filter(None, (line_key(x, lang) for x in texts["-"]))) == \
+                sorted(filter(None, (line_key(x, lang) for x in texts["+"]))):
+            continue               # LD-347: only comments / whitespace / formatting changed
         changes.append(EntityChange(kind=kind, name=k, change=EntityChangeType.behavior_changed,
                                     details=[f"{cnt} changed line(s) in the body"],
                                     line_start=ln or None, old_line_start=ol or None,
                                     changed_lines=cnt,
-                                    signals=extract_signals("\n".join(texts["-"]), "\n".join(texts["+"])),
+                                    signals=extract_signals("\n".join(texts["-"]), "\n".join(texts["+"]), lang=lang),
                                     **common))
     return changes
 

@@ -1,0 +1,6 @@
+{
+  "description": "A removed parameter is still listed - but in the next function's section, not this one.",
+  "path": "shop/cart.py",
+  "status": "modified",
+  "expected": []
+}

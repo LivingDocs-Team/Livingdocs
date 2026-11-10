@@ -1,0 +1,13 @@
+{
+  "description": "A parameter type and a default change; the parameter table still shows the old ones.",
+  "path": "shop/cart.py",
+  "status": "modified",
+  "expected": [
+    [
+      "signature",
+      "parameter_type_changed",
+      "get_total",
+      "docs/api.md"
+    ]
+  ]
+}

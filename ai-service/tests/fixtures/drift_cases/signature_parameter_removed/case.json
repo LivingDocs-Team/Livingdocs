@@ -1,0 +1,13 @@
+{
+  "description": "A parameter is removed; the call shown in the docs still passes it.",
+  "path": "shop/cart.py",
+  "status": "modified",
+  "expected": [
+    [
+      "signature",
+      "parameter_removed",
+      "fetch_cart",
+      "docs/api.md"
+    ]
+  ]
+}

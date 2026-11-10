@@ -153,6 +153,7 @@ def _rate_documents(affected: List[AffectedDocument], findings: List[DriftFindin
                 == (a.source, a.document_id, a.path)]
         a.findings = len(mine)
         a.severity = drift_severity.highest([f.severity for f in mine])
+    affected[:] = [a for a in affected if a.findings]     # LD-347: only parts that really drifted
     affected.sort(key=lambda a: (-(SEVERITY_ORDER.index(a.severity) if a.severity else -1),
                                  a.source.value, a.document_id or "", a.path))
 

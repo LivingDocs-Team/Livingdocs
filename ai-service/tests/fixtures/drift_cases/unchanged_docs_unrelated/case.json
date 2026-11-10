@@ -1,0 +1,6 @@
+{
+  "description": "The code changes, but the documentation never describes the changed code.",
+  "path": "shop/cart.py",
+  "status": "modified",
+  "expected": []
+}
