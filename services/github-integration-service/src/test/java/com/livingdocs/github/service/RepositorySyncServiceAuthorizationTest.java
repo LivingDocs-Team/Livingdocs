@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class RepositorySyncServiceAuthorizationTest {
@@ -27,7 +28,8 @@ class RepositorySyncServiceAuthorizationTest {
         var repositories = mock(ConnectedRepositoryRepository.class);
         var connections = mock(GitHubConnectionService.class);
         var fetcher = mock(GitHubRepositoryFetcher.class);
-        var service = new RepositorySyncService(repositories, connections, fetcher);
+        var ingestion = mock(IngestionService.class);
+        var service = new RepositorySyncService(repositories, connections, fetcher, ingestion);
         UUID repositoryId = UUID.fromString("22222222-2222-2222-2222-222222222222");
         UUID connectionId = UUID.fromString("11111111-1111-1111-1111-111111111111");
         var repository = new ConnectedRepository();
@@ -51,5 +53,6 @@ class RepositorySyncServiceAuthorizationTest {
         verify(fetcher, never()).fetch(org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
         verify(connections, never()).getActiveConnection("91");
+        verifyNoInteractions(ingestion);
     }
 }

@@ -15,6 +15,9 @@ public interface ConnectedRepositoryRepository extends JpaRepository<ConnectedRe
 
     List<ConnectedRepository> findByConnectionId(UUID connectionId);
 
+    /** LD-68: mọi workspace đã thêm repo GitHub này (webhook chỉ biết id repo trên GitHub). */
+    List<ConnectedRepository> findByGithubRepoId(Long githubRepoId);
+
     boolean existsByWorkspaceIdAndGithubRepoId(String workspaceId, Long githubRepoId);
 
     boolean existsByWorkspaceIdAndConnectionIdAndGithubRepoId(

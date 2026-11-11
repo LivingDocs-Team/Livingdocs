@@ -38,15 +38,18 @@ public class RepositorySyncService {
     private final ConnectedRepositoryRepository repositoryRepository;
     private final GitHubConnectionService connectionService;
     private final GitHubRepositoryFetcher fetcher;
+    private final IngestionService ingestionService;
     /** Kết quả đồng bộ gần nhất của từng repo, giữ trong bộ nhớ (mất khi khởi động lại service). */
     private final Map<UUID, RepositorySnapshot> latestResults = new ConcurrentHashMap<>();
 
     public RepositorySyncService(ConnectedRepositoryRepository repositoryRepository,
                                  GitHubConnectionService connectionService,
-                                 GitHubRepositoryFetcher fetcher) {
+                                 GitHubRepositoryFetcher fetcher,
+                                 IngestionService ingestionService) {
         this.repositoryRepository = repositoryRepository;
         this.connectionService = connectionService;
         this.fetcher = fetcher;
+        this.ingestionService = ingestionService;
     }
 
     /** Đồng bộ repo với GitHub. Lỗi GitHub được ném ra dạng {@link RepositorySyncException} (GlobalExceptionHandler trả JSON). */
@@ -81,6 +84,7 @@ public class RepositorySyncService {
             repo.setLastSyncedAt(snapshot.fetchedAt());  // LD-66
             repositoryRepository.save(repo);
             latestResults.put(repositoryId, snapshot);
+            ingestionService.backfill(repo, snapshot, connection.getAccessToken());  // LD-68: lấy bù PR/commit
             return snapshot;
         } catch (RepositorySyncException e) {
             if (e.getCode() == SyncErrorCode.TOKEN_INVALID) {
