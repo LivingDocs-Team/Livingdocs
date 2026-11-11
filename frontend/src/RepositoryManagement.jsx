@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import { githubApi } from './githubApi';
+import RepositoryActivity from './RepositoryActivity';
 
 export default function RepositoryManagement({ userId }) {
   return <RepositoryManagementForUser key={userId ?? 'anonymous'} userId={userId} />;
@@ -30,6 +31,7 @@ function RepositoryManagementForUser({ userId }) {
   const [connectionStatus, setConnectionStatus] = useState('DISCONNECTED');
   const [isLoading, setIsLoading] = useState(Boolean(userId));
   const [isAdding, setIsAdding] = useState(false);
+  const [activityRepoId, setActivityRepoId] = useState(null);
 
   const isCurrentWorkspace = useCallback((expectedUserId, expectedWorkspaceId) => (
     isMounted.current
@@ -422,6 +424,12 @@ function RepositoryManagementForUser({ userId }) {
                               {syncing ? 'Syncing…' : !isConnected ? 'Reconnect to sync' : syncError ? 'Retry sync' : 'Sync now'}
                             </button>
                           )}
+                          {inWorkspace && (
+                            <button type="button" className="sync-secondary-button" aria-expanded={activityRepoId === repo.id}
+                              onClick={() => setActivityRepoId((current) => (current === repo.id ? null : repo.id))}>
+                              {activityRepoId === repo.id ? 'Hide PRs & commits' : 'PRs & commits'}
+                            </button>
+                          )}
                           {inWorkspace && isWorkspaceOwner && (
                             <button type="button" className="sync-secondary-button" onClick={() => removeFromWorkspace(repo)}>
                               Remove
@@ -450,6 +458,10 @@ function RepositoryManagementForUser({ userId }) {
                             </>
                           )}
                         </div>
+                        {inWorkspace && activityRepoId === repo.id && (
+                          // key: reload after each sync, which also backfills pull requests and commits
+                          <RepositoryActivity key={`${repo.id}-${repo.lastSyncedAt}`} repository={repo} userId={userId} />
+                        )}
                       </div>
                     </li>
                   );
