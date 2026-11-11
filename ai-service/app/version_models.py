@@ -9,8 +9,7 @@ from enum import Enum
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
-
-from .models import Scope, now
+from .models import JobReport, Scope, SourceSnapshot, now
 
 
 class SourceChangeRef(BaseModel):
@@ -32,6 +31,27 @@ class DocumentCreate(_Actor):
     job_id: str = Field(min_length=1)
     title: Optional[str] = Field(default=None, max_length=200)
 
+
+class InternalDocumentCreate(BaseModel):
+    """Internal save request. Owner is taken from a trusted service header, never this body."""
+    job_id: str = Field(min_length=1)
+    title: Optional[str] = Field(default=None, max_length=200)
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
+class DocumentContentEdit(BaseModel):
+    content: str = Field(min_length=1, max_length=2_000_000)
+    expected_version: int = Field(ge=1)
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
+class InternalVersionDecision(BaseModel):
+    version: int = Field(ge=1)
+    decision: str = Field(pattern="^(APPROVED|REJECTED)$")
+    note: Optional[str] = Field(default=None, max_length=1000)
+class InternalRollbackRequest(BaseModel):
+    source_version: int = Field(ge=1)
+    note: Optional[str] = Field(default=None, max_length=1000)
 
 # ---------- Stored data ----------
 
@@ -96,6 +116,9 @@ class VersionSummary(BaseModel):
     created_at: datetime = Field(default_factory=now)
     decided_by: Optional[str] = None        # who accepted / dismissed it
     decided_at: Optional[datetime] = None
+    # LD-402: an edit or a rollback keeps the generation evidence (evidence_report, review_report,
+    # source_snapshot) of the version it was made from; this is that version (None: its own)
+    evidence_from_version: Optional[int] = None
 
 
 class DocumentVersion(VersionSummary):
@@ -103,8 +126,12 @@ class DocumentVersion(VersionSummary):
     sections: List[FileSection] = Field(default_factory=list)
     skipped: List[SkippedFile] = Field(default_factory=list)
     sections_match_content: bool = True
+    evidence_report: Optional[JobReport] = None
     """False when a manual edit could not be split back into per-file sections; a later update
     then rebuilds the text from `sections` and the hand edits are lost (a warning says so)."""
+    review_report: Optional[JobReport] = None
+    source_snapshot: Optional[SourceSnapshot] = None
+
 
 
 class Document(BaseModel):
@@ -115,6 +142,8 @@ class Document(BaseModel):
     template_id: str
     output_language: str
     source_job_id: Optional[str] = None
+    # Absent on legacy documents; never backfilled from the untrusted historical actor field.
+    owner_user_id: Optional[str] = None
     current_version: int = 1               # newest accepted version
     pending_version: Optional[int] = None  # proposal waiting for review, if any
     versions_total: int = 1
@@ -140,3 +169,11 @@ class HistoryEvent(BaseModel):
     related_version: Optional[int] = None
     actor: Optional[str] = None
     note: Optional[str] = None
+class VersionComparison(BaseModel):
+    """Compare a pending documentation version with the latest approved version."""
+
+    pending_version: DocumentVersion
+    approved_version: Optional[DocumentVersion] = None
+    has_approved_version: bool = False
+    diff: str = ""
+    changes: List[SectionChange] = Field(default_factory=list)

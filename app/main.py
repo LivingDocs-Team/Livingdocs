@@ -1,7 +1,5 @@
 import os
-import uuid
-from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional
 
 from fastapi import FastAPI, APIRouter, HTTPException, status
 
@@ -10,7 +8,6 @@ from app.models import (
     EvidenceCreate,
     SubmissionResponse,
     SubmissionCreate,
-    SubmissionStatus,
     RepoAnalysisRequest,
     RepoAnalysisResponse,
     FileAnalysis,
@@ -19,6 +16,7 @@ from app.analyzer import ASTAnalyzer
 from app.reader import FileReader
 from app.extractor import EntityExtractor
 from app.java_extractor import extract_java
+from app.submissions import SubmissionError, submissions
 
 
 app = FastAPI(
@@ -147,58 +145,46 @@ def java_module(path: str):
 
 
 # --- EVIDENCE & SUBMISSION ROUTER ---
+# LD-402: stored by app/submissions.py in SUBMISSIONS_FILE (survives a restart), not in memory.
 router = APIRouter(prefix="/api/v1", tags=["Evidence & Submission"])
 
-db_evidences = {}
-db_submissions = {}
+
+def _call(fn, *args):
+    try:
+        return fn(*args)
+    except SubmissionError as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
+
 
 @router.post("/evidences", response_model=EvidenceResponse, status_code=status.HTTP_201_CREATED)
 async def create_evidence(payload: EvidenceCreate):
-    evidence_id = f"ev-{uuid.uuid4().hex[:8]}"
-    evidence_data = EvidenceResponse(
-        id=evidence_id,
-        created_at=datetime.now(timezone.utc),
-        **payload.model_dump()
-    )
-    db_evidences[evidence_id] = evidence_data
-    return evidence_data
+    return _call(submissions.add_evidence, payload)
+
+
+@router.get("/evidences/{evidence_id}", response_model=EvidenceResponse)
+async def get_evidence(evidence_id: str):
+    return _call(submissions.evidence, evidence_id)
+
 
 @router.post("/submissions", response_model=SubmissionResponse, status_code=status.HTTP_201_CREATED)
 async def create_submission(payload: SubmissionCreate):
-    missing_evidences = [ev_id for ev_id in payload.evidence_ids if ev_id not in db_evidences]
-    if missing_evidences:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Các Evidence ID sau không tồn tại: {missing_evidences}"
-        )
+    return _call(submissions.add_submission, payload)
 
-    sub_id = f"sub-{uuid.uuid4().hex[:8]}"
-    evidences_list = [db_evidences[ev_id] for ev_id in payload.evidence_ids]
-    
-    submission_data = SubmissionResponse(
-        id=sub_id,
-        task_id=payload.task_id,
-        title=payload.title,
-        status=SubmissionStatus.DRAFT,
-        evidences=evidences_list,
-        created_at=datetime.now(timezone.utc)
-    )
-    db_submissions[sub_id] = submission_data
-    return submission_data
+
+@router.get("/submissions", response_model=List[SubmissionResponse])
+async def list_submissions(task_id: Optional[str] = None):
+    return submissions.submissions(task_id)
+
+
+@router.get("/submissions/{submission_id}", response_model=SubmissionResponse)
+async def get_submission(submission_id: str):
+    return _call(submissions.submission, submission_id)
+
 
 @router.post("/submissions/{submission_id}/submit", response_model=SubmissionResponse)
 async def submit_submission(submission_id: str):
-    if submission_id not in db_submissions:
-        raise HTTPException(status_code=404, detail="Submission không tồn tại")
-    
-    sub = db_submissions[submission_id]
-    if not sub.evidences:
-        raise HTTPException(status_code=400, detail="Cần ít nhất 1 evidence để thực hiện submit")
-    
-    sub.status = SubmissionStatus.SUBMITTED
-    sub.submitted_at = datetime.now(timezone.utc)
-    db_submissions[submission_id] = sub
-    return sub
+    return _call(submissions.submit, submission_id)
+
 
 # Đăng ký router vào FastAPI app
 app.include_router(router)
