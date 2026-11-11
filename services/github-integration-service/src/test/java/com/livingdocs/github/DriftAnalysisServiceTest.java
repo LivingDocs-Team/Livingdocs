@@ -367,6 +367,10 @@ class DriftAnalysisServiceTest {
         aiServiceServer.expect(requestTo("http://ai.test/drift/reports/report-1/findings/F9/resolution"))
                 .andRespond(withStatus(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON)
                         .body("{\"detail\":\"Finding 'F9' not found in this report\"}"));
+        // another user who can also see the repository: blocked by the report owner check
+        ConnectedRepository shared = new ConnectedRepository();
+        shared.setFullName("acme/shop");
+        lenient().when(repositorySyncService.requireOwned("another-user", REPOSITORY_ID)).thenReturn(shared);
 
         driftService.analyzePullRequest(USER_ID, REPOSITORY_ID, new DriftAnalysisRequest(7, null, false));
         ApiException badStatus = assertThrows(ApiException.class, () -> driftService.resolveFinding(
