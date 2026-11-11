@@ -29,6 +29,7 @@ Công nghệ: Java 21, Spring Boot 3.5, PostgreSQL, Flyway, Swagger (springdoc).
 | GET | `/api/repositories/{id}/drift/reports/{reportId}?minSeverity=high` | Báo cáo của repo (frontend gọi qua BFF), lọc theo mức độ (LD-156) |
 | GET | `/api/repositories/{id}/drift/reports/{reportId}/markdown` | Báo cáo dạng Markdown theo mức độ, để dán làm comment PR |
 | GET | `/api/documentation/drift/severity-rules` | Các mức độ (khoảng điểm, ý nghĩa, việc cần làm) và các luật đánh giá |
+| PUT | `/api/repositories/{id}/drift/reports/{reportId}/findings/{findingId}/resolution` | Xử lý một phát hiện (LD-346): `{"status":"acknowledged\|resolved\|dismissed\|open","note":"..."}`; dismissed bắt buộc có `note`; người thực hiện = user đang đăng nhập |
 
 > Browser không gọi service này trực tiếp. Backend BFF xác minh session, lấy user ID từ principal phía server và gửi request kèm `GITHUB_INTEGRATION_INTERNAL_SECRET`. GitHub Integration từ chối request thiếu/sai credential. Chi tiết: [Backend BFF authentication contract](docs/backend-bff-authentication.md).
 
@@ -106,6 +107,10 @@ này**, tài liệu của repo khác bị từ chối kèm cảnh báo), `includ
 - Mức độ (LD-156): mỗi finding có `severity_assessment` (luật gốc, các điều chỉnh, mã bằng chứng,
   điểm 0-100). Backend BFF chỉ chuyển tiếp `/api/repositories/**` và `/api/documentation/**`, nên
   frontend dùng các route theo repo ở trên (`/api/drift/reports/{id}` vẫn giữ cho gọi nội bộ).
+- AI review và xử lý (LD-346): mỗi finding có `ai_review` (AI xác nhận / phản bác / không chắc, giải
+  thích có trích mã bằng chứng, gợi ý đoạn tài liệu cần sửa; không có API key thì giải thích sinh từ
+  luật) và `resolution` (open → acknowledged / resolved / dismissed, có lịch sử). Lỗi:
+  `400 BAD_REQUEST` trạng thái sai hoặc dismissed thiếu lý do, `404` finding không tồn tại.
 - Báo cáo giữ trong bộ nhớ (cả ở ai-service), mất khi khởi động lại. Chi tiết luật phát hiện:
   [ai-service/README.md](../../ai-service/README.md).
 

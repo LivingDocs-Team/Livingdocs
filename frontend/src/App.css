@@ -4109,3 +4109,130 @@ button:disabled {
   font-family: ui-monospace, Menlo, Consolas, monospace;
   font-size: 0.82rem;
 }
+
+/* ---------- LD-346 AI review and resolution of drift findings ---------- */
+
+.drift-ai {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f3f6fb;
+  font-size: 0.92rem;
+}
+
+.drift-ai p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.drift-ai h4 {
+  margin: 10px 0 4px;
+  font-size: 0.85rem;
+}
+
+.drift-ai-verdict {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 1px 8px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #344054;
+  background: #e4e7ec;
+}
+
+.drift-ai-verdict[data-verdict="confirmed"] { color: #05603a; background: #dcfae6; }
+.drift-ai-verdict[data-verdict="disputed"] { color: #93370d; background: #fef0e6; }
+.drift-ai-verdict[data-verdict="uncertain"] { color: #7a5a00; background: #fdf6d8; }
+
+.drift-suggestion {
+  max-width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  border: 1px dashed #b2ccf5;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 0.82rem;
+}
+
+.drift-resolution {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.drift-resolution-status {
+  padding: 1px 8px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #344054;
+  background: #e4e7ec;
+}
+
+.drift-status-acknowledged { color: #1849a9; background: #e8f0fe; }
+.drift-status-resolved { color: #05603a; background: #dcfae6; }
+.drift-status-dismissed { color: #475467; background: #f2f4f7; text-decoration: line-through; }
+
+.drift-resolution-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.login-card .drift-resolution-actions button,
+.login-card .drift-dismiss button {
+  width: auto;
+  margin: 0;
+  padding: 4px 10px;
+  border: 1px solid #dce3ed;
+  border-radius: 8px;
+  background: #fff;
+  color: #172033;
+  font-size: 0.85rem;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.login-card .drift-dismiss button[type="submit"] {
+  border-color: #b42318;
+  color: #b42318;
+}
+
+.login-card .drift-dismiss button:disabled {
+  opacity: 0.5;
+}
+
+.drift-dismiss {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  flex-basis: 100%;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.drift-dismiss label {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.login-card .drift-dismiss input {
+  margin: 0;
+  padding: 6px 10px;
+}
+
+@media (max-width: 600px) {
+  .drift-resolution-actions {
+    margin-left: 0;
+  }
+
+  .drift-dismiss {
+    grid-template-columns: 1fr;
+  }
+}
