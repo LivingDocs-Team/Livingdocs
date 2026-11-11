@@ -28,6 +28,8 @@ from app.version_models import (Document, DocumentContentEdit, DocumentCreate, D
                                 VersionSummary)
 from app.versions import VersionError, documents
 from app.internal_auth import require_internal_service
+from app.source_change_impact import (AffectedDocumentsRequest, AffectedDocumentsResult,
+                                      find_for_source_change)
 
 app = FastAPI(title="LivingDocs AI Service", version="0.1.0")
 
@@ -390,6 +392,14 @@ def get_drift_report_markdown(report_id: str, min_severity: Optional[Severity] =
     """LD-159: the report as Markdown grouped by severity, e.g. for a Pull Request comment."""
     return PlainTextResponse(render_drift_markdown(_drift_report(report_id), min_severity),
                              media_type="text/markdown")
+
+
+@app.post("/internal/affected-documents", response_model=AffectedDocumentsResult,
+          dependencies=[Depends(require_internal_service)])
+def affected_documents(req: AffectedDocumentsRequest):
+    """LD-122: parts of the given saved documents that a source change (LD-116) may have made
+    outdated, each `direct` (documents a changed file) or `dependent` (refers to changed code)."""
+    return find_for_source_change(req, documents)
 
 
 @app.get("/drift/severity-rules")

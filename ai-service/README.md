@@ -58,6 +58,7 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | GET | `/drift/reports/{id}?min_severity=high` | One drift report (optionally only findings at or above a level) |
 | GET | `/drift/reports/{id}/markdown?min_severity=` | The report as Markdown grouped by severity (PR comment) |
 | GET | `/drift/severity-rules` | Severity levels (score bands, meaning, action) and every severity rule |
+| POST | `/internal/affected-documents` | Internal (`INTERNAL_API_SECRET`). Parts of the given saved documents a source change (LD-116) may have made outdated, each `direct` or `dependent` (LD-122) |
 
 Built-in templates: `default`, `api-reference`, `brief`.
 
