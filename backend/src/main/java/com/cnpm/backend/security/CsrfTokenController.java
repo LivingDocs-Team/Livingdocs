@@ -1,8 +1,7 @@
-package com.cnpm.backend.controller;
+package com.cnpm.backend.security;
 
 import org.springframework.security.web.csrf.CsrfToken;
 import jakarta.servlet.http.HttpServletRequest;
-import com.cnpm.backend.config.SpaCsrfTokenRequestHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 

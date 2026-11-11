@@ -1,11 +1,10 @@
 
-package com.cnpm.backend.service;
+package com.cnpm.backend.auth;
 
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.cnpm.backend.dto.RegisterRequest;
 import com.cnpm.backend.entity.User;
 import com.cnpm.backend.repository.UserRepository;
 

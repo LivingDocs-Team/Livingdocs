@@ -1,4 +1,4 @@
-package com.cnpm.backend;
+package com.cnpm.backend.auth;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -19,10 +19,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
 
-import com.cnpm.backend.controller.UserRegistrationController;
-import com.cnpm.backend.dto.RegisterRequest;
 import com.cnpm.backend.entity.User;
-import com.cnpm.backend.service.UserRegistrationService;
 
 @ExtendWith(MockitoExtension.class)
 class UserRegistrationControllerTest {

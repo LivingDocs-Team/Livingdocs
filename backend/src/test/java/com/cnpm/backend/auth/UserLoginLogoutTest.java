@@ -1,6 +1,5 @@
-package com.cnpm.backend;
+package com.cnpm.backend.auth;
 
-import com.cnpm.backend.controller.UserLoginController;
 import com.cnpm.backend.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
