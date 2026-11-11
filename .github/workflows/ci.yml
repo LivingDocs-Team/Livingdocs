@@ -249,8 +249,8 @@ jobs:
           python -m playwright install --with-deps chromium
 
       - name: Analyzer unit tests (LD-328)
-        run: python -m pytest -q -o addopts="" tests/test_analysis.py
-
+        run: python -m pytest -q -o addopts="" tests/test_analysis.py tests/test_evidence_submission.py
+        
       - name: Start analyzer service (LD-328) on port 8000
         # runs from the fixtures folder so the analyzer reads shop/*.py like files of a repository
         working-directory: ai-service/tests/integration/fixtures
