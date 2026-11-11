@@ -31,6 +31,14 @@ Confidence (0-1, same levels as LD-340: high >= 0.75, medium >= 0.50):
     method     1.00 entity changes from the analyzer (before/after), 0.80 from the diff only
     location   1.00 section generated from the changed file, 0.85 other documentation
     certainty  1.00 removed / renamed / signature, 0.80 new entity, 0.70 behaviour change
+    evidence   LD-356: 1.00 code diff (X) and documentation passage (D) both present, x0.70 for
+               each one that is missing (empty excerpt counts as missing): a finding without
+               its proof is never rated high, without both it is low
+    AI review  LD-346 / LD-356: -0.10 per evidence id the AI cited that the finding does not have
+               (at most 0.30); the rule-based severity is not changed
+
+Scores are bounded to 0-1 and rounded half-up (confidence.bounded); the level comes from the
+rounded score with the thresholds of confidence.py, the same ones severity uses.
 """
 import threading
 import uuid
@@ -38,13 +46,13 @@ from collections import Counter, OrderedDict
 from typing import List, Optional, Tuple
 
 from . import drift_referential, drift_semantic, drift_severity, drift_signature
-from .confidence import level_of
+from .confidence import LEVELS_TEXT, MISSING_EVIDENCE_FACTOR, bounded, level_of
 from .drift_affected import DocText, Hit, collect_docs, find_affected
 from .drift_changes import analyze_pull_request
 from .drift_evidence import build_evidence
 from .drift_models import (DRIFT_KINDS, SEVERITY_ORDER, AffectedDocument, DriftAnalyzeRequest,
                            DriftFinding, DriftReport, DriftReportSummary, DriftStatus, DriftSummary,
-                           DriftType, EntityChangeType, PullRequestAnalysis)
+                           DriftEvidence, DriftType, EntityChangeType, PullRequestAnalysis)
 from .drift_review import DriftReviewer, get_reviewer, resolve
 from .drift_models import ResolutionUpdate
 from .drift_rules import Classified
@@ -55,7 +63,9 @@ METHOD = ("Entity changes from the analyzer's before/after results (or the diff)
           "HTTP method or contract changed (breaking or not); Semantic: status codes, exceptions, "
           "values, docstring or implementation changed, or new code undocumented. A passage that "
           "still states the old detail raises the severity. Confidence = match x method x location "
-          "x certainty; levels: high >= 0.75, medium >= 0.50, low < 0.50.")
+          f"x certainty x evidence ({MISSING_EVIDENCE_FACTOR:.2f} per missing code diff or "
+          "documentation passage), minus 0.10 per unknown evidence id the AI review cites; bounded "
+          "to 0-1. " + LEVELS_TEXT)
 
 
 
@@ -87,7 +97,15 @@ def classify(hit: Hit) -> List[Classified]:
     return [x for x in out if x is not None]
 
 
-def _confidence(hit: Hit, cl: Classified) -> Tuple[float, dict]:
+def evidence_factor(evidence: List[DriftEvidence]) -> float:
+    """LD-356: x0.70 for each kind of proof the finding lacks (code diff, documentation passage)."""
+    def has(kind: str) -> bool:
+        return any(e.kind.value == kind and (e.excerpt or "").strip() for e in evidence)
+    missing = (not has("code_diff")) + (not has("documentation"))
+    return round(MISSING_EVIDENCE_FACTOR ** missing, 2)
+
+
+def _confidence(hit: Hit, cl: Classified, evidence: List[DriftEvidence]) -> Tuple[float, dict]:
     t = hit.target
     exact = [m for m in hit.matches if m.exact]
     if hit.param_matches or cl.details or any(m.in_code for m in exact):
@@ -100,9 +118,10 @@ def _confidence(hit: Hit, cl: Classified) -> Tuple[float, dict]:
         match = 0.9     # file-level / undocumented finding on the file's own section
     method = 0.8 if (t.change is not None and t.change.source == "patch") else 1.0
     location = 1.0 if hit.documents_file else 0.85
-    score = round(match * method * location * cl.certainty, 2)
+    proof = evidence_factor(evidence)
+    score = bounded(match * method * location * cl.certainty * proof)
     return score, {"match": match, "method": method, "location": location,
-                   "certainty": cl.certainty}
+                   "certainty": cl.certainty, "evidence": proof}
 
 
 def _part(hit: Hit, cl: Classified) -> AffectedDocument:
@@ -123,9 +142,9 @@ def _part(hit: Hit, cl: Classified) -> AffectedDocument:
 def detect(analysis: PullRequestAnalysis, hits: List[Hit]) -> List[DriftFinding]:
     findings: List[DriftFinding] = []
     for hit, cl in ((h, x) for h in hits for x in classify(h)):
-        score, factors = _confidence(hit, cl)
         c = hit.target.change
         evidence = build_evidence(hit, analysis, cl.details)
+        score, factors = _confidence(hit, cl, evidence)
         # LD-156: the severity comes only from the rule table, with the evidence of each rule
         assessment = drift_severity.assess(cl.type, cl.base, cl.adjust, score, evidence)
         cl.severity = assessment.level

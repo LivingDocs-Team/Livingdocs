@@ -146,8 +146,12 @@ PR files (patch + analyzer result at base/head)
     summary. `finding.rules` keeps the short form.
   - *LD-159 display*: `GET /drift/reports/{id}/markdown` (PR comment) and the frontend page
     "Documentation Drift" (`frontend/src/DocumentationDrift.jsx`).
-- **Confidence** 0-1 = match x method x location x certainty; levels as LD-340 (high >= 0.75,
-  medium >= 0.50). Every finding has `factors` explaining the score.
+- **Confidence** 0-1 = match x method x location x certainty x evidence; levels as LD-340
+  (high >= 0.75, medium >= 0.50). Every finding has `factors` explaining the score. LD-356: a
+  finding missing its code diff or its documentation passage is x0.70 per missing proof (never
+  high; without both, low); every evidence id the AI review cites that the finding does not have
+  costs -0.10 (max 0.30, `factors.invalid_citations`, `ai_review.invalid_citations`) - severity
+  is not changed.
 - **Evidence** (BR-50): `X1` code diff of the entity (without a diff: signature and docstring
   before -> after), `D1..` documentation lines, `C1` commit / PR link, `T1..` Jira keys from the PR
   title, branch and description.
@@ -262,6 +266,19 @@ analysis (LD-328) -> prompt -> Claude -> JSON (FileDoc) -> validate -> Markdown 
 - `app/confidence.py`: 0-1 confidence per entity, file and job, mostly from checkable signals
   (input quality, evidence grounding, whether it was described) plus the AI's self-assessment.
   Shown in the Markdown and returned by `GET /jobs/{id}/report`.
+- **Confidence scoring rules (LD-356)**, same for generated documentation and drift findings:
+  - *bounded*: `confidence.bounded()` clamps every score to 0-1 (NaN / infinity / not a number
+    -> 0) and rounds half-up to 2 decimals, so the same input always gives the same score; the
+    response models reject values outside 0-1.
+  - *thresholds*: `HIGH = 0.75`, `MEDIUM = 0.50` are defined once; the level is taken from the
+    rounded score (0.745 -> 0.75 high, 0.7449 -> 0.74 medium). Drift severity
+    (`UNCERTAIN_CONFIDENCE`) and the Markdown renderer use the same constants.
+  - *unknown evidence*: -0.10 per cited id that is not in the evidence (max 0.30); ids are
+    matched ignoring case and counted once.
+  - *missing evidence*: an entity without its own source evidence is x0.70 (never high); an AI
+    self-assessment that is not a finite number counts as missing (0.5).
+  - Tests: `tests/test_confidence_scoring.py` (boundaries, penalties, missing evidence,
+    reproducibility of generation and drift reports).
 
 Input format agreed with LD-328: see [CONTRACT.md](CONTRACT.md).
 

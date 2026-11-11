@@ -4,7 +4,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from .confidence import METHOD, level_of
+from .confidence import METHOD, average, level_of
 from .generator import DocGenerator, get_generator
 from .normalize import normalize
 from .models import (
@@ -157,7 +157,7 @@ def run_job(job_id: str, req: GenerateRequest, generator: Optional[DocGenerator]
 
         # job confidence = mean over every documented entity (files weighted by size)
         scores = [e.confidence for fr in file_reports for e in fr.entities]
-        overall = round(sum(scores) / len(scores), 2) if scores else None
+        overall = average(scores)
         report = JobReport(
             job_id=job_id,
             template_id=tpl.id,
