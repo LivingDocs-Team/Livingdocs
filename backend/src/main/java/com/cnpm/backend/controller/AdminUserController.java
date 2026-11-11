@@ -9,6 +9,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -34,6 +35,7 @@ public class AdminUserController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority('USER_VIEW')")
     @Transactional(readOnly = true)
     public UserPageResponse listUsers(
             @RequestParam(defaultValue = "0") int page,
@@ -59,12 +61,14 @@ public class AdminUserController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAuthority('USER_VIEW')")
     @Transactional(readOnly = true)
     public UserResponse getUser(@PathVariable Long id) {
         return toResponse(findUser(id));
     }
 
     @PatchMapping("/{id}")
+    @PreAuthorize("hasAuthority('USER_UPDATE')")
     @Transactional
     public UserResponse updateUser(
             @PathVariable Long id,
@@ -111,6 +115,7 @@ public class AdminUserController {
     }
 
     @PatchMapping("/{id}/status")
+    @PreAuthorize("hasAuthority('USER_DISABLE')")
     @Transactional
     public ResponseEntity<?> updateStatus(
             @PathVariable Long id,
@@ -130,6 +135,29 @@ public class AdminUserController {
         User target = findUser(id);
         target.setActive(request.active());
         return ResponseEntity.ok(toResponse(userRepository.save(target)));
+    }
+
+    @PatchMapping("/{id}/role")
+    @PreAuthorize("hasAuthority('USER_ASSIGN_ROLE')")
+    @Transactional
+    public UserResponse updatePrimaryRole(
+            @PathVariable Long id,
+            @RequestBody UpdateUserRoleRequest request,
+            Authentication authentication) {
+        if (request == null || request.role() == null || request.role().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The role field is required");
+        }
+        User actor = findAuthenticatedUser(authentication);
+        if (actor.getId().equals(id)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Administrators cannot change their own role");
+        }
+        String role = request.role().trim().toUpperCase(java.util.Locale.ROOT);
+        if (!java.util.Set.of("DEVELOPER", "STAFF", "MANAGER", "TECHNICAL_LEAD", "ADMINISTRATOR").contains(role)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown system role");
+        }
+        User target = findUser(id);
+        target.setRole(role);
+        return toResponse(userRepository.save(target));
     }
 
     private User findUser(Long id) {
@@ -183,6 +211,8 @@ public class AdminUserController {
 
     public record UpdateUserStatusRequest(Boolean active) {
     }
+
+    public record UpdateUserRoleRequest(String role) { }
 
     public record UserResponse(
             Long id,

@@ -4,8 +4,10 @@ import com.livingdocs.github.entity.ConnectionStatus;
 import com.livingdocs.github.entity.GitHubConnection;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import jakarta.persistence.LockModeType;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -14,6 +16,10 @@ import java.util.UUID;
 public interface GitHubConnectionRepository extends JpaRepository<GitHubConnection, UUID> {
 
     Optional<GitHubConnection> findByUserId(String userId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select c from GitHubConnection c where c.id = :id")
+    Optional<GitHubConnection> findByIdForUpdate(@Param("id") UUID id);
 
     /**
      * Chỉ đổi trạng thái kết nối, không ghi lại token (LD-76): lưu cả bản ghi có thể ghi token cũ

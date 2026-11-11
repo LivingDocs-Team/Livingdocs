@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.security.authentication.AuthenticationServiceException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
@@ -15,18 +16,27 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.cnpm.backend.entity.User;
 import com.cnpm.backend.repository.UserRepository;
+import com.cnpm.backend.repository.RoleRepository;
 
 @Service
 public class GitHubOAuth2UserService extends DefaultOAuth2UserService {
 
     private final UserRepository userRepository;
 private final PasswordEncoder passwordEncoder;
+    private final RoleRepository roleRepository;
 
+    @Autowired
 public GitHubOAuth2UserService(
         UserRepository userRepository,
-        PasswordEncoder passwordEncoder) {
+        PasswordEncoder passwordEncoder,
+        RoleRepository roleRepository) {
     this.userRepository = userRepository;
     this.passwordEncoder = passwordEncoder;
+    this.roleRepository = roleRepository;
+}
+
+public GitHubOAuth2UserService(UserRepository userRepository, PasswordEncoder passwordEncoder) {
+    this(userRepository, passwordEncoder, null);
 }
 
     @Override
@@ -55,8 +65,16 @@ public GitHubOAuth2UserService(
                     "This account has been disabled");
         }
 
+        var authorities = new java.util.HashSet<org.springframework.security.core.GrantedAuthority>();
+        authorities.addAll(githubUser.getAuthorities());
+        String roleName = user.getRole().startsWith("ROLE_") ? user.getRole().substring(5) : user.getRole();
+        authorities.add(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_" + roleName));
+        if (roleRepository != null) {
+            roleRepository.findWithPermissionsByName(roleName).ifPresent(role -> role.getPermissions().forEach(permission ->
+                    authorities.add(new org.springframework.security.core.authority.SimpleGrantedAuthority(permission.getCode()))));
+        }
         return new org.springframework.security.oauth2.core.user.DefaultOAuth2User(
-                githubUser.getAuthorities(),
+                authorities,
                 attributes,
                 "id");
     }
