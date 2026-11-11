@@ -1,5 +1,6 @@
 package com.livingdocs.github.service;
 
+import com.livingdocs.github.change.AffectedDocumentsClient;
 import com.livingdocs.github.change.ChangedEntity;
 import com.livingdocs.github.change.ChangedEntityDetector;
 import com.livingdocs.github.change.CodeAnalyzerClient;
@@ -11,6 +12,7 @@ import com.livingdocs.github.client.GitHubBlob;
 import com.livingdocs.github.client.GitHubChangedFile;
 import com.livingdocs.github.client.GitHubClient;
 import com.livingdocs.github.dto.SourceChangeResponse;
+import com.livingdocs.github.entity.AffectedDocument;
 import com.livingdocs.github.entity.ConnectedRepository;
 import com.livingdocs.github.entity.GitHubConnection;
 import com.livingdocs.github.entity.SourceChange;
@@ -40,11 +42,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * LD-116 - phát hiện thay đổi mã nguồn của một commit hoặc Pull Request:
  * lấy file thay đổi từ GitHub (LD-117..119), tìm code entity thay đổi bằng Code Analyzer (LD-120)
  * và lưu thành source change PENDING để bước cập nhật tài liệu (LD-128) đọc qua API.
+ * Sau đó LD-122 hỏi ai-service tài liệu đã lưu nào của repo có thể đã cũ (documentsStatus, affectedDocuments).
  * Lỗi GitHub / analyzer được lưu thành FAILED kèm mã lỗi; người dùng gọi retry để chạy lại.
  */
 @Service
@@ -58,6 +62,7 @@ public class SourceChangeService {
     private final GitHubConnectionService connectionService;
     private final GitHubClient gitHubClient;
     private final CodeAnalyzerClient analyzerClient;
+    private final AffectedDocumentsClient documentsClient;
     private final SourceChangeRepository sourceChangeRepository;
     private final TransactionTemplate transaction;
 
@@ -66,6 +71,7 @@ public class SourceChangeService {
                                GitHubConnectionService connectionService,
                                GitHubClient gitHubClient,
                                CodeAnalyzerClient analyzerClient,
+                               AffectedDocumentsClient documentsClient,
                                SourceChangeRepository sourceChangeRepository,
                                PlatformTransactionManager transactionManager) {
         this.repositoryRepository = repositoryRepository;
@@ -73,6 +79,7 @@ public class SourceChangeService {
         this.connectionService = connectionService;
         this.gitHubClient = gitHubClient;
         this.analyzerClient = analyzerClient;
+        this.documentsClient = documentsClient;
         this.sourceChangeRepository = sourceChangeRepository;
         this.transaction = new TransactionTemplate(transactionManager);
     }
@@ -96,7 +103,10 @@ public class SourceChangeService {
         } catch (ApiException e) { // GitHub chưa kết nối hoặc cần kết nối lại
             result = Result.failed(e.getCode(), e.getMessage());
         }
-        save(request, result);
+        UUID pending = save(request, result);
+        if (pending != null) {
+            findAffectedDocuments(repo.getFullName(), pending);
+        }
     }
 
     @Transactional(readOnly = true)
@@ -105,14 +115,25 @@ public class SourceChangeService {
                 .stream().map(SourceChangeResponse::from).toList();
     }
 
-    /** Chạy lại một source change FAILED. Kết quả rỗng nghĩa là lần này không còn file mã nguồn nào thay đổi. */
+    /**
+     * Chạy lại một source change FAILED, hoặc chỉ bước tìm tài liệu bị ảnh hưởng khi bước đó FAILED (LD-122).
+     * Kết quả rỗng nghĩa là lần này không còn file mã nguồn nào thay đổi.
+     */
     public Optional<SourceChangeResponse> retry(UUID repositoryId, UUID changeId) {
         SourceChange change = sourceChangeRepository.findById(changeId)
                 .filter(c -> c.getRepositoryId().equals(repositoryId))
                 .orElseThrow(() -> ApiException.notFound("Source change " + changeId + " was not found."));
+        if (change.getStatus() == SourceChange.Status.PENDING
+                && change.getDocumentsStatus() == SourceChange.DocumentsStatus.FAILED) {
+            ConnectedRepository repo = repositoryRepository.findById(repositoryId)
+                    .orElseThrow(() -> ApiException.notFound("Repository " + repositoryId + " was not found."));
+            findAffectedDocuments(repo.getFullName(), changeId);
+            return transaction.execute(status -> sourceChangeRepository.findById(changeId).map(SourceChangeResponse::from));
+        }
         if (change.getStatus() != SourceChange.Status.FAILED) {
             throw new ApiException(HttpStatus.CONFLICT, "SOURCE_CHANGE_NOT_FAILED",
-                    "Only a failed source change can be retried.");
+                    "Only a failed source change, or one whose affected documentation could not be checked, "
+                            + "can be retried.");
         }
         detect(new SourceChangeRequest(repositoryId, change.getTriggerType(), change.getCommitSha(),
                 change.getPullRequestNumber()));
@@ -267,17 +288,55 @@ public class SourceChangeService {
         return status >= 500 ? "GITHUB_UNAVAILABLE" : "UNEXPECTED_GITHUB_RESPONSE";
     }
 
+    // ------------------------------------------------------------------ tài liệu bị ảnh hưởng (LD-122)
+
+    /** Đọc source change và lưu kết quả trong transaction ngắn; gọi ai-service ở giữa, ngoài transaction. */
+    private void findAffectedDocuments(String repository, UUID changeId) {
+        List<AffectedDocumentsClient.ChangedFile> files = transaction.execute(status ->
+                sourceChangeRepository.findById(changeId).map(SourceChangeService::changedFiles).orElse(null));
+        if (files == null) {
+            return; // source change vừa bị xoá
+        }
+        Consumer<SourceChange> result = lookUpDocuments(repository, files);
+        transaction.executeWithoutResult(status -> sourceChangeRepository.findById(changeId).ifPresent(result));
+    }
+
+    private Consumer<SourceChange> lookUpDocuments(String repository, List<AffectedDocumentsClient.ChangedFile> files) {
+        try {
+            List<AffectedDocument> found = documentsClient.find(repository, files).stream()
+                    .filter(a -> a.documentId() != null && a.path() != null)
+                    .map(a -> new AffectedDocument(a.documentId(), a.title(), a.version(), a.path(), a.documentsFile(),
+                            "direct".equalsIgnoreCase(a.dependency())
+                                    ? AffectedDocument.Dependency.DIRECT : AffectedDocument.Dependency.DEPENDENT,
+                            a.reasons()))
+                    .toList();
+            return change -> change.markDocumentsFound(found);
+        } catch (SourceChangeException e) {
+            return change -> change.markDocumentsFailed(e.getCode(), e.getMessage());
+        }
+    }
+
+    private static List<AffectedDocumentsClient.ChangedFile> changedFiles(SourceChange change) {
+        return change.getFiles().stream()
+                .map(f -> new AffectedDocumentsClient.ChangedFile(f.getPath(), f.getPreviousPath(), f.getChangeType(),
+                        f.getLanguage(), f.getEntities().stream()
+                        .map(e -> new AffectedDocumentsClient.ChangedEntity(e.getKind(), e.getName(), e.getChangeType()))
+                        .toList()))
+                .toList();
+    }
+
     // ------------------------------------------------------------------ lưu
 
-    private void save(SourceChangeRequest request, Result result) {
-        transaction.executeWithoutResult(status -> {
+    /** Trả về id của source change nếu nó được lưu ở trạng thái PENDING. */
+    private UUID save(SourceChangeRequest request, Result result) {
+        return transaction.execute(status -> {
             SourceChange change = sourceChangeRepository.findByRepositoryIdAndTriggerTypeAndCommitSha(
                     request.repositoryId(), request.trigger(), request.commitSha()).orElse(null);
             if (result.files() != null && result.files().isEmpty()) {
                 if (change != null) {
                     sourceChangeRepository.delete(change); // chạy lại và không còn file mã nguồn nào thay đổi
                 }
-                return;
+                return null;
             }
             if (change == null) {
                 change = new SourceChange();
@@ -291,7 +350,8 @@ public class SourceChangeService {
             } else {
                 change.markPending(result.files());
             }
-            sourceChangeRepository.save(change);
+            SourceChange saved = sourceChangeRepository.save(change);
+            return saved.getStatus() == SourceChange.Status.PENDING ? saved.getId() : null;
         });
     }
 
