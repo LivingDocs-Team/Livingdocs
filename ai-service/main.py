@@ -1,5 +1,6 @@
 """LivingDocs AI service - AI-assisted documentation generation (LD-90, LD-340), versioned
-documentation (LD-195) and documentation drift detection (LD-145).
+documentation (LD-195), documentation drift detection (LD-145) and AI-based drift analysis
+with review and resolution (LD-346).
 
 Run:  uvicorn main:app --reload --port 8001
 Docs: http://localhost:8001/docs
@@ -13,8 +14,9 @@ from app.drift import analyze as analyze_drift
 from app.drift import drift_reports
 from app.drift_changes import analyze_pull_request
 from app.drift_markdown import at_least, render as render_drift_markdown
-from app.drift_models import (DriftAnalyzeRequest, DriftReport, DriftReportSummary,
-                              PullRequestAnalysis, Severity)
+from app.drift_models import (DriftAnalyzeRequest, DriftFinding, DriftReport, DriftReportSummary,
+                              PullRequestAnalysis, ResolutionUpdate, Severity)
+from app.drift_review import ResolutionError
 from app.drift_severity import CAPS, SCORE_BANDS, SEVERITY_LEVELS, rules_table
 from app.generator import get_generator
 from app.jobs import jobs, run_job
@@ -358,7 +360,11 @@ def drift_analyze(req: DriftAnalyzeRequest):
     """LD-147/148/149: findings (Referential / Signature / Semantic, severity, confidence) for
     every saved document section and repository Markdown file that describes changed code,
     each with its evidence (code diff, documentation passage, commit, ticket). The report is
-    kept and can be read again from /drift/reports/{id}."""
+    kept and can be read again from /drift/reports/{id}.
+
+    LD-346: every finding also gets `ai_review` (AI verdict, explanation citing its evidence ids,
+    suggested documentation update; offline explanation without an API key; `ai_review: false`
+    skips the AI) and `resolution` (open until a reviewer handles it)."""
     return drift_reports.add(analyze_drift(req, documents))
 
 
@@ -390,6 +396,19 @@ def get_drift_report_markdown(report_id: str, min_severity: Optional[Severity] =
     """LD-159: the report as Markdown grouped by severity, e.g. for a Pull Request comment."""
     return PlainTextResponse(render_drift_markdown(_drift_report(report_id), min_severity),
                              media_type="text/markdown")
+
+
+@app.put("/drift/reports/{report_id}/findings/{finding_id}/resolution", response_model=DriftFinding)
+def resolve_drift_finding(report_id: str, finding_id: str, update: ResolutionUpdate):
+    """LD-346: review and resolution of one finding: open, acknowledged, resolved or dismissed
+    (dismissing needs a `note` with the reason). Every change is kept in `resolution.history`."""
+    try:
+        finding = drift_reports.resolve(report_id, finding_id, update)
+    except ResolutionError as e:
+        raise HTTPException(e.status, e.message)
+    if finding is None:
+        raise HTTPException(404, "Drift report not found")
+    return finding
 
 
 @app.get("/drift/severity-rules")

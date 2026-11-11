@@ -37,6 +37,7 @@ import com.livingdocs.github.client.GitHubPullRequest;
 import com.livingdocs.github.client.GitHubPullRequestFile;
 import com.livingdocs.github.client.GitHubTree;
 import com.livingdocs.github.dto.DriftAnalysisRequest;
+import com.livingdocs.github.dto.DriftResolutionRequest;
 import com.livingdocs.github.entity.ConnectedRepository;
 import com.livingdocs.github.entity.GitHubConnection;
 import com.livingdocs.github.exception.ApiException;
@@ -74,6 +75,7 @@ public class DriftAnalysisService {
 
     private static final Set<String> ANALYZED_LANGUAGES = Set.of("python", "java");
     private static final Set<String> SEVERITY_LEVELS = Set.of("low", "medium", "high", "critical");
+    private static final Set<String> RESOLUTION_STATUSES = Set.of("open", "acknowledged", "resolved", "dismissed");
     private static final Set<String> GITHUB_STATUSES = Set.of(
             "added", "modified", "removed", "renamed", "copied", "changed", "unchanged");
     private static final Set<String> SKIPPED_DIRECTORIES = Set.of(
@@ -226,6 +228,55 @@ public class DriftAnalysisService {
             throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid response.");
         }
         return rules;
+    }
+
+    /**
+     * LD-346: review and resolution of one finding (open, acknowledged, resolved, dismissed).
+     * The actor is the authenticated user; dismissing needs a reason.
+     */
+    public JsonNode resolveFinding(String userId, UUID repositoryId, String reportId, String findingId,
+                                   DriftResolutionRequest request) {
+        requireReport(userId, repositoryId, reportId);
+        String status = request == null || request.status() == null ? ""
+                : request.status().trim().toLowerCase(Locale.ROOT);
+        if (!RESOLUTION_STATUSES.contains(status)) {
+            throw ApiException.badRequest("status must be one of open, acknowledged, resolved, dismissed.");
+        }
+        String note = request.note() == null || request.note().isBlank() ? null : request.note().trim();
+        if ("dismissed".equals(status) && note == null) {
+            throw ApiException.badRequest("A reason (note) is required to dismiss a finding.");
+        }
+        if (note != null && note.length() > 2000) {
+            throw ApiException.badRequest("note must be 2000 characters or fewer.");
+        }
+        ObjectNode body = json.objectNode();
+        body.put("status", status);
+        body.put("actor", userId);
+        putIfPresent(body, "note", note);
+        try {
+            JsonNode finding = aiServiceClient.put()
+                    .uri("/drift/reports/{id}/findings/{finding}/resolution", reportId, findingId)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body)
+                    .retrieve()
+                    .body(JsonNode.class);
+            if (finding == null || !finding.isObject() || !finding.path("resolution").isObject()) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid finding.");
+            }
+            return finding;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                throw ApiException.notFound("Drift report or finding not found in the AI service.");
+            }
+            if (e.getStatusCode().value() == 422) {
+                String detail = DocumentationTemplateService.detail(e);
+                throw new ApiException(HttpStatus.BAD_REQUEST, "DRIFT_RESOLUTION_INVALID",
+                        detail != null ? detail : "The finding could not be updated.");
+            }
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not update the finding.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not update the finding.");
+        }
     }
 
     /** Owner check; returns the repository name when a repository id is given. */

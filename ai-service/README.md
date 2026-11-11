@@ -58,6 +58,7 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | GET | `/drift/reports/{id}?min_severity=high` | One drift report (optionally only findings at or above a level) |
 | GET | `/drift/reports/{id}/markdown?min_severity=` | The report as Markdown grouped by severity (PR comment) |
 | GET | `/drift/severity-rules` | Severity levels (score bands, meaning, action) and every severity rule |
+| PUT | `/drift/reports/{id}/findings/{finding}/resolution` | Review / resolve one finding: `open`, `acknowledged`, `resolved`, `dismissed` (needs a `note`) (LD-346) |
 
 Built-in templates: `default`, `api-reference`, `brief`.
 
@@ -86,7 +87,7 @@ for the AI) and an ordered list of `sections` taken from `Overview`, `Classes`, 
 - Saved to `DOCUMENTS_FILE` (default `data/documents.json`, atomic writes; empty = memory only).
 - Details: `Docs/Linh/` FR6.md.
 
-### Documentation drift detection (LD-145, LD-151)
+### Documentation drift detection (LD-145, LD-151, LD-346)
 
 Checks whether a Pull Request makes existing documentation outdated.
 
@@ -153,13 +154,46 @@ PR files (patch + analyzer result at base/head)
 - Matching avoids false positives: whole identifiers only, common words (`add`, `run`) only in
   code / headings, bare method names only in the section of their own file, endpoint paths match
   any placeholder style (`{id}`, `:id`, `<id>`).
+- **Source-documentation comparison (LD-347)**, `app/drift_compare.py` - no finding when the
+  documentation is not outdated:
+  - *already updated*: no stale detail and the entity's section shows every new parameter, type,
+    default and return type (signature) or the new status code, exception, value or docstring
+    sentence (semantic);
+  - *change acknowledged*: each mention says it was removed / renamed / deprecated / moved, or
+    names the new name on the line; change logs (`CHANGELOG.md`, `HISTORY.md`, `RELEASE_NOTES.md`...)
+    are skipped with a warning;
+  - *no real code change*: comments, blank lines and whitespace are ignored (Python `#`, Java `//`
+    and `/* */`; `//` in Python is division); docstring changes still count;
+  - *one change, one finding*: defaults on the `def` line are a signature change, not also a
+    semantic "values" change; values that only follow an added / removed / renamed parameter are
+    ignored; an endpoint whose parameters changed only through its handler is reported on the
+    handler (as in diff-only mode);
+  - stale details are searched from the mention of the entity to the next heading only;
+    `affected_documents` lists only parts with findings.
+  - Regression fixtures: `tests/fixtures/drift_cases.json` (15 Pull Requests: referential,
+    signature, semantic, unchanged documentation, no-change PRs), each run with the analyzer's
+    results and with the diff only, exact expected findings (`tests/test_drift_cases.py`). Refresh
+    the analyzer results with `python ai-service/scripts/capture_drift_cases.py` (repository root).
+- **AI review (LD-346)**, `app/drift_review.py`: after the rules, the AI reviews every finding (the
+  20 most severe, one call per report) like a second reviewer - `ai_review.verdict` confirmed /
+  disputed / uncertain, a plain-language `explanation` citing the finding's evidence ids (unknown
+  ids are dropped; an answer with no valid citation is `uncertain`), and a `suggested_update` for
+  the documentation. It never changes type or severity. Invalid JSON is retried with a repair
+  message; without `ANTHROPIC_API_KEY`, or when the AI fails, `mode: offline` with an explanation
+  and suggestion built from the rules and evidence (`verdict: not_reviewed`). `ai_review: false` in
+  the request skips the AI. With a key, `/drift/analyze` waits for one AI call (`LLM_TIMEOUT`,
+  `LLM_MAX_ATTEMPTS`, default 2).
+- **Review and resolution (LD-346)**: every finding has `resolution` (status, actor, note,
+  history), starting `open`; reviewers acknowledge, resolve, dismiss (with a reason) or reopen it.
+  The report's `review` gives the progress (`pending`, `in_progress`, `completed`, `not_required`)
+  and the AI verdict counts; the Markdown report and the frontend page show both.
 - **Manual analysis from the app:** github-integration-service `POST /api/repositories/{id}/drift/analyze`
   `{"pullRequestNumber": 7}` reads the PR from GitHub, runs the analyzer on both commits and calls
   `/drift/analyze` with the saved documents of that repository only. Details:
   [github-integration-service README](../services/github-integration-service/README.md).
-- Reports are kept in memory (last 500); history and resolution of drift are LD-167.
-- Tests (LD-150, LD-155, LD-160): `tests/test_drift.py`, `tests/test_drift_classification.py`,
-  `tests/test_drift_severity.py`, `tests/test_drift_api.py`,
+- Reports (with their resolutions) are kept in memory (last 500); persistent drift history is LD-167.
+- Tests (LD-150, LD-155, LD-160, LD-346, LD-347): `tests/test_drift.py`, `tests/test_drift_classification.py`,
+  `tests/test_drift_severity.py`, `tests/test_drift_cases.py`, `tests/test_drift_review.py`, `tests/test_drift_api.py`,
   `tests/integration/test_drift_integration.py`, live: `test_live_pipeline.py`; UI:
   `tests/test_frontend_drift.py` (repository root).
 

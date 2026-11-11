@@ -23,6 +23,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.HttpMethod.GET;
 import static org.springframework.http.HttpMethod.POST;
+import static org.springframework.http.HttpMethod.PUT;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -43,6 +44,7 @@ import com.livingdocs.github.client.GitHubPullRequest;
 import com.livingdocs.github.client.GitHubPullRequestFile;
 import com.livingdocs.github.client.GitHubTree;
 import com.livingdocs.github.dto.DriftAnalysisRequest;
+import com.livingdocs.github.dto.DriftResolutionRequest;
 import com.livingdocs.github.entity.ConnectedRepository;
 import com.livingdocs.github.entity.GitHubConnection;
 import com.livingdocs.github.exception.ApiException;
@@ -328,6 +330,58 @@ class DriftAnalysisServiceTest {
                 () -> driftService.getReport(USER_ID, REPOSITORY_ID, "report-1", null));
 
         assertEquals(HttpStatus.NOT_FOUND, error.getStatus());
+        aiServiceServer.verify();
+    }
+
+    @Test
+    void findingResolutionIsForwardedWithTheAuthenticatedUserAsActor() {
+        stubGitHub();
+        expectAnalyzer(ANALYSIS_BEFORE, ANALYSIS_AFTER);
+        expectDocuments();
+        aiServiceServer.expect(requestTo("http://ai.test/drift/analyze"))
+                .andRespond(withStatus(HttpStatus.CREATED).contentType(MediaType.APPLICATION_JSON).body(REPORT));
+        aiServiceServer.expect(requestTo("http://ai.test/drift/reports/report-1/findings/F1/resolution"))
+                .andExpect(method(PUT))
+                .andExpect(content().json("""
+                        {"status":"dismissed","actor":"%s","note":"Docs already describe v2."}
+                        """.formatted(USER_ID)))
+                .andRespond(withSuccess("""
+                        {"id":"F1","resolution":{"status":"dismissed","actor":"%s","note":"Docs already describe v2."}}
+                        """.formatted(USER_ID), MediaType.APPLICATION_JSON));
+
+        driftService.analyzePullRequest(USER_ID, REPOSITORY_ID, new DriftAnalysisRequest(7, null, false));
+        JsonNode finding = driftService.resolveFinding(USER_ID, REPOSITORY_ID, "report-1", "F1",
+                new DriftResolutionRequest(" Dismissed ", " Docs already describe v2. "));
+
+        assertEquals("dismissed", finding.path("resolution").path("status").asText());
+        aiServiceServer.verify();
+    }
+
+    @Test
+    void findingResolutionIsValidatedAndOwned() {
+        stubGitHub();
+        expectAnalyzer(ANALYSIS_BEFORE, ANALYSIS_AFTER);
+        expectDocuments();
+        aiServiceServer.expect(requestTo("http://ai.test/drift/analyze"))
+                .andRespond(withStatus(HttpStatus.CREATED).contentType(MediaType.APPLICATION_JSON).body(REPORT));
+        aiServiceServer.expect(requestTo("http://ai.test/drift/reports/report-1/findings/F9/resolution"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"detail\":\"Finding 'F9' not found in this report\"}"));
+
+        driftService.analyzePullRequest(USER_ID, REPOSITORY_ID, new DriftAnalysisRequest(7, null, false));
+        ApiException badStatus = assertThrows(ApiException.class, () -> driftService.resolveFinding(
+                USER_ID, REPOSITORY_ID, "report-1", "F1", new DriftResolutionRequest("fixed", null)));
+        ApiException noReason = assertThrows(ApiException.class, () -> driftService.resolveFinding(
+                USER_ID, REPOSITORY_ID, "report-1", "F1", new DriftResolutionRequest("dismissed", " ")));
+        ApiException otherUser = assertThrows(ApiException.class, () -> driftService.resolveFinding(
+                "another-user", REPOSITORY_ID, "report-1", "F1", new DriftResolutionRequest("resolved", null)));
+        ApiException unknown = assertThrows(ApiException.class, () -> driftService.resolveFinding(
+                USER_ID, REPOSITORY_ID, "report-1", "F9", new DriftResolutionRequest("resolved", null)));
+
+        assertEquals(HttpStatus.BAD_REQUEST, badStatus.getStatus());
+        assertEquals(HttpStatus.BAD_REQUEST, noReason.getStatus());
+        assertEquals(HttpStatus.FORBIDDEN, otherUser.getStatus());
+        assertEquals(HttpStatus.NOT_FOUND, unknown.getStatus());
         aiServiceServer.verify();
     }
 

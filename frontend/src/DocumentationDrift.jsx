@@ -3,10 +3,93 @@ import { githubApi, githubApiText } from './githubApi';
 
 // LD-159 Display drift severity: run a drift check for a pull request and show every finding
 // with its severity level, why it has that level (rules and evidence) and the evidence itself.
+// LD-346: the AI's review of each finding (verdict, explanation citing the evidence, suggested
+// documentation update) and its resolution (acknowledge, resolve, dismiss with a reason, reopen).
 
 const LEVELS = ['critical', 'high', 'medium', 'low'];
 const LEVEL_LABEL = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' };
 const TYPE_LABEL = { referential: 'Referential', signature: 'Signature', semantic: 'Semantic' };
+const VERDICT_LABEL = {
+  confirmed: 'AI confirmed', disputed: 'AI disputed', uncertain: 'AI uncertain', not_reviewed: 'Rule-based explanation',
+};
+const RESOLUTION_LABEL = { open: 'Open', acknowledged: 'Acknowledged', resolved: 'Resolved', dismissed: 'Dismissed' };
+
+function reviewProgress(findings) {
+  const counts = { open: 0, acknowledged: 0, resolved: 0, dismissed: 0 };
+  findings.forEach((finding) => { counts[finding.resolution?.status || 'open'] += 1; });
+  let status = 'not_required';
+  if (findings.length) {
+    if (counts.open === findings.length) status = 'pending';
+    else if (counts.open + counts.acknowledged === 0) status = 'completed';
+    else status = 'in_progress';
+  }
+  return { ...counts, status };
+}
+
+function AIReview({ review }) {
+  if (!review) return null;
+  return (
+    <div className={`drift-ai drift-ai-${review.verdict}`} aria-label="AI review">
+      <p>
+        <span className="drift-ai-verdict" data-verdict={review.verdict}>{VERDICT_LABEL[review.verdict] || review.verdict}</span>
+        {' '}{review.explanation}
+      </p>
+      {review.suggested_update && (
+        <>
+          <h4>Suggested documentation update</h4>
+          <pre className="drift-suggestion">{review.suggested_update}</pre>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Resolution({ finding, onResolve }) {
+  const [reason, setReason] = useState('');
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const current = finding.resolution?.status || 'open';
+
+  async function change(status, note) {
+    setBusy(true);
+    setError('');
+    try {
+      await onResolve(finding.id, status, note);
+      setAsking(false);
+      setReason('');
+    } catch (requestError) {
+      setError(requestError.message || 'Could not update the finding.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="drift-resolution" aria-label={`Resolution of ${finding.id}`}>
+      <span className={`drift-resolution-status drift-status-${current}`} data-status={current}>{RESOLUTION_LABEL[current]}</span>
+      {finding.resolution?.note && <span className="drift-meta"> {finding.resolution.note}</span>}
+      <div className="drift-resolution-actions">
+        {current === 'open' && <button type="button" disabled={busy} onClick={() => change('acknowledged')}>Acknowledge</button>}
+        {current !== 'resolved' && current !== 'dismissed' && (
+          <button type="button" disabled={busy} onClick={() => change('resolved')}>Mark resolved</button>
+        )}
+        {current !== 'dismissed' && current !== 'resolved' && (
+          <button type="button" disabled={busy} onClick={() => setAsking((value) => !value)}>Dismiss</button>
+        )}
+        {current !== 'open' && <button type="button" disabled={busy} onClick={() => change('open')}>Reopen</button>}
+      </div>
+      {asking && (
+        <form className="drift-dismiss" onSubmit={(event) => { event.preventDefault(); if (reason.trim()) change('dismissed', reason.trim()); }}>
+          <label htmlFor={`dismiss-${finding.id}`}>Why is this not a documentation drift?</label>
+          <input id={`dismiss-${finding.id}`} value={reason} maxLength={2000} onChange={(event) => setReason(event.target.value)} />
+          <button type="submit" disabled={busy || !reason.trim()}>Confirm dismiss</button>
+        </form>
+      )}
+      {error && <p role="alert" className="drift-error">{error}</p>}
+    </div>
+  );
+}
 
 function SeverityBadge({ level, score }) {
   if (!level) return null;
@@ -73,7 +156,7 @@ function Evidence({ items }) {
   );
 }
 
-function Finding({ finding }) {
+function Finding({ finding, onResolve }) {
   const [open, setOpen] = useState(false);
   const part = finding.document || {};
   return (
@@ -94,6 +177,8 @@ function Finding({ finding }) {
         <dt>Confidence</dt>
         <dd>{Number(finding.confidence).toFixed(2)} ({finding.confidence_level})</dd>
       </dl>
+      <AIReview review={finding.ai_review} />
+      <Resolution finding={finding} onResolve={onResolve} />
       <button type="button" className="text-button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         {open ? 'Hide severity reasons and evidence' : 'Why this severity? Show evidence'}
       </button>
@@ -222,6 +307,18 @@ export default function DocumentationDrift({ userId }) {
   }
 
   const summary = report?.summary;
+  const progress = reviewProgress(report?.findings || []);
+
+  async function resolveFinding(findingId, status, note) {
+    const updated = await githubApi(
+      `/api/repositories/${encodeURIComponent(repositoryId)}/drift/reports/${encodeURIComponent(report.id)}/findings/${encodeURIComponent(findingId)}/resolution`,
+      { method: 'PUT', userId, body: note ? { status, note } : { status } },
+    );
+    setReport((current) => ({
+      ...current,
+      findings: current.findings.map((finding) => (finding.id === findingId ? { ...finding, ...updated } : finding)),
+    }));
+  }
   return (
     <section className="login-card documentation-drift-page" aria-labelledby="documentation-drift-title">
       <h1 id="documentation-drift-title">Documentation Drift</h1>
@@ -279,6 +376,13 @@ export default function DocumentationDrift({ userId }) {
               PR #{report.pull_request?.number}{report.pull_request?.title ? ` · ${report.pull_request.title}` : ''}
               {' · '}{summary?.findings || 0} finding(s) · {summary?.breaking || 0} breaking · {summary?.affected_documents || 0} document(s)
             </p>
+            {summary?.findings > 0 && (
+              <p className="drift-meta drift-review-progress" data-review={progress.status}>
+                Review {progress.status.replace('_', ' ')}: {progress.open} open · {progress.acknowledged} acknowledged
+                {' · '}{progress.resolved} resolved · {progress.dismissed} dismissed
+                {' · '}{report.review?.ai_mode === 'ai' ? 'AI review on' : 'AI review offline (rule-based explanations)'}
+              </p>
+            )}
           </div>
 
           {summary?.findings > 0 && (
@@ -311,7 +415,7 @@ export default function DocumentationDrift({ userId }) {
           )}
 
           <div className="drift-findings">
-            {shownFindings.map((finding) => <Finding key={finding.id} finding={finding} />)}
+            {shownFindings.map((finding) => <Finding key={finding.id} finding={finding} onResolve={resolveFinding} />)}
           </div>
 
           {report.warnings?.length > 0 && (

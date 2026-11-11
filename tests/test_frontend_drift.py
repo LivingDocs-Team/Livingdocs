@@ -64,7 +64,20 @@ REPORT = {
                 [], breaking=False),
     ],
     "warnings": ["web/app.js: language not analysed; only file-level changes are checked."],
+    "review": {"status": "pending", "open": 3, "acknowledged": 0, "resolved": 0, "dismissed": 0,
+               "ai_mode": "ai", "ai_confirmed": 1, "ai_disputed": 1, "ai_uncertain": 0},
 }
+# LD-346: AI review of each finding, every finding starts open
+for _f, _review in zip(REPORT["findings"], [
+        {"mode": "ai", "verdict": "confirmed", "evidence": ["X1", "D1"],
+         "explanation": "README still calls the old path [D1]; the route moved [X1].",
+         "suggested_update": "Read a total with `GET /api/carts/:id`."},
+        {"mode": "ai", "verdict": "disputed", "evidence": ["D2"],
+         "explanation": "The table row [D2] belongs to an older API section.", "suggested_update": None},
+        {"mode": "offline", "verdict": "not_reviewed", "evidence": ["X1"],
+         "explanation": "Message of Cart.add.", "suggested_update": None}]):
+    _f["ai_review"] = _review
+    _f["resolution"] = {"status": "open", "history": []}
 LEVELS = {"levels": [
     {"level": "critical", "min_score": 75, "max_score": 100, "label": "Critical",
      "meaning": "The documented API no longer exists or works.", "action": "Fix before merging."},
@@ -81,6 +94,7 @@ def install_api(page: Page, state: dict):
     state.setdefault("analyze_bodies", [])
     state.setdefault("markdown_queries", [])
     state.setdefault("reports", [])
+    state.setdefault("resolutions", [])
 
     def handle(route):
         request = route.request
@@ -125,6 +139,14 @@ def install_api(page: Page, state: dict):
                 "summary": r["summary"]} for r in state["reports"]])
         if path == f"{BASE}/reports/report-1":
             return route.fulfill(status=200, json=REPORT)
+        if path.startswith(f"{BASE}/reports/report-1/findings/") and path.endswith("/resolution") and method == "PUT":
+            fid = path.split("/")[-2]
+            state["resolutions"].append((fid, body))
+            if body["status"] == "dismissed" and not body.get("note"):
+                return route.fulfill(status=400, json={"code": "DRIFT_RESOLUTION_INVALID", "message": "note"})
+            current = next(f for f in REPORT["findings"] if f["id"] == fid)
+            return route.fulfill(status=200, json={**current, "resolution": {
+                "status": body["status"], "actor": "42", "note": body.get("note"), "history": [body]}})
         if path == f"{BASE}/reports/report-1/markdown":
             state["markdown_queries"].append(query)
             return route.fulfill(status=200, content_type="text/markdown", body=MARKDOWN)
@@ -248,3 +270,53 @@ def test_invalid_number_and_unknown_pull_request(page: Page):
     expect(page.get_by_role("alert")).to_have_text(
         "The pull request was not found in this repository. Check the number and try again.")
     assert state["analyze_bodies"] == [{"pullRequestNumber": 404, "includeRepositoryDocs": False}]
+
+
+def test_ai_review_is_shown_for_every_finding(page: Page):
+    install_api(page, {})
+    open_drift(page)
+    run_check(page)
+
+    expect(page.locator(".drift-review-progress")).to_contain_text("Review pending: 3 open")
+    expect(page.locator(".drift-review-progress")).to_contain_text("AI review on")
+    f1 = page.locator('[data-finding="F1"]').get_by_label("AI review")
+    expect(f1.locator(".drift-ai-verdict")).to_have_attribute("data-verdict", "confirmed")
+    expect(f1).to_contain_text("README still calls the old path [D1]")
+    expect(f1.locator(".drift-suggestion")).to_have_text("Read a total with `GET /api/carts/:id`.")
+    f2 = page.locator('[data-finding="F2"]').get_by_label("AI review")
+    expect(f2.locator(".drift-ai-verdict")).to_have_text("AI disputed")
+    expect(f2.locator(".drift-suggestion")).to_have_count(0)
+    expect(page.locator('[data-finding="F3"] .drift-ai-verdict')).to_have_text("Rule-based explanation")
+
+
+def test_findings_are_acknowledged_resolved_dismissed_and_reopened(page: Page):
+    state = {}
+    install_api(page, state)
+    open_drift(page)
+    run_check(page)
+
+    f1 = page.locator('[data-finding="F1"]')
+    f1.get_by_role("button", name="Acknowledge").click()
+    expect(f1.locator(".drift-resolution-status")).to_have_attribute("data-status", "acknowledged")
+    expect(page.locator(".drift-review-progress")).to_contain_text("Review in progress: 2 open · 1 acknowledged")
+    f1.get_by_role("button", name="Mark resolved").click()
+    expect(f1.locator(".drift-resolution-status")).to_have_text("Resolved")
+    expect(f1.get_by_role("button", name="Dismiss")).to_have_count(0)
+
+    f2 = page.locator('[data-finding="F2"]')
+    f2.get_by_role("button", name="Dismiss").click()
+    expect(f2.get_by_role("button", name="Confirm dismiss")).to_be_disabled()     # a reason is required
+    f2.get_by_label("Why is this not a documentation drift?").fill("Table is in the v1 archive section.")
+    f2.get_by_role("button", name="Confirm dismiss").click()
+    expect(f2.locator(".drift-resolution-status")).to_have_text("Dismissed")
+    expect(f2.locator(".drift-resolution")).to_contain_text("Table is in the v1 archive section.")
+
+    page.locator('[data-finding="F3"]').get_by_role("button", name="Mark resolved").click()
+    expect(page.locator(".drift-review-progress")).to_contain_text(
+        "Review completed: 0 open · 0 acknowledged · 2 resolved · 1 dismissed")
+    f2.get_by_role("button", name="Reopen").click()
+    expect(f2.locator(".drift-resolution-status")).to_have_text("Open")
+    assert state["resolutions"] == [
+        ("F1", {"status": "acknowledged"}), ("F1", {"status": "resolved"}),
+        ("F2", {"status": "dismissed", "note": "Table is in the v1 archive section."}),
+        ("F3", {"status": "resolved"}), ("F2", {"status": "open"})]

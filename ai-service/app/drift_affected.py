@@ -26,6 +26,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .drift_models import (AffectedDocument, ChangeStatus, DocMatch, DocSource, EntityChange,
                            EntityChangeType, FileChangeSummary, PullRequestAnalysis)
+from .drift_compare import HEADING, is_change_log, section_rows
 
 EXCERPT_CHARS = 200
 PARAM_WINDOW = 25        # a removed parameter must be named this many lines after the entity
@@ -45,6 +46,7 @@ class DocText:
     documents_file: Optional[str] = None
     _lines: Optional[List[str]] = None
     _code: Optional[List[object]] = None   # per line: True (all code) or [(start, end), ...]
+    _headings: Optional[set] = None        # line indexes of Markdown headings (not in code blocks)
 
     @property
     def lines(self) -> List[str]:
@@ -55,8 +57,9 @@ class DocText:
     def _index(self) -> None:
         self._lines = self.text.splitlines()
         self._code = []
+        self._headings = set()
         fence: Optional[str] = None
-        for line in self._lines:
+        for i, line in enumerate(self._lines):
             s = line.strip()
             if fence:
                 self._code.append(True)
@@ -69,8 +72,20 @@ class DocText:
                 self._code.append(True)
             elif s.startswith("#"):
                 self._code.append(True)          # headings name the documented element
+                if HEADING.match(line):
+                    self._headings.add(i)
             else:
                 self._code.append([(m.start(), m.end()) for m in re.finditer(r"(`+)(.+?)\1", line)])
+
+    @property
+    def headings(self) -> set:
+        if self._headings is None:
+            self._index()
+        return self._headings
+
+    def section(self, start: int, window: int) -> List[int]:
+        """LD-347: lines from a mention of an entity to the next heading (at most `window`)."""
+        return section_rows(self, start, window)
 
     def in_code(self, line_no: int, col: int) -> bool:
         if self._code is None:
@@ -242,9 +257,8 @@ def search_params(doc: DocText, params: List[str], near: List[DocMatch]) -> List
     for p in params:
         pat = re.compile(r"(?<![\w$])" + re.escape(p) + r"(?![\w$])")
         for m0 in near:
-            start, stop = m0.line - 1, min(len(doc.lines), m0.line - 1 + PARAM_WINDOW)
             hit = None
-            for i in range(start, stop):
+            for i in doc.section(m0.line - 1, PARAM_WINDOW):      # LD-347: this entity only
                 for m in pat.finditer(doc.lines[i]):
                     if doc.in_code(i, m.start()):
                         hit = DocMatch(term=p, target=p, line=i + 1, excerpt=excerpt(doc.lines[i]),
@@ -330,5 +344,8 @@ def collect_docs(store, document_ids: Optional[List[str]], repo_docs) -> Tuple[L
             out.append(DocText(DocSource.document, d.target, v.content, d.id, d.title, v.number,
                                documents_file=single))
     for rd in repo_docs:
+        if is_change_log(rd.path):                           # LD-347
+            warnings.append(f"{rd.path}: change log, not checked (it describes earlier versions on purpose).")
+            continue
         out.append(DocText(DocSource.repository, rd.path, rd.content, title=rd.title))
     return out, warnings
