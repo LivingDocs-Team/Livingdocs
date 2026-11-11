@@ -38,7 +38,7 @@ class DocumentationGenerationControllerTest {
     @Test
     void endpointRequiresUserHeaderAndReturnsAcceptedAiJob() throws Exception {
         when(generationService.generate("user-1", REPOSITORY_ID,
-                new DocumentationGenerationRequest("default", "vi")))
+                new DocumentationGenerationRequest("default", "vi"), null))
                 .thenReturn(new ObjectMapper().readTree("""
                         {"id":"job-123","status":"pending","target":"acme/shop"}
                         """));
@@ -54,6 +54,6 @@ class DocumentationGenerationControllerTest {
                 .andExpect(jsonPath("$.status").value("pending"));
 
         verify(generationService).generate("user-1", REPOSITORY_ID,
-                new DocumentationGenerationRequest("default", "vi"));
+                new DocumentationGenerationRequest("default", "vi"), null);
     }
 }

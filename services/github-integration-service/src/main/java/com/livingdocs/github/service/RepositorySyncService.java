@@ -38,20 +38,33 @@ public class RepositorySyncService {
     private final ConnectedRepositoryRepository repositoryRepository;
     private final GitHubConnectionService connectionService;
     private final GitHubRepositoryFetcher fetcher;
+    private final IngestionService ingestionService;
     /** Kết quả đồng bộ gần nhất của từng repo, giữ trong bộ nhớ (mất khi khởi động lại service). */
     private final Map<UUID, RepositorySnapshot> latestResults = new ConcurrentHashMap<>();
 
     public RepositorySyncService(ConnectedRepositoryRepository repositoryRepository,
                                  GitHubConnectionService connectionService,
-                                 GitHubRepositoryFetcher fetcher) {
+                                 GitHubRepositoryFetcher fetcher,
+                                 IngestionService ingestionService) {
         this.repositoryRepository = repositoryRepository;
         this.connectionService = connectionService;
         this.fetcher = fetcher;
+        this.ingestionService = ingestionService;
     }
 
     /** Đồng bộ repo với GitHub. Lỗi GitHub được ném ra dạng {@link RepositorySyncException} (GlobalExceptionHandler trả JSON). */
     public RepositorySnapshot sync(String userId, UUID repositoryId, SyncOptions options) {
-        ConnectedRepository repo = findOwned(userId, repositoryId);
+        return sync(userId, repositoryId, options, null);
+    }
+
+    public RepositorySnapshot sync(String userId, UUID repositoryId, SyncOptions options,
+            String verifiedWorkspaceId) {
+        return sync(userId, repositoryId, options, verifiedWorkspaceId, "OWNER");
+    }
+
+    public RepositorySnapshot sync(String userId, UUID repositoryId, SyncOptions options,
+            String verifiedWorkspaceId, String verifiedAccess) {
+        ConnectedRepository repo = findOwned(userId, repositoryId, verifiedWorkspaceId, verifiedAccess);
         GitHubConnection connection = connectionService.getActiveConnection(userId); // tự làm mới token nếu sắp hết hạn
 
         // Lần đồng bộ trước bị dừng giữa chừng thì không khôi phục về SYNCING
@@ -71,6 +84,7 @@ public class RepositorySyncService {
             repo.setLastSyncedAt(snapshot.fetchedAt());  // LD-66
             repositoryRepository.save(repo);
             latestResults.put(repositoryId, snapshot);
+            ingestionService.backfill(repo, snapshot, connection.getAccessToken());  // LD-68: lấy bù PR/commit
             return snapshot;
         } catch (RepositorySyncException e) {
             if (e.getCode() == SyncErrorCode.TOKEN_INVALID) {
@@ -88,7 +102,16 @@ public class RepositorySyncService {
 
     /** Kết quả lần đồng bộ gần nhất (có cả nội dung file). Chưa đồng bộ lần nào thì báo 404. */
     public RepositorySnapshot latest(String userId, UUID repositoryId) {
-        findOwned(userId, repositoryId);
+        return latest(userId, repositoryId, null);
+    }
+
+    public RepositorySnapshot latest(String userId, UUID repositoryId, String verifiedWorkspaceId) {
+        return latest(userId, repositoryId, verifiedWorkspaceId, "OWNER");
+    }
+
+    public RepositorySnapshot latest(String userId, UUID repositoryId,
+            String verifiedWorkspaceId, String verifiedAccess) {
+        findOwned(userId, repositoryId, verifiedWorkspaceId, verifiedAccess);
         RepositorySnapshot snapshot = latestResults.get(repositoryId);
         if (snapshot == null) {
             throw ApiException.notFound("Repository này chưa được đồng bộ lần nào (hoặc service vừa khởi động lại). "
@@ -101,21 +124,51 @@ public class RepositorySyncService {
      * không còn trong RAM thì tự động đồng bộ lại repository.
      */
     public RepositorySnapshot latestOrSync(String userId, UUID repositoryId) {
-        findOwned(userId, repositoryId);
+        return latestOrSync(userId, repositoryId, null);
+    }
+
+    public RepositorySnapshot latestOrSync(String userId, UUID repositoryId, String verifiedWorkspaceId) {
+        return latestOrSync(userId, repositoryId, verifiedWorkspaceId, "OWNER");
+    }
+
+    public RepositorySnapshot latestOrSync(String userId, UUID repositoryId,
+            String verifiedWorkspaceId, String verifiedAccess) {
+        findOwned(userId, repositoryId, verifiedWorkspaceId, verifiedAccess);
 
         RepositorySnapshot snapshot = latestResults.get(repositoryId);
         return snapshot != null
                 ? snapshot
-                : sync(userId, repositoryId, SyncOptions.defaults());
+                : sync(userId, repositoryId, SyncOptions.defaults(), verifiedWorkspaceId, verifiedAccess);
+    }
+
+    /** Repo đã kết nối của người dùng (404 nếu không có, 403 nếu thuộc người khác). Dùng cho LD-145. */
+    public ConnectedRepository requireOwned(String userId, UUID repositoryId) {
+        return findOwned(userId, repositoryId);
     }
 
     /** Repo phải tồn tại và thuộc kết nối GitHub của người dùng (kết quả đồng bộ có cả nội dung code). */
     private ConnectedRepository findOwned(String userId, UUID repositoryId) {
+        return findOwned(userId, repositoryId, null, "OWNER");
+    }
+
+    private ConnectedRepository findOwned(String userId, UUID repositoryId, String verifiedWorkspaceId) {
+        return findOwned(userId, repositoryId, verifiedWorkspaceId, "OWNER");
+    }
+
+    private ConnectedRepository findOwned(String userId, UUID repositoryId,
+            String verifiedWorkspaceId, String verifiedAccess) {
         ConnectedRepository repo = repositoryRepository.findById(repositoryId)
                 .orElseThrow(() -> ApiException.notFound("Không tìm thấy repository " + repositoryId));
         GitHubConnection connection = connectionService.findConnection(userId).orElse(null);
         if (connection == null || !connection.getId().equals(repo.getConnectionId())) {
             throw ApiException.forbidden("Repository này không thuộc kết nối GitHub của bạn.");
+        }
+        if (repo.getWorkspaceId() != null && repo.getWorkspaceId().startsWith("workspace-")) {
+            if (!repo.getWorkspaceId().equals(verifiedWorkspaceId) || !"OWNER".equals(verifiedAccess)) {
+                throw ApiException.forbidden("Workspace ownership was not verified by the Backend.");
+            }
+        } else if (verifiedWorkspaceId != null && !repo.getWorkspaceId().equals(verifiedWorkspaceId)) {
+            throw ApiException.forbidden("Repository is not associated with the verified workspace.");
         }
         return repo;
     }
