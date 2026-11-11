@@ -211,8 +211,12 @@ public class GitHubClient {
         return commit == null || commit.files() == null ? List.of() : commit.files();
     }
 
-    /** File thay đổi của một Pull Request so với nhánh đích, tối đa 1000 file. */
-    public List<GitHubChangedFile> listPullRequestFiles(String accessToken, String owner, String repo, int number) {
+    /**
+     * File thay đổi của một Pull Request so với nhánh đích, tối đa 1000 file. Khác
+     * {@link #listPullRequestFiles}: trả về {@link GitHubChangedFile} cho source change (LD-116).
+     */
+    public List<GitHubChangedFile> listPullRequestChangedFiles(String accessToken, String owner, String repo,
+                                                               int number) {
         List<GitHubChangedFile> result = new ArrayList<>();
         for (int page = 1; page <= MAX_PAGES; page++) {
             final int p = page;
@@ -232,6 +236,53 @@ public class GitHubClient {
             }
         }
         return result;
+    }
+
+    // ------------------------------------------------------------------ Pull Request (LD-146)
+
+    /** Thông tin một Pull Request: tiêu đề, mô tả, nhánh và commit head / base. */
+    public GitHubPullRequest getPullRequest(String accessToken, String owner, String repo, int number) {
+        return call(() -> apiClient.get().uri("/repos/{owner}/{repo}/pulls/{number}", owner, repo, number)
+                .headers(auth(accessToken))
+                .retrieve()
+                .body(GitHubPullRequest.class));
+    }
+
+    /**
+     * Các file thay đổi của Pull Request kèm diff (patch). GitHub trả tối đa 100 file mỗi trang;
+     * đọc tối đa {@value #MAX_PAGES} trang (1000 file).
+     */
+    public List<GitHubPullRequestFile> listPullRequestFiles(String accessToken, String owner, String repo,
+                                                            int number) {
+        List<GitHubPullRequestFile> result = new ArrayList<>();
+        for (int page = 1; page <= MAX_PAGES; page++) {
+            int current = page;
+            List<GitHubPullRequestFile> batch = call(() -> apiClient.get()
+                    .uri("/repos/{owner}/{repo}/pulls/{number}/files?per_page={pp}&page={page}",
+                            owner, repo, number, PER_PAGE, current)
+                    .headers(auth(accessToken))
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<List<GitHubPullRequestFile>>() {
+                    }));
+            if (batch == null || batch.isEmpty()) {
+                break;
+            }
+            result.addAll(batch);
+            if (batch.size() < PER_PAGE) {
+                break;
+            }
+        }
+        return result;
+    }
+
+    /** Commit chung gần nhất của base và head (diff của PR tính từ commit này). Null nếu GitHub không trả về. */
+    public String getMergeBase(String accessToken, String owner, String repo, String baseSha, String headSha) {
+        GitHubCompare compare = call(() -> apiClient.get()
+                .uri("/repos/{owner}/{repo}/compare/{base}...{head}?per_page=1", owner, repo, baseSha, headSha)
+                .headers(auth(accessToken))
+                .retrieve()
+                .body(GitHubCompare.class));
+        return compare == null || compare.mergeBaseCommit() == null ? null : compare.mergeBaseCommit().sha();
     }
 
     // ------------------------------------------------------------------ helpers

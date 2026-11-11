@@ -9,8 +9,7 @@ from enum import Enum
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
-
-from .models import Scope, now
+from .models import JobReport, Scope, SourceSnapshot, now
 
 
 class SourceChangeRef(BaseModel):
@@ -50,7 +49,9 @@ class InternalVersionDecision(BaseModel):
     version: int = Field(ge=1)
     decision: str = Field(pattern="^(APPROVED|REJECTED)$")
     note: Optional[str] = Field(default=None, max_length=1000)
-
+class InternalRollbackRequest(BaseModel):
+    source_version: int = Field(ge=1)
+    note: Optional[str] = Field(default=None, max_length=1000)
 
 # ---------- Stored data ----------
 
@@ -122,8 +123,12 @@ class DocumentVersion(VersionSummary):
     sections: List[FileSection] = Field(default_factory=list)
     skipped: List[SkippedFile] = Field(default_factory=list)
     sections_match_content: bool = True
+    evidence_report: Optional[JobReport] = None
     """False when a manual edit could not be split back into per-file sections; a later update
     then rebuilds the text from `sections` and the hand edits are lost (a warning says so)."""
+    review_report: Optional[JobReport] = None
+    source_snapshot: Optional[SourceSnapshot] = None
+
 
 
 class Document(BaseModel):
@@ -161,3 +166,11 @@ class HistoryEvent(BaseModel):
     related_version: Optional[int] = None
     actor: Optional[str] = None
     note: Optional[str] = None
+class VersionComparison(BaseModel):
+    """Compare a pending documentation version with the latest approved version."""
+
+    pending_version: DocumentVersion
+    approved_version: Optional[DocumentVersion] = None
+    has_approved_version: bool = False
+    diff: str = ""
+    changes: List[SectionChange] = Field(default_factory=list)

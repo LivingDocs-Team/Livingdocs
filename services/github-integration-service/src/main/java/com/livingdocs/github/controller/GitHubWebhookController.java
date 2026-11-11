@@ -1,5 +1,7 @@
 package com.livingdocs.github.controller;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.livingdocs.github.exception.ApiException;
 import com.livingdocs.github.service.IngestionService;
@@ -61,7 +63,13 @@ public class GitHubWebhookController {
         if (event == null || deliveryId == null || deliveryId.isBlank()) {
             throw ApiException.badRequest("Missing X-GitHub-Event or X-GitHub-Delivery header.");
         }
-        IngestionService.Result result = ingestionService.handleWebhook(deliveryId, event, objectMapper.readTree(body));
+        JsonNode payload;
+        try {
+            payload = objectMapper.readTree(body);
+        } catch (JsonProcessingException e) {
+            throw ApiException.badRequest("The webhook payload is not valid JSON.");
+        }
+        IngestionService.Result result = ingestionService.handleWebhook(deliveryId, event, payload);
         return ResponseEntity.accepted().body(Map.of("status", result.name()));
     }
 }

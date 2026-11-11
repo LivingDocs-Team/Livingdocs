@@ -144,7 +144,7 @@ class SourceChangeDetectionTest {
         String user = "change-pull-request";
         Repo repo = connectAndAddRepo(user);
         String head = newSha();
-        when(gitHubClient.listPullRequestFiles(TOKEN, "acme", "docs", 12)).thenReturn(List.of(invoiceFile(PATCH)));
+        when(gitHubClient.listPullRequestChangedFiles(TOKEN, "acme", "docs", 12)).thenReturn(List.of(invoiceFile(PATCH)));
         mockInvoiceContentAndAnalyzer();
 
         sendWebhook("pull_request", pullRequestPayload(repo.githubId(), "opened", 12, "open", head, "2026-11-06T03:00:00Z"))
@@ -153,7 +153,7 @@ class SourceChangeDetectionTest {
         sendWebhook("pull_request", pullRequestPayload(repo.githubId(), "closed", 12, "closed", head, "2026-11-06T04:00:00Z"))
                 .andExpect(jsonPath("$.status").value("PROCESSED"));
 
-        verify(gitHubClient, after(1000).times(1)).listPullRequestFiles(TOKEN, "acme", "docs", 12);
+        verify(gitHubClient, after(1000).times(1)).listPullRequestChangedFiles(TOKEN, "acme", "docs", 12);
         mvc.perform(get(sourceChangesUrl(repo.id())).header(USER_HEADER, user))
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].trigger").value("PULL_REQUEST"))

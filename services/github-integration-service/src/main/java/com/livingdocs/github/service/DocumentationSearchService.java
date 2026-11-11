@@ -48,14 +48,23 @@ public class DocumentationSearchService {
     }
 
     public DocumentationSearchResponse search(String userId, java.util.UUID repositoryId, String rawQuery) {
+        return search(userId, repositoryId, rawQuery, null);
+    }
+
+    public DocumentationSearchResponse search(String userId, java.util.UUID repositoryId,
+            String rawQuery, String verifiedWorkspaceId) {
         if (rawQuery == null || rawQuery.isBlank()) throw ApiException.badRequest("Search query is required.");
         String query = rawQuery.trim();
         if (query.length() > MAX_QUERY_LENGTH || query.codePoints().anyMatch(Character::isISOControl)) {
             throw ApiException.badRequest("Search query must be at most 200 characters and contain no control characters.");
         }
 
-        RepositoryResponse repository = repositoryService.get(userId, repositoryId);
-        RepositorySnapshot snapshot = syncService.latestOrSync(userId, repositoryId);
+        RepositoryResponse repository = verifiedWorkspaceId == null
+                ? repositoryService.get(userId, repositoryId)
+                : repositoryService.get(userId, repositoryId, verifiedWorkspaceId);
+        RepositorySnapshot snapshot = verifiedWorkspaceId == null
+                ? syncService.latestOrSync(userId, repositoryId)
+                : syncService.latestOrSync(userId, repositoryId, verifiedWorkspaceId);
         String commit = snapshot.headCommit() == null ? "" : snapshot.headCommit().sha();
         CachedAnalysis cached = cache.compute(repositoryId, (ignored, current) ->
                 current != null && current.commit().equals(commit) ? current

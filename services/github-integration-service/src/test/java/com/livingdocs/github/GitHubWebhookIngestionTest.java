@@ -174,6 +174,27 @@ class GitHubWebhookIngestionTest {
     }
 
     @Test
+    void malformedJson_isRejectedWith400_andDoesNotUseUpTheDelivery() throws Exception {
+        String repoId = connectAndAddRepo("ingest-malformed");
+        String delivery = newDelivery();
+        byte[] broken = "{\"ref\": \"refs/heads/main\", \"commits\": [".getBytes(StandardCharsets.UTF_8);
+
+        // Chữ ký đúng nhưng JSON hỏng: 400, không phải 500
+        mvc.perform(post(WEBHOOK).header("X-GitHub-Event", "push").header("X-GitHub-Delivery", delivery)
+                        .header("X-Hub-Signature-256", sign(broken))
+                        .contentType(MediaType.APPLICATION_JSON).content(broken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
+        mvc.perform(asUser(get(commitsUrl(repoId)), "ingest-malformed"))
+                .andExpect(jsonPath("$.length()").value(0));
+
+        // Gửi lại cùng delivery với payload đúng vẫn được xử lý
+        sendWebhook("push", delivery, pushPayload(BILLING.id(), "refs/heads/main", SHA_1))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.status").value("PROCESSED"));
+    }
+
+    @Test
     void ping_otherEvents_tags_andRepositoriesOutsideWorkspaces_storeNothing() throws Exception {
         String repoId = connectAndAddRepo("ingest-ignored");
 
@@ -210,7 +231,7 @@ class GitHubWebhookIngestionTest {
                         new GitHubCommit.Account("d3r-bbb"))));
         Instant updated = Instant.parse("2026-11-05T09:00:00Z");
         when(gitHubClient.listPullRequests(eq(TOKEN), eq("acme"), eq("billing"), anyInt()))
-                .thenReturn(List.of(new GitHubPullRequest(3, "Fix totals", "open",
+                .thenReturn(List.of(new GitHubPullRequest(3, "Fix totals", null, "open",
                         "https://github.com/acme/billing/pull/3", new GitHubPullRequest.Account("lamhuyy"),
                         new GitHubPullRequest.Ref("fix/totals", SHA_2), new GitHubPullRequest.Ref("main", SHA_1),
                         updated, updated, null, null)));

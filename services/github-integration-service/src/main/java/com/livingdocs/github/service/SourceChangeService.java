@@ -128,7 +128,7 @@ public class SourceChangeService {
         String name = ownerAndName[1];
         List<GitHubChangedFile> changed = request.trigger() == SourceChange.Trigger.COMMIT
                 ? gitHubClient.getCommitFiles(token, owner, name, request.commitSha())
-                : gitHubClient.listPullRequestFiles(token, owner, name, request.pullRequestNumber());
+                : gitHubClient.listPullRequestChangedFiles(token, owner, name, request.pullRequestNumber());
         List<GitHubChangedFile> sources = changed.stream().filter(SourceChangeService::isSourceFile).toList();
 
         List<SourceChangeFile> rows = new ArrayList<>();

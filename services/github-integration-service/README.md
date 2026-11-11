@@ -28,6 +28,12 @@ Công nghệ: Java 21, Spring Boot 3.5, PostgreSQL, Flyway, Swagger (springdoc).
 | POST | `/api/github/webhook` | GitHub gọi khi có `push` / `pull_request` (LD-68). Không qua Backend, xác thực bằng chữ ký `X-Hub-Signature-256` |
 | GET | `/api/repositories/{id}/source-changes` | Thay đổi mã nguồn đã phát hiện (LD-116): file Java/Python và code entity thay đổi, cho bước cập nhật tài liệu (LD-128) |
 | POST | `/api/repositories/{id}/source-changes/{changeId}/retry` | Chạy lại một source change `FAILED` |
+| POST | `/api/repositories/{id}/drift/analyze` | Phân tích lệch tài liệu thủ công cho một Pull Request (LD-145), body: `{"pullRequestNumber":7}` |
+| GET | `/api/repositories/{id}/drift/reports?pullRequest=7` | Các báo cáo lệch tài liệu của repo, mới nhất trước |
+| GET | `/api/drift/reports/{reportId}` | Một báo cáo: findings, tài liệu bị ảnh hưởng, bằng chứng |
+| GET | `/api/repositories/{id}/drift/reports/{reportId}?minSeverity=high` | Báo cáo của repo (frontend gọi qua BFF), lọc theo mức độ (LD-156) |
+| GET | `/api/repositories/{id}/drift/reports/{reportId}/markdown` | Báo cáo dạng Markdown theo mức độ, để dán làm comment PR |
+| GET | `/api/documentation/drift/severity-rules` | Các mức độ (khoảng điểm, ý nghĩa, việc cần làm) và các luật đánh giá |
 
 > Browser không gọi service này trực tiếp. Backend BFF xác minh session, lấy user ID từ principal phía server và gửi request kèm `GITHUB_INTEGRATION_INTERNAL_SECRET`. GitHub Integration từ chối request thiếu/sai credential. Chi tiết: [Backend BFF authentication contract](docs/backend-bff-authentication.md).
 
@@ -81,7 +87,7 @@ Chạy thử với GitHub thật (repo public, không cần token): chạy `GitH
 
 ## Nhận Pull Request và commit (LD-68)
 
-Hai nguồn, cùng ghi vào bảng `github_pull_requests` và `github_commits` (migration `V4`):
+Hai nguồn, cùng ghi vào bảng `github_pull_requests` và `github_commits` (migration `V5`):
 
 - **Webhook** `POST /api/github/webhook`: kiểm chữ ký bằng `GITHUB_WEBHOOK_SECRET`, chỉ nhận event `push` và `pull_request` của repo đã thêm vào workspace. GitHub gửi lại cùng `X-GitHub-Delivery` thì trả `DUPLICATE`, không ghi lần hai. Push tag hoặc xoá nhánh không tạo commit.
 - **Lấy bù khi đồng bộ**: mỗi lần `POST /api/repositories/{id}/sync` thành công thì lưu các commit gần nhất của nhánh và 30 Pull Request cập nhật gần nhất, để không mất dữ liệu khi webhook bị lỡ (service tắt, mạng lỗi). Không lấy được danh sách PR thì chỉ ghi log, lần đồng bộ vẫn thành công.
@@ -111,7 +117,7 @@ Các bước:
 1. Lấy file thay đổi từ GitHub: `GET /repos/{owner}/{repo}/commits/{sha}` hoặc `GET /repos/{owner}/{repo}/pulls/{number}/files`. Chỉ giữ file Java/Python theo đúng quy tắc chọn file khi đồng bộ (`LanguageDetector`, `PathFilter`).
 2. Tải nội dung file sau thay đổi (blob). Nội dung trước thay đổi được dựng lại từ nội dung sau và `patch` của GitHub (`change/UnifiedDiff`), nên không cần gọi thêm GitHub.
 3. Gửi nội dung trước và sau sang Code Analyzer (`POST /api/v1/analyze-repo`), so khoảng dòng `lineno`–`end_lineno` của từng class, method, function, endpoint với các dòng được thêm/xoá trong diff (`change/ChangedEntityDetector`): entity chỉ có ở bản sau là `ADDED`, có ở cả hai bản là `MODIFIED`, chỉ có ở bản trước là `REMOVED`.
-4. Lưu thành **source change** trạng thái `PENDING` (bảng `source_changes`, `source_change_files`, `source_change_entities`, migration `V5`). Commit / Pull Request không có file mã nguồn nào thay đổi thì không lưu.
+4. Lưu thành **source change** trạng thái `PENDING` (bảng `source_changes`, `source_change_files`, `source_change_entities`, migration `V6`). Commit / Pull Request không có file mã nguồn nào thay đổi thì không lưu.
 
 Lỗi GitHub hoặc Code Analyzer được lưu thành `FAILED` kèm `errorCode` (`GITHUB_UNAVAILABLE`, `RATE_LIMITED`, `TOKEN_INVALID`, `ACCESS_DENIED`, `REPOSITORY_NOT_FOUND`, `ANALYZER_UNAVAILABLE`, `GITHUB_NOT_CONNECTED`...). Gọi `POST .../source-changes/{changeId}/retry` để chạy lại.
 
@@ -138,9 +144,40 @@ File không tìm được code entity vẫn có trong danh sách, kèm `skippedR
 
 `startLine`/`endLine` là dòng trong file sau thay đổi; với `REMOVED` là dòng trong file trước thay đổi. Cách đánh dấu một source change đã được cập nhật tài liệu sẽ thống nhất với LD-128.
 
+## Phát hiện lệch tài liệu (LD-145)
+
+`service/DriftAnalysisService` phân tích **thủ công** một Pull Request (người dùng nhập số PR):
+
+```
+GitHub: PR + file thay đổi kèm diff        GET /repos/{o}/{r}/pulls/{n}, /pulls/{n}/files (nhiều trang)
+        merge base của PR                  GET /repos/{o}/{r}/compare/{base}...{head}
+        nội dung file .py/.java ở 2 phía   cây thư mục + blob ở merge base và head
+code-analyzer: phân tích 2 phiên bản       POST /api/v1/analyze-repo  (-> before / after)
+GitHub: README + file .md của repo         ở commit head (bỏ node_modules, target, dist...)
+ai-service: POST /drift/analyze            findings Referential / Signature / Semantic, độ nghiêm trọng,
+                                           độ tin cậy, bằng chứng (diff, đoạn tài liệu, commit, ticket)
+```
+
+Body: `pullRequestNumber` (bắt buộc), `documentIds` (tuỳ chọn; mặc định mọi tài liệu đã lưu **của repo
+này**, tài liệu của repo khác bị từ chối kèm cảnh báo), `includeRepositoryDocs` (mặc định `true`).
+
+- Diff của PR tính từ merge base, nên "trước thay đổi" cũng đọc ở merge base (không phải đầu nhánh `main`).
+- Tối đa 100 file Python/Java được tải nội dung, 30 file Markdown; file khác chỉ kiểm tra bằng diff.
+- code-analyzer lỗi hoặc không tải được một file: vẫn có báo cáo, thay đổi đọc từ diff (độ tin cậy thấp
+  hơn), lý do nằm ở đầu `warnings`.
+- Lỗi: `400 BAD_REQUEST` thiếu số PR, `404 PULL_REQUEST_NOT_FOUND`, `401 GITHUB_REAUTH_REQUIRED` (token
+  bị GitHub từ chối, kết nối bị đánh dấu `INVALID`), `502 AI_SERVICE_FAILED`, `403` báo cáo của người khác.
+- Mức độ (LD-156): mỗi finding có `severity_assessment` (luật gốc, các điều chỉnh, mã bằng chứng,
+  điểm 0-100). Backend BFF chỉ chuyển tiếp `/api/repositories/**` và `/api/documentation/**`, nên
+  frontend dùng các route theo repo ở trên (`/api/drift/reports/{id}` vẫn giữ cho gọi nội bộ).
+- Báo cáo giữ trong bộ nhớ (cả ở ai-service), mất khi khởi động lại. Chi tiết luật phát hiện:
+  [ai-service/README.md](../../ai-service/README.md).
+
 ## Chưa làm (để sprint sau)
 
 - Tìm tài liệu bị ảnh hưởng bởi source change (LD-122) và cách đánh dấu source change đã cập nhật tài liệu (cùng LD-128)
+- Chạy phân tích lệch tài liệu tự động khi webhook nhận `pull_request` (hiện chạy thủ công)
+- Gửi event Kafka cho TV3 và TV4 khi nhận Pull Request và commit
 - Thông báo cho người dùng khi token hỏng (hiện tại mới đánh dấu trạng thái `INVALID`)
 - Duy trì credential service-to-service trong secret manager phù hợp với môi trường triển khai
 - Lưu kết quả đồng bộ vào database (hiện chỉ giữ lần gần nhất trong bộ nhớ) và chạy đồng bộ ở nền cho repo lớn
