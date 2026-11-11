@@ -6,6 +6,7 @@ come from the analyzer output; the AI only supplies descriptions. This keeps the
 output format identical for every file and prevents invented classes/functions.
 """
 import json
+import math
 import re
 from typing import List, Optional
 
@@ -31,9 +32,11 @@ class _Cited(BaseModel):
     def _clamp(cls, v):
         # a bad self-score must not make the whole answer invalid: ignore it
         try:
-            return None if v is None else max(0.0, min(1.0, float(v)))
+            x = None if v is None or isinstance(v, bool) else float(v)
         except (TypeError, ValueError):
             return None
+        # LD-356: NaN / infinity is no estimate at all (min/max would turn NaN into 1.0)
+        return None if x is None or not math.isfinite(x) else max(0.0, min(1.0, x))
 
 
 class ParamDoc(BaseModel):
