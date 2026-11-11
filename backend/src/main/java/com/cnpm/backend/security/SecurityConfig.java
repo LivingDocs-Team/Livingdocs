@@ -1,5 +1,5 @@
 
-package com.cnpm.backend.config;
+package com.cnpm.backend.security;
 
 import java.util.List;
 
@@ -26,8 +26,8 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-import com.cnpm.backend.service.CustomUserDetailsService;
-import com.cnpm.backend.service.GitHubOAuth2UserService;
+import com.cnpm.backend.auth.CustomUserDetailsService;
+import com.cnpm.backend.auth.GitHubOAuth2UserService;
 
 @Configuration
 @EnableMethodSecurity

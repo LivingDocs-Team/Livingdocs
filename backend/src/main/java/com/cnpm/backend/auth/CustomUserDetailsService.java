@@ -1,5 +1,5 @@
 
-package com.cnpm.backend.service;
+package com.cnpm.backend.auth;
 
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;

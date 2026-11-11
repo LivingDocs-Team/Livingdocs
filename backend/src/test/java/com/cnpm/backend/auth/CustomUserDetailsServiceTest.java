@@ -1,11 +1,10 @@
-package com.cnpm.backend;
+package com.cnpm.backend.auth;
 
 import com.cnpm.backend.entity.User;
 import com.cnpm.backend.repository.UserRepository;
 import com.cnpm.backend.repository.RoleRepository;
 import com.cnpm.backend.entity.Permission;
 import com.cnpm.backend.entity.Role;
-import com.cnpm.backend.service.CustomUserDetailsService;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.core.userdetails.UserDetails;
 

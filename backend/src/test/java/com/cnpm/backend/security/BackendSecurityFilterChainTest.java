@@ -1,14 +1,11 @@
-package com.cnpm.backend;
+package com.cnpm.backend.security;
 
-import com.cnpm.backend.config.SecurityConfig;
-import com.cnpm.backend.config.AccountStatusFilter;
-import com.cnpm.backend.config.SpaCsrfTokenRequestHandler;
 import com.cnpm.backend.entity.User;
 import com.cnpm.backend.repository.UserRepository;
 import com.cnpm.backend.repository.RoleRepository;
 import com.cnpm.backend.repository.PermissionRepository;
-import com.cnpm.backend.service.CustomUserDetailsService;
-import com.cnpm.backend.service.GitHubOAuth2UserService;
+import com.cnpm.backend.auth.CustomUserDetailsService;
+import com.cnpm.backend.auth.GitHubOAuth2UserService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -63,10 +60,10 @@ import org.springframework.web.util.UriUtils;
 import java.nio.charset.StandardCharsets;
 @WebMvcTest(controllers = {
         com.cnpm.backend.controller.GitHubIntegrationBffController.class,
-        com.cnpm.backend.controller.CsrfTokenController.class,
-        com.cnpm.backend.controller.CurrentUserController.class,
-        com.cnpm.backend.controller.OAuth2SuccessController.class,
-        com.cnpm.backend.controller.UserLoginController.class,
+        com.cnpm.backend.security.CsrfTokenController.class,
+        com.cnpm.backend.auth.CurrentUserController.class,
+        com.cnpm.backend.auth.OAuth2SuccessController.class,
+        com.cnpm.backend.auth.UserLoginController.class,
         com.cnpm.backend.controller.AdminUserController.class,
         com.cnpm.backend.controller.AdminRoleController.class
 }, properties = {
