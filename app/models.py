@@ -2,7 +2,6 @@ from enum import Enum
 from typing import List, Optional
 from datetime import datetime
 from pydantic import BaseModel, Field
-from typing import Optional
 
 class FileInput(BaseModel):
     """Input data for a source file."""
@@ -101,18 +100,10 @@ class EvidenceCreate(BaseModel):
     metadata: Optional[dict] = Field(default_factory=dict)
 
 class EvidenceResponse(EvidenceCreate):
+    """LD-402: the only EvidenceResponse (PR #108 declared it twice; the second one replaced the
+    first and dropped created_at and metadata from every response)."""
     id: str
     created_at: datetime
-
-class EvidenceResponse(BaseModel):
-    id: str
-    task_id: str
-    evidence_type: str
-    file_path: str
-    description: Optional[str] = None
-
-    class Config:
-        from_attributes = True  # Hoặc orm_mode = True nếu dùng Pydantic v1
 
 class SubmissionCreate(BaseModel):
     task_id: str
@@ -120,10 +111,22 @@ class SubmissionCreate(BaseModel):
     evidence_ids: List[str]
     notes: Optional[str] = None
 
+class SubmissionRecord(BaseModel):
+    """What is stored for a submission (app/submissions.py): evidences by id."""
+    id: str
+    task_id: str
+    title: str
+    notes: Optional[str] = None
+    status: SubmissionStatus
+    evidence_ids: List[str] = Field(default_factory=list)
+    submitted_at: Optional[datetime] = None
+    created_at: datetime
+
 class SubmissionResponse(BaseModel):
     id: str
     task_id: str
     title: str
+    notes: Optional[str] = None
     status: SubmissionStatus
     evidences: List[EvidenceResponse]
     submitted_at: Optional[datetime] = None
