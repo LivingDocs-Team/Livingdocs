@@ -21,6 +21,26 @@ public interface DocumentWorkflowRepository extends JpaRepository<DocumentWorkfl
     Page<DocumentWorkflow> findByOwnerUserIdOrderByCreatedAtDesc(String ownerUserId, Pageable pageable);
     Page<DocumentWorkflow> findByStatusOrderBySubmittedAtAsc(DocumentWorkflowStatus status, Pageable pageable);
 
+    @Query("""
+            select w from DocumentWorkflow w
+            where (:includeOwned = true and w.ownerUserId = :actor)
+               or (:includeStaffQueue = true and (
+                    (w.status = :pendingStaff or w.status = :staffReviewing)
+                    and (w.reviewerUserId is null or w.reviewerUserId = :actor)
+               ))
+               or (:includeAssignedReviews = true and w.reviewerUserId = :actor)
+               or (:includeManagerDecisions = true and w.status in :managerStatuses)
+            """)
+    Page<DocumentWorkflow> findHistoryAccessible(@Param("actor") String actor,
+            @Param("includeOwned") boolean includeOwned,
+            @Param("includeStaffQueue") boolean includeStaffQueue,
+            @Param("includeAssignedReviews") boolean includeAssignedReviews,
+            @Param("includeManagerDecisions") boolean includeManagerDecisions,
+            @Param("pendingStaff") DocumentWorkflowStatus pendingStaff,
+            @Param("staffReviewing") DocumentWorkflowStatus staffReviewing,
+            @Param("managerStatuses") java.util.Collection<DocumentWorkflowStatus> managerStatuses,
+            Pageable pageable);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select w from DocumentWorkflow w where w.id = :id")
     java.util.Optional<DocumentWorkflow> lockById(@Param("id") UUID id);

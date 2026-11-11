@@ -4,6 +4,9 @@ import com.cnpm.backend.controller.GitHubIntegrationBffController;
 import com.cnpm.backend.entity.User;
 import com.cnpm.backend.repository.UserRepository;
 import com.cnpm.backend.repository.RoleRepository;
+import com.cnpm.backend.repository.WorkspaceRepository;
+import com.cnpm.backend.repository.WorkspaceMembershipRepository;
+import com.cnpm.backend.entity.Workspace;
 import com.cnpm.backend.entity.Role;
 import com.cnpm.backend.entity.Permission;
 import jakarta.servlet.http.HttpServletRequest;
@@ -34,6 +37,209 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withException;
 
 class GitHubIntegrationBffControllerTest {
+
+    @Test
+    void managedWorkspaceAssociationUsesBackendVerifiedOwnerAndReplacesForgedHeader() throws Exception {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        UserRepository users = mock(UserRepository.class);
+        WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        User authenticatedUser = mock(User.class);
+        when(authenticatedUser.getId()).thenReturn(73L);
+        when(users.findByEmail("verified@example.test")).thenReturn(Optional.of(authenticatedUser));
+        String workspaceId = "workspace-11111111-1111-1111-1111-111111111111";
+        when(workspaces.findByIdAndOwner_Id(workspaceId, 73L)).thenReturn(Optional.of(mock(Workspace.class)));
+        server.expect(requestTo("http://github.test:8082/api/workspaces/" + workspaceId + "/repositories"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("X-User-Id", "73"))
+                .andExpect(header("X-Verified-Workspace-Id", workspaceId))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        var controller = new GitHubIntegrationBffController(builder.build(), users,
+                "http://github.test:8082", "internal-test-credential");
+        controller.setWorkspaceRepository(workspaces);
+        MockHttpServletRequest incoming = new MockHttpServletRequest(HttpMethod.GET.name(),
+                "/api/workspaces/" + workspaceId + "/repositories");
+        incoming.addHeader("X-Verified-Workspace-Id", "workspace-forged");
+
+        var response = controller.proxy(incoming, authenticatedEmail("verified@example.test"), null);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        server.verify();
+    }
+
+    @Test
+    void managedWorkspaceAssociationIsNotForwardedForNonOwner() {
+        RestClient.Builder builder = RestClient.builder();
+        UserRepository users = mock(UserRepository.class);
+        WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        User authenticatedUser = mock(User.class);
+        when(authenticatedUser.getId()).thenReturn(73L);
+        when(users.findByEmail("verified@example.test")).thenReturn(Optional.of(authenticatedUser));
+        String workspaceId = "workspace-11111111-1111-1111-1111-111111111111";
+        when(workspaces.findByIdAndOwner_Id(workspaceId, 73L)).thenReturn(Optional.empty());
+        var controller = new GitHubIntegrationBffController(builder.build(), users,
+                "http://github.test:8082", "internal-test-credential");
+        controller.setWorkspaceRepository(workspaces);
+        MockHttpServletRequest incoming = new MockHttpServletRequest(HttpMethod.GET.name(),
+                "/api/workspaces/" + workspaceId + "/repositories");
+
+        assertThatThrownBy(() -> controller.proxy(incoming,
+                authenticatedEmail("verified@example.test"), null))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(404));
+    }
+
+    @Test
+    void memberReadForwardsOnlyBackendVerifiedMemberAccess() throws Exception {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        UserRepository users = mock(UserRepository.class);
+        WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        WorkspaceMembershipRepository memberships = mock(WorkspaceMembershipRepository.class);
+        User member = mock(User.class);
+        when(member.getId()).thenReturn(91L);
+        when(users.findByEmail("member@example.test")).thenReturn(Optional.of(member));
+        String workspaceId = "workspace-11111111-1111-1111-1111-111111111111";
+        when(memberships.existsByWorkspace_IdAndUser_IdAndUser_ActiveTrue(workspaceId, 91L)).thenReturn(true);
+        server.expect(requestTo("http://github.test:8082/api/workspaces/" + workspaceId + "/repositories"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("X-User-Id", "91"))
+                .andExpect(header("X-Verified-Workspace-Id", workspaceId))
+                .andExpect(header("X-Verified-Workspace-Access", "MEMBER"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+        var controller = new GitHubIntegrationBffController(builder.build(), users,
+                "http://github.test:8082", "internal-test-credential");
+        controller.setWorkspaceRepository(workspaces);
+        controller.setWorkspaceMembershipRepository(memberships);
+        MockHttpServletRequest incoming = new MockHttpServletRequest(HttpMethod.GET.name(),
+                "/api/workspaces/" + workspaceId + "/repositories");
+        incoming.addHeader("X-Verified-Workspace-Access", "OWNER");
+
+        var response = controller.proxy(incoming, authenticatedEmail("member@example.test"), null);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        server.verify();
+    }
+
+    @Test
+    void memberCannotUseWorkspaceRepositoryMutationRoutes() {
+        RestClient.Builder builder = RestClient.builder();
+        UserRepository users = mock(UserRepository.class);
+        WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        WorkspaceMembershipRepository memberships = mock(WorkspaceMembershipRepository.class);
+        User member = mock(User.class);
+        when(member.getId()).thenReturn(91L);
+        when(users.findByEmail("member@example.test")).thenReturn(Optional.of(member));
+        String workspaceId = "workspace-11111111-1111-1111-1111-111111111111";
+        when(memberships.existsByWorkspace_IdAndUser_IdAndUser_ActiveTrue(workspaceId, 91L)).thenReturn(true);
+        var controller = new GitHubIntegrationBffController(builder.build(), users,
+                "http://github.test:8082", "internal-test-credential");
+        controller.setWorkspaceRepository(workspaces);
+        controller.setWorkspaceMembershipRepository(memberships);
+        MockHttpServletRequest incoming = new MockHttpServletRequest(HttpMethod.POST.name(),
+                "/api/workspaces/" + workspaceId + "/repositories");
+
+        assertThatThrownBy(() -> controller.proxy(incoming,
+                authenticatedEmail("member@example.test"), "{}".getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(403));
+    }
+
+    @Test
+    void memberCanReadRepositoryByIdOnlyAfterBackendVerifiesMembership() throws Exception {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        UserRepository users = mock(UserRepository.class);
+        WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        WorkspaceMembershipRepository memberships = mock(WorkspaceMembershipRepository.class);
+        User member = mock(User.class);
+        when(member.getId()).thenReturn(91L);
+        when(users.findByEmail("member@example.test")).thenReturn(Optional.of(member));
+        String repositoryId = "22222222-2222-2222-2222-222222222222";
+        String workspaceId = "workspace-11111111-1111-1111-1111-111111111111";
+        when(memberships.existsByWorkspace_IdAndUser_IdAndUser_ActiveTrue(workspaceId, 91L)).thenReturn(true);
+        server.expect(requestTo("http://github.test:8082/api/internal/repositories/" + repositoryId + "/workspace"))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer internal-test-credential"))
+                .andRespond(withSuccess("{\"workspaceId\":\"" + workspaceId + "\"}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo("http://github.test:8082/api/repositories/" + repositoryId))
+                .andExpect(header("X-Verified-Workspace-Access", "MEMBER"))
+                .andExpect(header("X-Verified-Workspace-Id", workspaceId))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+        var controller = new GitHubIntegrationBffController(builder.build(), users,
+                "http://github.test:8082", "internal-test-credential");
+        controller.setWorkspaceRepository(workspaces);
+        controller.setWorkspaceMembershipRepository(memberships);
+        MockHttpServletRequest incoming = new MockHttpServletRequest(HttpMethod.GET.name(),
+                "/api/repositories/" + repositoryId);
+
+        assertThat(controller.proxy(incoming, authenticatedEmail("member@example.test"), null)
+                .getStatusCode().value()).isEqualTo(200);
+        server.verify();
+    }
+
+    @Test
+    void verifiesManagedWorkspaceOwnerBeforeForwardingRepositoryIdRouteAndReplacesForgedHeader() throws Exception {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        UserRepository users = mock(UserRepository.class);
+        WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        User authenticatedUser = mock(User.class);
+        when(authenticatedUser.getId()).thenReturn(73L);
+        when(users.findByEmail("verified@example.test")).thenReturn(Optional.of(authenticatedUser));
+        String repositoryId = "22222222-2222-2222-2222-222222222222";
+        String workspaceId = "workspace-11111111-1111-1111-1111-111111111111";
+        server.expect(requestTo("http://github.test:8082/api/internal/repositories/" + repositoryId + "/workspace"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer internal-test-credential"))
+                .andExpect(header("X-User-Id", "73"))
+                .andRespond(withSuccess("{\"workspaceId\":\"" + workspaceId + "\"}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo("http://github.test:8082/api/repositories/" + repositoryId))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("X-Verified-Workspace-Id", workspaceId))
+                .andExpect(header("X-User-Id", "73"))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        var controller = new GitHubIntegrationBffController(builder.build(), users,
+                "http://github.test:8082", "internal-test-credential");
+        controller.setWorkspaceRepository(workspaces);
+        Workspace workspace = mock(Workspace.class);
+        when(workspaces.findByIdAndOwner_Id(workspaceId, 73L)).thenReturn(Optional.of(workspace));
+        MockHttpServletRequest incoming = new MockHttpServletRequest(HttpMethod.GET.name(),
+                "/api/repositories/" + repositoryId);
+        incoming.addHeader("X-Verified-Workspace-Id", "workspace-forged");
+
+        var response = controller.proxy(incoming, authenticatedEmail("verified@example.test"), null);
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        server.verify();
+    }
+
+    @Test
+    void doesNotForwardManagedRepositoryIdRouteWhenWorkspaceBelongsToAnotherUser() throws Exception {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        UserRepository users = mock(UserRepository.class);
+        WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        User authenticatedUser = mock(User.class);
+        when(authenticatedUser.getId()).thenReturn(73L);
+        when(users.findByEmail("verified@example.test")).thenReturn(Optional.of(authenticatedUser));
+        String repositoryId = "22222222-2222-2222-2222-222222222222";
+        String workspaceId = "workspace-11111111-1111-1111-1111-111111111111";
+        server.expect(requestTo("http://github.test:8082/api/internal/repositories/" + repositoryId + "/workspace"))
+                .andRespond(withSuccess("{\"workspaceId\":\"" + workspaceId + "\"}", MediaType.APPLICATION_JSON));
+        var controller = new GitHubIntegrationBffController(builder.build(), users,
+                "http://github.test:8082", "internal-test-credential");
+        controller.setWorkspaceRepository(workspaces);
+        MockHttpServletRequest incoming = new MockHttpServletRequest(HttpMethod.DELETE.name(),
+                "/api/repositories/" + repositoryId);
+
+        assertThatThrownBy(() -> controller.proxy(incoming,
+                authenticatedEmail("verified@example.test"), null))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(404));
+        server.verify();
+    }
 
     @Test
     void replacesBrowserIdentityWithUserResolvedFromAuthenticatedPrincipal() throws Exception {

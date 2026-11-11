@@ -25,7 +25,10 @@ public final class WorkflowDtos {
                                  @NotBlank @Size(max = 1000) String reason) { }
     public record EditDocumentRequest(@NotBlank @Size(max = 2_000_000) String content,
                                       @Size(max = 1000) String note) { }
-
+    public record RollbackRequest(
+        @NotNull @Positive Integer sourceVersion,
+        @NotBlank @Size(max = 1000) String reason
+) { }
     public record WorkflowResponse(UUID id, String documentId, String documentTitle, String ownerUserId,
             DocumentWorkflowStatus status, Integer submittedDocumentVersion, String reviewerUserId,
             StaffReviewResult staffReviewResult, String staffComment, String managerUserId,
@@ -33,7 +36,7 @@ public final class WorkflowDtos {
             Instant submittedAt, Instant reviewedAt, Instant decidedAt, long optimisticVersion) { }
 
     public record ContentResponse(String documentId, int version, String content) { }
-    public record AuditResponse(UUID id, String actorUserId, String action, String previousStatus,
+    public record AuditResponse(UUID id, String actorUserId, String actorRole, String action, String previousStatus,
             String newStatus, String previousReviewerUserId, String newReviewerUserId,
             String comment, Instant createdAt) { }
     public record PageResponse<T>(List<T> content, int page, int size, long totalElements,

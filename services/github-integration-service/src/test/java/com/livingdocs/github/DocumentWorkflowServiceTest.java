@@ -16,6 +16,10 @@ import java.lang.reflect.Field;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.data.jpa.repository.Lock;
 
@@ -99,6 +103,7 @@ class DocumentWorkflowServiceTest {
                 Set.of("ROLE_MANAGER", "DOCUMENT_APPROVE"), ID, ManagerDecision.APPROVED, null))
                 .isInstanceOf(ApiException.class)
                 .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(403));
+        verify(audit, never()).save(any());
     }
 
     @Test
@@ -118,6 +123,7 @@ class DocumentWorkflowServiceTest {
                     .isInstanceOf(ApiException.class)
                     .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(403));
         }
+        verify(audit, never()).save(any());
     }
 
     @Test
@@ -140,8 +146,49 @@ class DocumentWorkflowServiceTest {
                 Set.of("ROLE_MANAGER", "DOCUMENT_REJECT"), ID, ManagerDecision.REJECTED, "Changed my mind"))
                 .isInstanceOf(ApiException.class)
                 .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(409));
-        verify(audit, org.mockito.Mockito.times(2)).save(any(DocumentWorkflowAudit.class));
+        var events = org.mockito.ArgumentCaptor.forClass(DocumentWorkflowAudit.class);
+        verify(audit, org.mockito.Mockito.times(2)).save(events.capture());
+        DocumentWorkflowAudit approvalEvent = events.getAllValues().get(1);
+        assertThat(approvalEvent.getActorUserId()).isEqualTo(MANAGER);
+        assertThat(approvalEvent.getActorRole()).isEqualTo("MANAGER");
+        assertThat(approvalEvent.getAction()).isEqualTo("APPROVED");
+        assertThat(approvalEvent.getPreviousStatus()).isEqualTo("PENDING_MANAGER_APPROVAL");
+        assertThat(approvalEvent.getNewStatus()).isEqualTo("APPROVED");
+        assertThat(approvalEvent.getComment()).isEqualTo("Approved");
+        assertThat(approvalEvent.getCreatedAt()).isNotNull();
         verify(documents, never()).resolveDocumentVersion(any(), any(), any(), any(Integer.class), any(), any());
+    }
+
+    @Test
+    void managerMayApproveWithoutOptionalComment() throws Exception {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+        workflow.review(StaffReviewResult.PASSED, "Checks passed");
+        when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
+        when(workflows.saveAndFlush(workflow)).thenReturn(workflow);
+        when(documents.getDocument(MANAGER, "doc-1")).thenReturn(new ObjectMapper().readTree(
+                "{\"owner_user_id\":\"73\",\"current_version\":0,\"pending_version\":1,\"versions_total\":1}"));
+
+        service.decide(MANAGER, Set.of("ROLE_MANAGER", "DOCUMENT_APPROVE"), ID,
+                ManagerDecision.APPROVED, null);
+
+        var events = org.mockito.ArgumentCaptor.forClass(DocumentWorkflowAudit.class);
+        verify(audit).save(events.capture());
+        assertThat(events.getValue().getAction()).isEqualTo("APPROVED");
+        assertThat(events.getValue().getComment()).isNull();
+    }
+
+    @Test
+    void managerCannotRejectWithoutReasonOrCreateAuditEvent() {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+        workflow.review(StaffReviewResult.PASSED, "Checks passed");
+        when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
+
+        assertThatThrownBy(() -> service.decide(MANAGER,
+                Set.of("ROLE_MANAGER", "DOCUMENT_REJECT"), ID, ManagerDecision.REJECTED, null))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(400));
+        verify(audit, never()).save(any());
+        verify(documents, never()).getDocument(any(), any());
     }
 
     @Test
@@ -327,7 +374,16 @@ class DocumentWorkflowServiceTest {
         assertThat(rejected.status()).isEqualTo(DocumentWorkflowStatus.REJECTED);
         verify(documents).resolveDocumentVersion(MANAGER, OWNER, "doc-1", 1, "REJECTED",
                 "Does not meet the documentation standard");
-        verify(audit).save(any(DocumentWorkflowAudit.class));
+        var events = org.mockito.ArgumentCaptor.forClass(DocumentWorkflowAudit.class);
+        verify(audit).save(events.capture());
+        DocumentWorkflowAudit rejectionEvent = events.getValue();
+        assertThat(rejectionEvent.getActorUserId()).isEqualTo(MANAGER);
+        assertThat(rejectionEvent.getActorRole()).isEqualTo("MANAGER");
+        assertThat(rejectionEvent.getAction()).isEqualTo("REJECTED");
+        assertThat(rejectionEvent.getPreviousStatus()).isEqualTo("PENDING_MANAGER_APPROVAL");
+        assertThat(rejectionEvent.getNewStatus()).isEqualTo("REJECTED");
+        assertThat(rejectionEvent.getComment()).isEqualTo("Does not meet the documentation standard");
+        assertThat(rejectionEvent.getCreatedAt()).isNotNull();
     }
 
     @Test
@@ -367,19 +423,360 @@ class DocumentWorkflowServiceTest {
     }
 
     @Test
+    void assignedStaffCanViewReviewEvidenceForSubmittedVersion() throws Exception {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+
+        when(documents.getDocument(REVIEWER, "doc-1")).thenReturn(
+                new ObjectMapper().readTree(
+                        "{\"id\":\"doc-1\",\"owner_user_id\":\"73\",\"current_version\":1}"));
+
+        var evidence = new ObjectMapper().readTree(
+                "{\"job_id\":\"job-1\",\"template_name\":\"Default\",\"files\":[]}");
+
+        when(documents.getDocumentReviewEvidence(REVIEWER, "doc-1", 1))
+                .thenReturn(evidence);
+        when(documents.verifySourceSnapshot(OWNER, evidence))
+                .thenReturn(evidence);
+
+        var result = service.reviewEvidence(
+                REVIEWER,
+                Set.of("ROLE_STAFF", "DOCUMENT_REVIEW"),
+                ID);
+
+        assertThat(result).isEqualTo(evidence);
+        verify(documents).verifySourceSnapshot(OWNER, evidence);
+        verify(documents).getDocumentReviewEvidence(REVIEWER, "doc-1", 1);
+    }
+
+    @Test
+    void unassignedStaffCannotViewReviewEvidence() {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+
+        assertThatThrownBy(() -> service.reviewEvidence(
+                "82",
+                Set.of("ROLE_STAFF", "DOCUMENT_REVIEW"),
+                ID))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> assertThat(
+                        ((ApiException) error).getStatus().value()).isEqualTo(403));
+
+        verify(documents, never()).getDocumentReviewEvidence(any(), any(), any(Integer.class));
+    }
+
+    @Test
+    void assignedStaffCanViewReviewComparisonForSubmittedVersion() throws Exception {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+
+        when(documents.getDocument(REVIEWER, "doc-1")).thenReturn(
+                new ObjectMapper().readTree(
+                        "{\"id\":\"doc-1\",\"owner_user_id\":\"73\",\"current_version\":1}"));
+
+        var comparison = new ObjectMapper().readTree(
+                "{\"pending_version\":{\"number\":1},\"changes\":[]}");
+
+        when(documents.getDocumentReviewComparison(REVIEWER, "doc-1"))
+                .thenReturn(comparison);
+
+        var result = service.reviewComparison(
+                REVIEWER,
+                Set.of("ROLE_STAFF", "DOCUMENT_REVIEW"),
+                ID);
+
+        assertThat(result).isEqualTo(comparison);
+        verify(documents).getDocumentReviewComparison(REVIEWER, "doc-1");
+    }
+
+    @Test
+    void managerCanReadEvidenceForTheExactSubmittedVersion() throws Exception {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+        workflow.review(StaffReviewResult.PASSED, "All checks passed");
+
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+        when(documents.getDocument(MANAGER, "doc-1")).thenReturn(
+                new ObjectMapper().readTree(
+                        "{\"id\":\"doc-1\",\"owner_user_id\":\"73\","
+                                + "\"current_version\":0,\"pending_version\":1}"));
+
+        var expectedEvidence = new ObjectMapper().readTree(
+                "{\"job_id\":\"job-1\",\"files\":[]}");
+
+        when(documents.getDocumentEvidence(MANAGER, "doc-1", 1))
+                .thenReturn(expectedEvidence);
+
+        var result = service.evidence(
+                MANAGER,
+                Set.of("ROLE_MANAGER", "DOCUMENT_APPROVAL_QUEUE_VIEW"),
+                ID);
+
+        assertThat(result).isEqualTo(expectedEvidence);
+        verify(documents).getDocumentEvidence(MANAGER, "doc-1", 1);
+    }
+
+
+@Test
+void managerCannotReadEvidenceBeforeStaffReviewPasses() {
+    DocumentWorkflow workflow = pendingStaffWorkflow();
+
+    when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+
+    assertThatThrownBy(() -> service.evidence(
+            MANAGER,
+            Set.of("ROLE_MANAGER", "DOCUMENT_APPROVAL_QUEUE_VIEW"),
+            ID))
+            .isInstanceOf(ApiException.class);
+
+    verify(documents, never()).getDocumentEvidence(
+            any(), any(), org.mockito.ArgumentMatchers.anyInt());
+}
+
+@Test
+void nonManagerCannotReadGroundingEvidence() {
+    assertThatThrownBy(() -> service.evidence(
+            MANAGER,
+            Set.of("DOCUMENT_APPROVAL_QUEUE_VIEW"),
+            ID))
+            .isInstanceOf(ApiException.class)
+            .satisfies(error -> assertThat(
+                    ((ApiException) error).getStatus().value()).isEqualTo(403));
+
+    verify(workflows, never()).findById(ID);
+}
+    @Test
+    void staffCannotViewReviewComparisonWhenPendingVersionDiffersFromSubmittedVersion()
+            throws Exception {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+
+        when(documents.getDocument(REVIEWER, "doc-1")).thenReturn(
+                new ObjectMapper().readTree(
+                        "{\"id\":\"doc-1\",\"owner_user_id\":\"73\",\"current_version\":1}"));
+
+        var comparison = new ObjectMapper().readTree(
+                "{\"pending_version\":{\"number\":2},\"changes\":[]}");
+
+        when(documents.getDocumentReviewComparison(REVIEWER, "doc-1"))
+                .thenReturn(comparison);
+
+        assertThatThrownBy(() -> service.reviewComparison(
+                REVIEWER,
+                Set.of("ROLE_STAFF", "DOCUMENT_REVIEW"),
+                ID))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> assertThat(
+                        ((ApiException) error).getStatus().value()).isEqualTo(409));
+    }
+@Test
     void historyIsReturnedOnlyToAuthorizedOwner() {
         DocumentWorkflow workflow = submittedWorkflow();
         when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
         when(audit.findByWorkflowIdOrderByCreatedAtAsc(ID)).thenReturn(List.of(
-                new DocumentWorkflowAudit(ID, OWNER, "SUBMITTED", "DRAFT", "PENDING_STAFF_REVIEW", null)));
+                new DocumentWorkflowAudit(ID, OWNER, "SUBMITTED", "DRAFT", "PENDING_STAFF_REVIEW", null),
+                new DocumentWorkflowAudit(ID, MANAGER, "APPROVED", "PENDING_MANAGER_APPROVAL", "APPROVED",
+                        "Approved", null, null, "MANAGER")));
 
-        assertThat(service.history(OWNER, Set.of("DOCUMENT_VIEW"), ID)).hasSize(1);
+        var history = service.history(OWNER, Set.of("DOCUMENT_VIEW"), ID);
+        assertThat(history).hasSize(2);
+        assertThat(history).extracting(response -> response.action())
+                .containsExactly("SUBMITTED", "APPROVED");
+        assertThat(history.get(0).actorRole()).isNull();
+        assertThat(history.get(1).actorUserId()).isEqualTo(MANAGER);
+        assertThat(history.get(1).actorRole()).isEqualTo("MANAGER");
+        assertThat(history.get(1).previousStatus()).isEqualTo("PENDING_MANAGER_APPROVAL");
+        assertThat(history.get(1).newStatus()).isEqualTo("APPROVED");
+        assertThat(history.get(1).comment()).isEqualTo("Approved");
+        assertThat(history.get(1).createdAt()).isNotNull();
+        assertThatThrownBy(() -> service.history(OWNER, Set.of(), ID))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(404));
         assertThatThrownBy(() -> service.history("999", Set.of("DOCUMENT_VIEW"), ID))
                 .isInstanceOf(ApiException.class)
                 .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(404));
+        verify(audit, org.mockito.Mockito.times(1)).findByWorkflowIdOrderByCreatedAtAsc(ID);
+    }
+
+@Test
+    void historyAccessibleUsesPermissionAuthoritiesAndStablePagination() {
+        when(workflows.findHistoryAccessible(any(), org.mockito.ArgumentMatchers.anyBoolean(),
+                org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.anyBoolean(),
+                org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any(), any(Pageable.class)))
+                .thenAnswer(invocation -> Page.empty(invocation.getArgument(8)));
+
+        service.historyAccessible(OWNER, Set.of("ROLE_DEVELOPER", "DOCUMENT_VIEW"), 2, 7);
+        service.historyAccessible(REVIEWER, Set.of("ROLE_CUSTOM_QUEUE", "DOCUMENT_REVIEW_QUEUE_VIEW"), 0, 20);
+        service.historyAccessible("assigned-reviewer", Set.of("ROLE_CUSTOM_REVIEWER", "DOCUMENT_REVIEW"), 0, 20);
+        service.historyAccessible(MANAGER, Set.of("ROLE_CUSTOM_MANAGER", "DOCUMENT_APPROVAL_QUEUE_VIEW"), 1, 10);
+        service.historyAccessible("multi-authority", Set.of("ROLE_CUSTOM", "DOCUMENT_VIEW",
+                "DOCUMENT_APPROVAL_QUEUE_VIEW"), 0, 20);
+
+        verify(workflows).findHistoryAccessible(org.mockito.ArgumentMatchers.eq(OWNER),
+                org.mockito.ArgumentMatchers.eq(true), org.mockito.ArgumentMatchers.eq(false),
+                org.mockito.ArgumentMatchers.eq(false), org.mockito.ArgumentMatchers.eq(false),
+                any(), any(), any(), any(Pageable.class));
+        verify(workflows).findHistoryAccessible(org.mockito.ArgumentMatchers.eq(REVIEWER),
+                org.mockito.ArgumentMatchers.eq(false), org.mockito.ArgumentMatchers.eq(true),
+                org.mockito.ArgumentMatchers.eq(false), org.mockito.ArgumentMatchers.eq(false),
+                any(), any(), any(), any(Pageable.class));
+        verify(workflows).findHistoryAccessible(org.mockito.ArgumentMatchers.eq("assigned-reviewer"),
+                org.mockito.ArgumentMatchers.eq(false), org.mockito.ArgumentMatchers.eq(false),
+                org.mockito.ArgumentMatchers.eq(true), org.mockito.ArgumentMatchers.eq(false),
+                any(), any(), any(), any(Pageable.class));
+        var managerPage = org.mockito.ArgumentCaptor.forClass(Pageable.class);
+        verify(workflows).findHistoryAccessible(org.mockito.ArgumentMatchers.eq(MANAGER),
+                org.mockito.ArgumentMatchers.eq(false), org.mockito.ArgumentMatchers.eq(false),
+                org.mockito.ArgumentMatchers.eq(false), org.mockito.ArgumentMatchers.eq(true),
+                any(), any(), any(), managerPage.capture());
+        assertThat(managerPage.getValue().getPageNumber()).isEqualTo(1);
+        assertThat(managerPage.getValue().getPageSize()).isEqualTo(10);
+        assertThat(managerPage.getValue().getSort().getOrderFor("createdAt").getDirection())
+                .isEqualTo(Sort.Direction.DESC);
+        assertThat(managerPage.getValue().getSort().getOrderFor("id").getDirection())
+                .isEqualTo(Sort.Direction.ASC);
+        verify(workflows).findHistoryAccessible(org.mockito.ArgumentMatchers.eq("multi-authority"),
+                org.mockito.ArgumentMatchers.eq(true), org.mockito.ArgumentMatchers.eq(false),
+                org.mockito.ArgumentMatchers.eq(false), org.mockito.ArgumentMatchers.eq(true),
+                any(), any(), any(), any(Pageable.class));
     }
 
     @Test
+    void historyAccessibleRejectsMissingPermissionsAndBadPaginationButAllowsCustomRoles() {
+        assertThatThrownBy(() -> service.historyAccessible(OWNER, Set.of("ROLE_STAFF"), 0, 20))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(403));
+        assertThatThrownBy(() -> service.historyAccessible(MANAGER,
+                Set.of("ROLE_MANAGER", "DOCUMENT_APPROVAL_QUEUE_VIEW"), -1, 20))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(400));
+        assertThatThrownBy(() -> service.historyAccessible(MANAGER,
+                Set.of("ROLE_MANAGER", "DOCUMENT_APPROVAL_QUEUE_VIEW"), 0, 101))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(400));
+        verify(workflows, never()).findHistoryAccessible(any(), org.mockito.ArgumentMatchers.anyBoolean(),
+                org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.anyBoolean(),
+                org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any(), any(Pageable.class));
+        when(workflows.findHistoryAccessible(any(), org.mockito.ArgumentMatchers.anyBoolean(),
+                org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.anyBoolean(),
+                org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any(), any(Pageable.class)))
+                .thenAnswer(invocation -> Page.empty(invocation.getArgument(8)));
+        service.historyAccessible(OWNER, Set.of("ROLE_CUSTOM_OWNER", "DOCUMENT_VIEW"), 0, 20);
+        verify(workflows).findHistoryAccessible(org.mockito.ArgumentMatchers.eq(OWNER),
+                org.mockito.ArgumentMatchers.eq(true), org.mockito.ArgumentMatchers.eq(false),
+                org.mockito.ArgumentMatchers.eq(false), org.mockito.ArgumentMatchers.eq(false),
+                any(), any(), any(), any(Pageable.class));
+    }
+
+    @Test
+    void administratorDiscoveryUsesTheSamePermissionsAsHistoryReads() {
+        when(workflows.findHistoryAccessible(any(), org.mockito.ArgumentMatchers.anyBoolean(),
+                org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.anyBoolean(),
+                org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any(), any(Pageable.class)))
+                .thenAnswer(invocation -> Page.empty(invocation.getArgument(8)));
+
+        service.historyAccessible("legacy-admin", Set.of("ROLE_ADMIN", "DOCUMENT_APPROVAL_QUEUE_VIEW"), 0, 20);
+
+        verify(workflows).findHistoryAccessible(org.mockito.ArgumentMatchers.eq("legacy-admin"),
+                org.mockito.ArgumentMatchers.eq(false), org.mockito.ArgumentMatchers.eq(false),
+                org.mockito.ArgumentMatchers.eq(false), org.mockito.ArgumentMatchers.eq(true),
+                any(), any(), any(), any(Pageable.class));
+
+        assertThatThrownBy(() -> service.historyAccessible("admin-no-permission", Set.of("ROLE_ADMIN"), 0, 20))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(403));
+        verify(workflows, never()).findHistoryAccessible(org.mockito.ArgumentMatchers.eq("admin-no-permission"),
+                org.mockito.ArgumentMatchers.anyBoolean(),
+                org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.anyBoolean(),
+                org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any(), any(Pageable.class));
+    }
+     @Test
+void managerCanReadAuditTrailForPendingApprovalWorkflow() {
+    DocumentWorkflow workflow = pendingStaffWorkflow();
+    workflow.review(StaffReviewResult.PASSED, "All checks passed");
+
+    when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+    when(audit.findByWorkflowIdOrderByCreatedAtAsc(ID)).thenReturn(List.of(
+            new DocumentWorkflowAudit(
+                    ID,
+                    REVIEWER,
+                    "PASSED",
+                    "STAFF_REVIEWING",
+                    "PENDING_MANAGER_APPROVAL",
+                    "All checks passed"
+            ),
+            new DocumentWorkflowAudit(
+                    ID,
+                    MANAGER,
+                    "APPROVED",
+                    "PENDING_MANAGER_APPROVAL",
+                    "APPROVED",
+                    "Approved"
+            )
+    ));
+
+    var history = service.history(
+            MANAGER,
+            Set.of("ROLE_MANAGER", "DOCUMENT_APPROVAL_QUEUE_VIEW"),
+            ID
+    );
+
+    assertThat(history).hasSize(2);
+    verify(audit).findByWorkflowIdOrderByCreatedAtAsc(ID);
+}
+        @Test
+    void managerCanRollbackApprovedDocumentAndRollbackMustPassStaffReviewAgain() throws Exception {
+        DocumentWorkflow workflow = approvedWorkflow();
+
+        when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
+
+        when(documents.getDocument(MANAGER, "doc-1")).thenReturn(
+                new ObjectMapper().readTree(
+                        "{\"owner_user_id\":\"73\",\"current_version\":2,\"pending_version\":null}"
+                )
+        );
+
+        when(documents.rollbackDocumentVersion(
+                MANAGER,
+                OWNER,
+                "doc-1",
+                1,
+                "Restore stable version"
+        )).thenReturn(
+                new ObjectMapper().readTree(
+                        "{\"number\":3,\"status\":\"proposed\",\"origin\":\"rollback\",\"restored_from\":1}"
+                )
+        );
+
+        when(workflows.saveAndFlush(workflow)).thenReturn(workflow);
+
+        var result = service.rollback(
+                MANAGER,
+                Set.of("ROLE_MANAGER", "DOCUMENT_ROLLBACK"),
+                ID,
+                1,
+                "Restore stable version"
+        );
+
+        assertThat(result.status()).isEqualTo(DocumentWorkflowStatus.PENDING_STAFF_REVIEW);
+        assertThat(result.submittedDocumentVersion()).isEqualTo(3);
+
+        verify(documents).rollbackDocumentVersion(
+                MANAGER,
+                OWNER,
+                "doc-1",
+                1,
+                "Restore stable version"
+        );
+
+        verify(workflows).saveAndFlush(workflow);
+        verify(audit).save(any(DocumentWorkflowAudit.class));
+    }
+    @Test
+
     void persistenceDeclaresUniqueDocumentKeyAndPessimisticClaimDecisionLock() throws Exception {
         Lock lock = DocumentWorkflowRepository.class.getMethod("lockById", UUID.class).getAnnotation(Lock.class);
         Field version = DocumentWorkflow.class.getDeclaredField("optimisticVersion");
@@ -390,7 +787,17 @@ class DocumentWorkflowServiceTest {
         assertThat(DocumentWorkflow.class.getDeclaredField("documentId")
                 .getAnnotation(jakarta.persistence.Column.class).unique()).isTrue();
     }
+    private static DocumentWorkflow approvedWorkflow() {
+    DocumentWorkflow workflow = new DocumentWorkflow("doc-1", "Document", OWNER);
+    ReflectionTestUtils.setField(workflow, "id", ID);
 
+    workflow.submit(2);
+    workflow.claim(REVIEWER);
+    workflow.review(StaffReviewResult.PASSED, "Staff review passed");
+    workflow.decide(MANAGER, ManagerDecision.APPROVED, "Approved");
+
+    return workflow;
+}
     private static DocumentWorkflow pendingStaffWorkflow() {
         DocumentWorkflow workflow = submittedWorkflow();
         workflow.claim(REVIEWER);

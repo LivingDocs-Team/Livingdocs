@@ -68,6 +68,8 @@ class FakeApi:
             return route.fulfill(status=200, json={"token": "csrf-ld68"})
         if (request.method, path) == ("GET", "/api/auth/me"):
             return route.fulfill(status=200, json={"id": USER_ID, "email": "ld68@example.com"})
+        if (request.method, path) == ("GET", "/api/managed-workspaces"):
+            return route.fulfill(status=200, json=[])  # LD-267: chỉ có workspace cá nhân
         if (request.method, path) == ("GET", "/api/github/connection"):
             return route.fulfill(status=200, json={"connected": True, "githubLogin": "d3r-bbb", "status": "ACTIVE"})
         if (request.method, path) == ("GET", "/api/github/repos/available"):
