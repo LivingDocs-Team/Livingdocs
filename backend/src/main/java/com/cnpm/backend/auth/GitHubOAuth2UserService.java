@@ -1,5 +1,5 @@
 
-package com.cnpm.backend.service;
+package com.cnpm.backend.auth;
 
 import java.util.Map;
 import java.util.UUID;
