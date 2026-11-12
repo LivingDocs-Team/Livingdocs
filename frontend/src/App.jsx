@@ -326,7 +326,7 @@ function App() {
                   type="button"
                   onClick={() => setPage('profile')}
                 >
-                  View demo profile
+                  View profile
                 </button>
               </p>
 

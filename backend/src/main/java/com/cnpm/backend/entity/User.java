@@ -41,8 +41,19 @@ public class User {
     @Column(nullable = false, length = 30)
     private String role = "DEVELOPER";
 
+    // LD-51: also the "Email updates" notification preference.
     @Column(name = "notification_enabled", nullable = false)
     private boolean notificationEnabled = true;
+
+    // LD-51: other notification preferences; existing accounts keep them on when Hibernate adds the columns.
+    @Column(name = "notify_document_changes", nullable = false, columnDefinition = "boolean default true")
+    private boolean notifyDocumentChanges = true;
+
+    @Column(name = "notify_review_requests", nullable = false, columnDefinition = "boolean default true")
+    private boolean notifyReviewRequests = true;
+
+    @Column(name = "notify_system", nullable = false, columnDefinition = "boolean default true")
+    private boolean notifySystem = true;
 
     // Existing accounts remain enabled when Hibernate adds this column.
     @Column(nullable = false, columnDefinition = "boolean default true")
@@ -147,6 +158,30 @@ public class User {
 
     public void setNotificationEnabled(boolean notificationEnabled) {
         this.notificationEnabled = notificationEnabled;
+    }
+
+    public boolean isNotifyDocumentChanges() {
+        return notifyDocumentChanges;
+    }
+
+    public void setNotifyDocumentChanges(boolean notifyDocumentChanges) {
+        this.notifyDocumentChanges = notifyDocumentChanges;
+    }
+
+    public boolean isNotifyReviewRequests() {
+        return notifyReviewRequests;
+    }
+
+    public void setNotifyReviewRequests(boolean notifyReviewRequests) {
+        this.notifyReviewRequests = notifyReviewRequests;
+    }
+
+    public boolean isNotifySystem() {
+        return notifySystem;
+    }
+
+    public void setNotifySystem(boolean notifySystem) {
+        this.notifySystem = notifySystem;
     }
 
     public LocalDateTime getCreatedAt() {
