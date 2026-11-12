@@ -41,6 +41,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.core.userdetails.User.withUsername;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -65,7 +66,8 @@ import java.nio.charset.StandardCharsets;
         com.cnpm.backend.auth.OAuth2SuccessController.class,
         com.cnpm.backend.auth.UserLoginController.class,
         com.cnpm.backend.controller.AdminUserController.class,
-        com.cnpm.backend.controller.AdminRoleController.class
+        com.cnpm.backend.controller.AdminRoleController.class,
+        com.cnpm.backend.controller.ProfileController.class
 }, properties = {
         "services.github-integration.base-url=http://127.0.0.1:1",
         "services.github-integration.internal-secret=filter-chain-test-credential",
@@ -185,6 +187,32 @@ class BackendSecurityFilterChainTest {
                         .cookie(new Cookie("JSESSIONID", expiredSessionId))
                         .header("X-User-Id", "forged-user"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void profileNeedsASessionAndCsrf_andCannotChangeEmailOrRole() throws Exception {  // LD-52
+        mvc.perform(get("/api/profile")).andExpect(status().isUnauthorized());
+
+        Csrf csrf = fetchCsrf();
+        MockHttpSession session = login(csrf);
+        mvc.perform(get("/api/profile").session(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value(EMAIL))
+                .andExpect(jsonPath("$.password").doesNotExist());
+        mvc.perform(patch("/api/profile").session(session)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"firstName\":\"New\"}"))
+                .andExpect(status().isForbidden());
+
+        when(userRepository.save(testUser)).thenReturn(testUser);
+        mvc.perform(patch("/api/profile").session(session)
+                        .cookie(csrf.cookie())
+                        .header("X-XSRF-TOKEN", csrf.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"firstName\":\"New\",\"email\":\"other@example.test\",\"role\":\"ADMINISTRATOR\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("New"))
+                .andExpect(jsonPath("$.email").value(EMAIL))
+                .andExpect(jsonPath("$.role").value("DEVELOPER"));
     }
 
     @Test
