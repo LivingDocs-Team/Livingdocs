@@ -5,6 +5,7 @@ Every file is rendered with the same layout regardless of what the AI returned.
 """
 from typing import Dict, List, Optional, Tuple
 
+from .confidence import bounded, level_of
 from .doc_schema import ClassDoc, EndpointDoc, FileDoc, FunctionDoc
 from .docstrings import parse_docstring
 from .evidence import location
@@ -230,8 +231,8 @@ def doc_items(doc: FileDoc) -> Dict[str, object]:
 def _score_text(score: Optional[float], L: dict) -> str:
     if score is None:
         return "-"
-    lvl = "high" if score >= 0.75 else "medium" if score >= 0.5 else "low"
-    return f"{score:.2f} ({L['levels'][lvl]})"
+    score = bounded(score)               # LD-356: same rounding and thresholds as the report
+    return f"{score:.2f} ({L['levels'][level_of(score).value]})"
 
 
 def _ev_ref(ev: Evidence) -> str:

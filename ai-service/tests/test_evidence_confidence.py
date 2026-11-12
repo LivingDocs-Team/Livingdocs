@@ -161,7 +161,7 @@ def test_invalid_citations_are_dropped_penalised_and_reported():
     res = run_routes(ai(json.dumps(bad))[0])
     fn = next(e for e in res.report.entities if e.name == "get_cart_total")
     assert [e.id for e in fn.evidence] == ["E1"] and fn.factors["invalid_citations"] == 2
-    assert fn.confidence == 0.86          # 0.96 - 0.10 penalty
+    assert fn.confidence == 0.76          # LD-356: 0.96 - 0.10 per unknown id (2)
     assert any("X9" in w and "D7" in w for w in res.warnings)
 
 
