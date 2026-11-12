@@ -1,4 +1,4 @@
-package com.cnpm.backend.controller;
+package com.cnpm.backend.auth;
 
 import java.util.Map;
 

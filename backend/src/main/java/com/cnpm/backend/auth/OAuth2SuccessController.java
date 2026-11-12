@@ -1,5 +1,5 @@
 
-package com.cnpm.backend.controller;
+package com.cnpm.backend.auth;
 
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
