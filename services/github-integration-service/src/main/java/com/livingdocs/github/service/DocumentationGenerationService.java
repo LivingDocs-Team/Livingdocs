@@ -32,15 +32,18 @@ public class DocumentationGenerationService {
     private final RepositorySyncService repositorySyncService;
     private final RestClient analyzerClient;
     private final RestClient aiServiceClient;
+    private final DocumentationCodeRelationshipService relationshipService;
     private final ConcurrentMap<String, String> jobOwners = new ConcurrentHashMap<>();
 
     public DocumentationGenerationService(
             RepositorySyncService repositorySyncService,
             @Qualifier("codeAnalyzerRestClient") RestClient analyzerClient,
-            @Qualifier("aiServiceRestClient") RestClient aiServiceClient) {
+            @Qualifier("aiServiceRestClient") RestClient aiServiceClient,
+            DocumentationCodeRelationshipService relationshipService) {
         this.repositorySyncService = repositorySyncService;
         this.analyzerClient = analyzerClient;
         this.aiServiceClient = aiServiceClient;
+        this.relationshipService = relationshipService;
     }
 
     /**
@@ -136,6 +139,9 @@ public class DocumentationGenerationService {
                     "The AI service returned an invalid job response.");
         }
         jobOwners.put(job.path("id").asText(), userId);
+        UUID documentId = relationshipService.recordGeneration(userId, repositoryId,
+                job.path("id").asText(), analysis, snapshot);
+        if (job instanceof ObjectNode jobObject) jobObject.put("documentId", documentId.toString());
         return job;
     }
 
@@ -154,6 +160,7 @@ public class DocumentationGenerationService {
                 throw integrationFailure("AI_SERVICE_INVALID_RESPONSE",
                         "The AI service returned an empty documentation result.");
             }
+            relationshipService.saveGeneratedMarkdown(userId, jobId, result);
             return result;
         } catch (RestClientResponseException e) {
             if (e.getStatusCode().value() == 404) {
