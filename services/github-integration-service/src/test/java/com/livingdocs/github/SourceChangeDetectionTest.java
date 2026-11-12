@@ -256,9 +256,14 @@ class SourceChangeDetectionTest {
         mockInvoiceContentAndAnalyzer();
         when(documentsClient.find(eq("acme/docs"), anyList())).thenReturn(List.of(
                 new AffectedDocumentsClient.Affected("doc-1", "Billing docs", 3, "src/main/java/acme/Checkout.java",
-                        "src/main/java/acme/Checkout.java", "dependent", List.of("mentions `Invoice.total`")),
+                        "src/main/java/acme/Checkout.java", "dependent", List.of("mentions `Invoice.total`"),
+                        List.of(new AffectedDocumentsClient.Match("Invoice.total", "name", 14,
+                                        "Checkout charges `Invoice.total()` of the cart."),
+                                new AffectedDocumentsClient.Match("Invoice.total", "name", 9,
+                                        "Uses `Invoice.total`."),
+                                new AffectedDocumentsClient.Match(null, "name", 3, "skipped: no target"))),
                 new AffectedDocumentsClient.Affected("doc-1", "Billing docs", 3, PATH, PATH, "direct",
-                        List.of("documents changed file " + PATH, "mentions `Invoice.discount`"))));
+                        List.of("documents changed file " + PATH, "mentions `Invoice.discount`"), null)));
 
         sourceChangeService.detect(commit(repo.id(), sha));
 
@@ -274,8 +279,16 @@ class SourceChangeDetectionTest {
                 .andExpect(jsonPath("$[0].affectedDocuments[0].section").value(PATH))
                 .andExpect(jsonPath("$[0].affectedDocuments[0].reasons[0]").value("documents changed file " + PATH))
                 .andExpect(jsonPath("$[0].affectedDocuments[0].reasons[1]").value("mentions `Invoice.discount`"))
+                .andExpect(jsonPath("$[0].affectedDocuments[0].evidence.length()").value(0))
                 .andExpect(jsonPath("$[0].affectedDocuments[1].dependency").value("DEPENDENT"))
-                .andExpect(jsonPath("$[0].affectedDocuments[1].section").value("src/main/java/acme/Checkout.java"));
+                .andExpect(jsonPath("$[0].affectedDocuments[1].section").value("src/main/java/acme/Checkout.java"))
+                // LD-126: bằng chứng theo dòng; chỗ thiếu target bị bỏ
+                .andExpect(jsonPath("$[0].affectedDocuments[1].evidence.length()").value(2))
+                .andExpect(jsonPath("$[0].affectedDocuments[1].evidence[0].line").value(9))
+                .andExpect(jsonPath("$[0].affectedDocuments[1].evidence[0].target").value("Invoice.total"))
+                .andExpect(jsonPath("$[0].affectedDocuments[1].evidence[0].kind").value("name"))
+                .andExpect(jsonPath("$[0].affectedDocuments[1].evidence[0].excerpt").value("Uses `Invoice.total`."))
+                .andExpect(jsonPath("$[0].affectedDocuments[1].evidence[1].line").value(14));
 
         // ai-service nhận đúng file và code entity mà LD-116 đã tìm
         verify(documentsClient).find(eq("acme/docs"), argThat(files -> files.size() == 1
@@ -296,7 +309,7 @@ class SourceChangeDetectionTest {
         when(documentsClient.find(eq("acme/docs"), anyList()))
                 .thenThrow(new SourceChangeException("AI_SERVICE_UNAVAILABLE", "The AI service is down."))
                 .thenReturn(List.of(new AffectedDocumentsClient.Affected("doc-2", "Docs", 1, PATH, PATH, "direct",
-                        List.of("documents changed file " + PATH))));
+                        List.of("documents changed file " + PATH), List.of())));
 
         sourceChangeService.detect(commit(repo.id(), sha));
 

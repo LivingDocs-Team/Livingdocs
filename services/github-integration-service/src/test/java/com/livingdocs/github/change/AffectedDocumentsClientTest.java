@@ -51,14 +51,19 @@ class AffectedDocumentsClientTest {
                 .andRespond(withSuccess("""
                         {"documents": [{"source": "document", "path": "src/Bill.java", "document_id": "d1",
                                         "title": "Docs", "version": 2, "documents_file": "src/Bill.java",
-                                        "dependency": "direct", "reasons": ["documents changed file src/Invoice.java"],
-                                        "matches": [], "findings": 0}],
+                                        "dependency": "direct",
+                                        "reasons": ["documents changed file src/Invoice.java", "mentions `Invoice.total`"],
+                                        "matches": [{"term": "total", "target": "Invoice.total", "line": 7,
+                                                     "excerpt": "`total()` adds the lines.", "in_code": true,
+                                                     "exact": false, "kind": "name"}],
+                                        "findings": 0}],
                          "warnings": []}""", MediaType.APPLICATION_JSON));
 
         List<AffectedDocumentsClient.Affected> found = client.find("acme/docs", FILES);
 
         assertThat(found).containsExactly(new AffectedDocumentsClient.Affected("d1", "Docs", 2, "src/Bill.java",
-                "src/Bill.java", "direct", List.of("documents changed file src/Invoice.java")));
+                "src/Bill.java", "direct", List.of("documents changed file src/Invoice.java", "mentions `Invoice.total`"),
+                List.of(new AffectedDocumentsClient.Match("Invoice.total", "name", 7, "`total()` adds the lines."))));
         aiServer.verify();
     }
 
