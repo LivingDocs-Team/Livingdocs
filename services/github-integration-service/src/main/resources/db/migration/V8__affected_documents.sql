@@ -17,3 +17,14 @@ CREATE TABLE source_change_documents (
 );
 
 CREATE INDEX idx_source_change_documents_change ON source_change_documents (source_change_id);
+
+-- LD-126: bằng chứng, mỗi dòng là một chỗ trong phần tài liệu nhắc tới code đã thay đổi
+CREATE TABLE source_change_document_evidence (
+    document_row_id  UUID          NOT NULL REFERENCES source_change_documents (id) ON DELETE CASCADE,
+    target           VARCHAR(500)  NOT NULL,  -- entity, endpoint hoặc đường dẫn đã thay đổi
+    kind             VARCHAR(30),             -- name / path / module / line_ref / parameter ...
+    line_number      INTEGER       NOT NULL,  -- dòng trong phần tài liệu
+    excerpt          VARCHAR(300)  NOT NULL
+);
+
+CREATE INDEX idx_source_change_document_evidence_row ON source_change_document_evidence (document_row_id);

@@ -1,6 +1,8 @@
 package com.livingdocs.github.entity;
 
+import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
+import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -10,10 +12,12 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -61,11 +65,18 @@ public class AffectedDocument {
     @Column(nullable = false, length = MAX_REASONS_LENGTH)
     private String reasons;
 
+    /** LD-126: các chỗ trong phần tài liệu nhắc tới code đã thay đổi, theo dòng. */
+    @ElementCollection
+    @CollectionTable(name = "source_change_document_evidence", joinColumns = @JoinColumn(name = "document_row_id"))
+    @OrderBy("line")
+    private List<ImpactEvidence> evidence = new ArrayList<>();
+
     protected AffectedDocument() {
     }
 
     public AffectedDocument(String documentId, String title, Integer version, String sectionPath,
-                            String documentsFile, Dependency dependency, List<String> reasons) {
+                            String documentsFile, Dependency dependency, List<String> reasons,
+                            List<ImpactEvidence> evidence) {
         this.documentId = cut(documentId, 100);
         this.title = cut(title, 500);
         this.version = version;
@@ -73,6 +84,8 @@ public class AffectedDocument {
         this.documentsFile = cut(documentsFile, 1000);
         this.dependency = dependency;
         this.reasons = cut(String.join("\n", reasons == null ? List.of() : reasons), MAX_REASONS_LENGTH);
+        // shortcut: keeps the first 20 places only, enough to explain the impact; page them if users need all
+        this.evidence.addAll(evidence == null ? List.of() : evidence.stream().limit(20).toList());
     }
 
     private static String cut(String value, int max) {
@@ -94,4 +107,6 @@ public class AffectedDocument {
     public Dependency getDependency() { return dependency; }
 
     public List<String> getReasons() { return reasons.isEmpty() ? List.of() : List.of(reasons.split("\n")); }
+
+    public List<ImpactEvidence> getEvidence() { return evidence; }
 }

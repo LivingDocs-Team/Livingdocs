@@ -53,10 +53,11 @@ def frontend_is_running():
 class FakeApi:
     """Backend giả cho trang Repository Management; activity_error = (HTTP status, JSON body)."""
 
-    def __init__(self, pull_requests=PULL_REQUESTS, commits=COMMITS, activity_error=None):
+    def __init__(self, pull_requests=PULL_REQUESTS, commits=COMMITS, activity_error=None, source_changes=()):
         self.pull_requests = pull_requests
         self.commits = commits
         self.activity_error = activity_error
+        self.source_changes = list(source_changes)
         self.requests = []
 
     def handle(self, route):
@@ -87,6 +88,8 @@ class FakeApi:
                 return route.fulfill(status=status, json=body)
             data = self.pull_requests if path.endswith("/pull-requests") else self.commits
             return route.fulfill(status=200, json=data)
+        if (request.method, path) == ("GET", f"/api/repositories/{REPOSITORY_ID}/source-changes"):
+            return route.fulfill(status=200, json=self.source_changes)
         return route.fulfill(status=404, json={"message": f"Unexpected API request: {request.method} {path}"})
 
 
@@ -148,3 +151,63 @@ def test_activity_error_is_shown_in_english(page: Page):
 
     expect(activity(page).get_by_role("alert")).to_have_text("You do not have access to this item.")
     expect(page.get_by_text(service_message)).to_have_count(0)
+
+
+# ---------- LD-122 / LD-126 / LD-127: tài liệu bị ảnh hưởng của source change ----------
+
+def source_change(sha, **extra):
+    change = {"id": f"change-{sha}", "trigger": "COMMIT", "commitSha": sha * 40, "pullRequestNumber": None,
+              "status": "PENDING", "errorCode": None, "errorMessage": None,
+              "createdAt": "2026-11-06T03:02:00Z", "updatedAt": "2026-11-06T03:02:00Z",
+              "files": [{"path": "shop/cart.py", "change": "MODIFIED", "entities": []}],
+              "documentsStatus": "FOUND", "documentsErrorCode": None, "documentsErrorMessage": None,
+              "affectedDocuments": []}
+    change.update(extra)
+    return change
+
+
+AFFECTED = [
+    {"documentId": "doc-1", "title": "acme/shop", "version": 2, "section": "shop/cart.py",
+     "documentsFile": "shop/cart.py", "dependency": "DIRECT",
+     "reasons": ["documents changed file shop/cart.py"], "evidence": []},
+    {"documentId": "doc-1", "title": "acme/shop", "version": 2, "section": "shop/checkout.py",
+     "documentsFile": "shop/checkout.py", "dependency": "DEPENDENT",
+     "reasons": ["mentions `get_cart_total`"],
+     "evidence": [{"target": "get_cart_total", "kind": "name", "line": 14,
+                   "excerpt": "Charge the customer get_cart_total(cart_id) of the cart."}]},
+]
+
+
+def test_affected_documentation_is_listed_with_dependency_and_evidence(page: Page):
+    open_workspace_repositories(page, FakeApi(source_changes=[source_change("a", affectedDocuments=AFFECTED)]))
+
+    page.get_by_role("button", name="PRs & commits").click()
+
+    expect(activity(page).get_by_role("heading", name="Source changes (1)")).to_be_visible()
+    docs = activity(page).get_by_role("list", name="Documentation affected by aaaaaaa")
+    direct = docs.get_by_role("listitem").filter(has_text="shop/cart.py").first
+    expect(direct).to_contain_text("Direct")
+    expect(direct).to_contain_text("documents changed file shop/cart.py")
+    dependent = docs.get_by_role("listitem").filter(has_text="shop/checkout.py").first
+    expect(dependent).to_contain_text("Dependent")
+    expect(dependent).to_contain_text("mentions `get_cart_total`")
+    expect(dependent).to_contain_text("Line 14: Charge the customer get_cart_total(cart_id) of the cart.")
+
+
+def test_source_change_documentation_states_are_explained(page: Page):
+    open_workspace_repositories(page, FakeApi(source_changes=[
+        source_change("b"),
+        source_change("c", documentsStatus="FAILED", documentsErrorCode="AI_SERVICE_UNAVAILABLE",
+                      documentsErrorMessage="The AI service could not check which documentation is affected."),
+        source_change("d", status="FAILED", errorCode="GITHUB_UNAVAILABLE", errorMessage="GitHub is unavailable.",
+                      files=[], documentsStatus=None),
+    ]))
+
+    page.get_by_role("button", name="PRs & commits").click()
+
+    panel = activity(page)
+    expect(panel.get_by_role("heading", name="Source changes (3)")).to_be_visible()
+    expect(panel.get_by_text("No documentation is affected.")).to_be_visible()
+    expect(panel.get_by_role("alert")).to_have_text(
+        "Affected documentation could not be checked: The AI service could not check which documentation is affected.")
+    expect(panel.get_by_text("Changes could not be detected: GitHub is unavailable.")).to_be_visible()

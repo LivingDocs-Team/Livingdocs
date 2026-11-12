@@ -48,9 +48,15 @@ public record SourceChangeResponse(
      * @param documentsFile file mã nguồn mà phần này được sinh ra từ đó
      * @param dependency    DIRECT: phần của chính file thay đổi; DEPENDENT: phần khác nhắc tới code đã thay đổi
      * @param reasons       vd. "documents changed file shop/cart.py", "mentions `Invoice.total`"
+     * @param evidence      LD-126: các chỗ trong phần tài liệu nhắc tới code đã thay đổi (tối đa 20, theo dòng)
      */
     public record DocumentResponse(String documentId, String title, Integer version, String section,
-                                   String documentsFile, String dependency, List<String> reasons) {
+                                   String documentsFile, String dependency, List<String> reasons,
+                                   List<EvidenceResponse> evidence) {
+    }
+
+    /** target: entity, endpoint hoặc đường dẫn đã thay đổi; line: dòng trong phần tài liệu; excerpt: đoạn trích dòng đó. */
+    public record EvidenceResponse(String target, String kind, int line, String excerpt) {
     }
 
     public static SourceChangeResponse from(SourceChange c) {
@@ -64,7 +70,10 @@ public record SourceChangeResponse(
                 .toList();
         List<DocumentResponse> documents = c.getAffectedDocuments().stream()
                 .map(d -> new DocumentResponse(d.getDocumentId(), d.getTitle(), d.getVersion(), d.getSectionPath(),
-                        d.getDocumentsFile(), d.getDependency().name(), d.getReasons()))
+                        d.getDocumentsFile(), d.getDependency().name(), d.getReasons(),
+                        d.getEvidence().stream()
+                                .map(e -> new EvidenceResponse(e.getTarget(), e.getKind(), e.getLine(), e.getExcerpt()))
+                                .toList()))
                 .toList();
         return new SourceChangeResponse(c.getId(), c.getTriggerType().name(), c.getCommitSha(),
                 c.getPullRequestNumber(), c.getStatus().name(), c.getErrorCode(), c.getErrorMessage(),

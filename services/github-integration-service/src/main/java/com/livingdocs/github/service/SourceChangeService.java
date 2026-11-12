@@ -15,6 +15,7 @@ import com.livingdocs.github.dto.SourceChangeResponse;
 import com.livingdocs.github.entity.AffectedDocument;
 import com.livingdocs.github.entity.ConnectedRepository;
 import com.livingdocs.github.entity.GitHubConnection;
+import com.livingdocs.github.entity.ImpactEvidence;
 import com.livingdocs.github.entity.SourceChange;
 import com.livingdocs.github.entity.SourceChangeEntity;
 import com.livingdocs.github.entity.SourceChangeFile;
@@ -308,12 +309,19 @@ public class SourceChangeService {
                     .map(a -> new AffectedDocument(a.documentId(), a.title(), a.version(), a.path(), a.documentsFile(),
                             "direct".equalsIgnoreCase(a.dependency())
                                     ? AffectedDocument.Dependency.DIRECT : AffectedDocument.Dependency.DEPENDENT,
-                            a.reasons()))
+                            a.reasons(), evidence(a.matches())))
                     .toList();
             return change -> change.markDocumentsFound(found);
         } catch (SourceChangeException e) {
             return change -> change.markDocumentsFailed(e.getCode(), e.getMessage());
         }
+    }
+
+    private static List<ImpactEvidence> evidence(List<AffectedDocumentsClient.Match> matches) {
+        return matches == null ? List.of() : matches.stream()
+                .filter(m -> m.target() != null && m.line() != null && m.excerpt() != null)
+                .map(m -> new ImpactEvidence(m.target(), m.kind(), m.line(), m.excerpt()))
+                .toList();
     }
 
     private static List<AffectedDocumentsClient.ChangedFile> changedFiles(SourceChange change) {

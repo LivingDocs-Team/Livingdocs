@@ -35,11 +35,16 @@ public class AffectedDocumentsClient {
     public record ChangedEntity(String kind, String name, String change) {
     }
 
-    /** Một phần tài liệu bị ảnh hưởng; dependency: direct hoặc dependent (LD-125). */
+    /** Một phần tài liệu bị ảnh hưởng; dependency: direct hoặc dependent (LD-125); matches: bằng chứng (LD-126). */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record Affected(@JsonProperty("document_id") String documentId, String title, Integer version,
                            String path, @JsonProperty("documents_file") String documentsFile,
-                           String dependency, List<String> reasons) {
+                           String dependency, List<String> reasons, List<Match> matches) {
+    }
+
+    /** Một chỗ trong phần tài liệu nhắc tới code đã thay đổi: target là entity / endpoint / đường dẫn đó. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record Match(String target, String kind, Integer line, String excerpt) {
     }
 
     private record Request(String repository, List<ChangedFile> files,
