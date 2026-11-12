@@ -151,7 +151,7 @@ Ngay sau khi lưu một source change `PENDING`, service hỏi ai-service phần
 ```
 ai-service GET /documents                        tài liệu của repo (target = owner/name), như LD-145
 ai-service POST /internal/affected-documents     file + code entity của source change, id các tài liệu đó
-  -> lưu vào bảng source_change_documents (migration V7)
+  -> lưu vào bảng source_change_documents (migration V8)
 ```
 
 Luật so khớp là của LD-148 (`ai-service/app/drift_affected.py`), không viết lại ở Java:
