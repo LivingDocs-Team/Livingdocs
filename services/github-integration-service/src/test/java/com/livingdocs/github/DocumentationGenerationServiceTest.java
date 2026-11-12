@@ -35,6 +35,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.livingdocs.github.dto.DocumentationGenerationRequest;
 import com.livingdocs.github.exception.ApiException;
 import com.livingdocs.github.service.DocumentationGenerationService;
+import com.livingdocs.github.service.DocumentationCodeRelationshipService;
 import com.livingdocs.github.service.RepositorySyncService;
 import com.livingdocs.github.sync.RepositorySnapshot;
 
@@ -77,6 +78,9 @@ class DocumentationGenerationServiceTest {
     @Mock
     private RepositorySyncService repositorySyncService;
 
+    @Mock
+    private DocumentationCodeRelationshipService relationshipService;
+
     private MockRestServiceServer analyzerServer;
     private MockRestServiceServer aiServiceServer;
     private DocumentationGenerationService generationService;
@@ -91,10 +95,19 @@ class DocumentationGenerationServiceTest {
         aiServiceServer = MockRestServiceServer.bindTo(aiBuilder).build();
         RestClient aiClient = aiBuilder.baseUrl("http://ai.test").build();
 
-        generationService = new DocumentationGenerationService(
-                repositorySyncService, analyzerClient, aiClient);
+         generationService = new DocumentationGenerationService(
+                repositorySyncService, analyzerClient, aiClient, relationshipService);
+
         lenient().when(repositorySyncService.latestOrSync(USER_ID, REPOSITORY_ID))
-        .thenReturn(snapshot());
+                .thenReturn(snapshot());
+
+        org.mockito.Mockito.lenient().when(relationshipService.recordGeneration(
+                org.mockito.ArgumentMatchers.eq(USER_ID),
+                org.mockito.ArgumentMatchers.eq(REPOSITORY_ID),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(UUID.fromString("22222222-2222-2222-2222-222222222222"));
     }
 
     @Test
@@ -118,6 +131,7 @@ class DocumentationGenerationServiceTest {
 
         assertEquals("job-123", job.path("id").asText());
         assertEquals("pending", job.path("status").asText());
+        assertEquals("22222222-2222-2222-2222-222222222222", job.path("documentId").asText());
         analyzerServer.verify();
         aiServiceServer.verify();
     }
@@ -286,57 +300,58 @@ class DocumentationGenerationServiceTest {
         aiServiceServer.verify();
     }
     @Test
-void verifiesSourceSnapshotWhenCommitMatches() {
-    String commitSha = "a".repeat(40);
+    void verifiesSourceSnapshotWhenCommitMatches() {
+        String commitSha = "a".repeat(40);
 
-    when(repositorySyncService.sync(USER_ID, REPOSITORY_ID, SyncOptions.defaults()))
-            .thenReturn(snapshot());
+        when(repositorySyncService.sync(USER_ID, REPOSITORY_ID, SyncOptions.defaults()))
+                .thenReturn(snapshot());
 
-    JsonNode result = generationService.verifySourceSnapshot(
-            USER_ID, reviewEvidence(REPOSITORY_ID.toString(), commitSha));
+        JsonNode result = generationService.verifySourceSnapshot(
+                USER_ID, reviewEvidence(REPOSITORY_ID.toString(), commitSha));
 
-    assertEquals("MATCH", result.path("source_verification").path("status").asText());
-    assertEquals(commitSha,
-            result.path("source_verification").path("current_commit_sha").asText());
-}
+        assertEquals("MATCH", result.path("source_verification").path("status").asText());
+        assertEquals(commitSha,
+                result.path("source_verification").path("current_commit_sha").asText());
+    }
 
-@Test
-void detectsChangedSourceSnapshotWhenCommitDiffers() {
-    String originalSha = "b".repeat(40);
-    String currentSha = "a".repeat(40);
+    @Test
+    void detectsChangedSourceSnapshotWhenCommitDiffers() {
+        String originalSha = "b".repeat(40);
+        String currentSha = "a".repeat(40);
 
-    when(repositorySyncService.sync(USER_ID, REPOSITORY_ID, SyncOptions.defaults()))
-            .thenReturn(snapshot());
+        when(repositorySyncService.sync(USER_ID, REPOSITORY_ID, SyncOptions.defaults()))
+                .thenReturn(snapshot());
 
-    JsonNode result = generationService.verifySourceSnapshot(
-            USER_ID, reviewEvidence(REPOSITORY_ID.toString(), originalSha));
+        JsonNode result = generationService.verifySourceSnapshot(
+                USER_ID, reviewEvidence(REPOSITORY_ID.toString(), originalSha));
 
-    assertEquals("CHANGED", result.path("source_verification").path("status").asText());
-    assertEquals(originalSha,
-            result.path("source_verification").path("expected_commit_sha").asText());
-    assertEquals(currentSha,
-            result.path("source_verification").path("current_commit_sha").asText());
-}
+        assertEquals("CHANGED", result.path("source_verification").path("status").asText());
+        assertEquals(originalSha,
+                result.path("source_verification").path("expected_commit_sha").asText());
+        assertEquals(currentSha,
+                result.path("source_verification").path("current_commit_sha").asText());
+    }
 
-@Test
-void marksSourceSnapshotUnverifiableWhenOriginalCommitShaIsInvalid() {
-    JsonNode result = generationService.verifySourceSnapshot(
-            USER_ID, reviewEvidence(REPOSITORY_ID.toString(), "invalid-sha"));
+    @Test
+    void marksSourceSnapshotUnverifiableWhenOriginalCommitShaIsInvalid() {
+        JsonNode result = generationService.verifySourceSnapshot(
+                USER_ID, reviewEvidence(REPOSITORY_ID.toString(), "invalid-sha"));
 
-    assertEquals("UNVERIFIABLE",
-            result.path("source_verification").path("status").asText());
-    assertEquals("invalid-sha",
-            result.path("source_verification").path("expected_commit_sha").asText());
-}
+        assertEquals("UNVERIFIABLE",
+                result.path("source_verification").path("status").asText());
+        assertEquals("invalid-sha",
+                result.path("source_verification").path("expected_commit_sha").asText());
+    }
+
     private static JsonNode reviewEvidence(String repositoryId, String commitSha) {
-    ObjectNode evidence = JsonNodeFactory.instance.objectNode();
-    ObjectNode sourceSnapshot = evidence.putObject("source_snapshot");
+        ObjectNode evidence = JsonNodeFactory.instance.objectNode();
+        ObjectNode sourceSnapshot = evidence.putObject("source_snapshot");
 
-    sourceSnapshot.put("repository_id", repositoryId);
-    sourceSnapshot.put("commit_sha", commitSha);
+        sourceSnapshot.put("repository_id", repositoryId);
+        sourceSnapshot.put("commit_sha", commitSha);
 
-    return evidence;
-}
+        return evidence;
+    }
     private static RepositorySnapshot snapshot() {
         return new RepositorySnapshot(
                 new RepositorySnapshot.RepositoryInfo(42L, "acme/shop", "acme", "shop", null,
