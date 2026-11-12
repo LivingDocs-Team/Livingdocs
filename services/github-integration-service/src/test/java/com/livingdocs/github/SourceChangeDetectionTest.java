@@ -1,6 +1,7 @@
 package com.livingdocs.github;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.livingdocs.github.change.AffectedDocumentsClient;
 import com.livingdocs.github.change.CodeAnalyzerClient;
 import com.livingdocs.github.change.CodeEntity;
 import com.livingdocs.github.change.SourceChangeException;
@@ -43,6 +44,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.after;
@@ -91,6 +93,7 @@ class SourceChangeDetectionTest {
 
     @MockitoBean GitHubClient gitHubClient;
     @MockitoBean CodeAnalyzerClient analyzerClient;
+    @MockitoBean AffectedDocumentsClient documentsClient;  // trả danh sách rỗng nếu test không cấu hình
 
     // ------------------------------------------------------------------ LD-118: commit trên nhánh mặc định
 
@@ -240,6 +243,113 @@ class SourceChangeDetectionTest {
                 .andExpect(jsonPath("$[0].files[0].skippedReason").value("PATCH_UNAVAILABLE"))
                 .andExpect(jsonPath("$[0].files[0].entities.length()").value(0));
         verify(gitHubClient, never()).getBlob(anyString(), anyString(), anyString(), eq(BLOB));
+    }
+
+    // ------------------------------------------------------------------ LD-122: tài liệu bị ảnh hưởng (LD-127)
+
+    @Test
+    void affectedDocumentsAreStoredWithTheSourceChange_directFirst() throws Exception {
+        String user = "change-affected-docs";
+        Repo repo = connectAndAddRepo(user);
+        String sha = newSha();
+        when(gitHubClient.getCommitFiles(TOKEN, "acme", "docs", sha)).thenReturn(List.of(invoiceFile(PATCH)));
+        mockInvoiceContentAndAnalyzer();
+        when(documentsClient.find(eq("acme/docs"), anyList())).thenReturn(List.of(
+                new AffectedDocumentsClient.Affected("doc-1", "Billing docs", 3, "src/main/java/acme/Checkout.java",
+                        "src/main/java/acme/Checkout.java", "dependent", List.of("mentions `Invoice.total`"),
+                        List.of(new AffectedDocumentsClient.Match("Invoice.total", "name", 14,
+                                        "Checkout charges `Invoice.total()` of the cart."),
+                                new AffectedDocumentsClient.Match("Invoice.total", "name", 9,
+                                        "Uses `Invoice.total`."),
+                                new AffectedDocumentsClient.Match(null, "name", 3, "skipped: no target"))),
+                new AffectedDocumentsClient.Affected("doc-1", "Billing docs", 3, PATH, PATH, "direct",
+                        List.of("documents changed file " + PATH, "mentions `Invoice.discount`"), null)));
+
+        sourceChangeService.detect(commit(repo.id(), sha));
+
+        mvc.perform(get(sourceChangesUrl(repo.id())).header(USER_HEADER, user))
+                .andExpect(jsonPath("$[0].status").value("PENDING"))
+                .andExpect(jsonPath("$[0].documentsStatus").value("FOUND"))
+                .andExpect(jsonPath("$[0].documentsErrorCode").doesNotExist())
+                .andExpect(jsonPath("$[0].affectedDocuments.length()").value(2))
+                .andExpect(jsonPath("$[0].affectedDocuments[0].dependency").value("DIRECT"))
+                .andExpect(jsonPath("$[0].affectedDocuments[0].documentId").value("doc-1"))
+                .andExpect(jsonPath("$[0].affectedDocuments[0].title").value("Billing docs"))
+                .andExpect(jsonPath("$[0].affectedDocuments[0].version").value(3))
+                .andExpect(jsonPath("$[0].affectedDocuments[0].section").value(PATH))
+                .andExpect(jsonPath("$[0].affectedDocuments[0].reasons[0]").value("documents changed file " + PATH))
+                .andExpect(jsonPath("$[0].affectedDocuments[0].reasons[1]").value("mentions `Invoice.discount`"))
+                .andExpect(jsonPath("$[0].affectedDocuments[0].evidence.length()").value(0))
+                .andExpect(jsonPath("$[0].affectedDocuments[1].dependency").value("DEPENDENT"))
+                .andExpect(jsonPath("$[0].affectedDocuments[1].section").value("src/main/java/acme/Checkout.java"))
+                // LD-126: bằng chứng theo dòng; chỗ thiếu target bị bỏ
+                .andExpect(jsonPath("$[0].affectedDocuments[1].evidence.length()").value(2))
+                .andExpect(jsonPath("$[0].affectedDocuments[1].evidence[0].line").value(9))
+                .andExpect(jsonPath("$[0].affectedDocuments[1].evidence[0].target").value("Invoice.total"))
+                .andExpect(jsonPath("$[0].affectedDocuments[1].evidence[0].kind").value("name"))
+                .andExpect(jsonPath("$[0].affectedDocuments[1].evidence[0].excerpt").value("Uses `Invoice.total`."))
+                .andExpect(jsonPath("$[0].affectedDocuments[1].evidence[1].line").value(14));
+
+        // ai-service nhận đúng file và code entity mà LD-116 đã tìm
+        verify(documentsClient).find(eq("acme/docs"), argThat(files -> files.size() == 1
+                && files.get(0).path().equals(PATH) && files.get(0).change().equals("MODIFIED")
+                && files.get(0).entities().contains(
+                        new AffectedDocumentsClient.ChangedEntity("METHOD", "Invoice.tax", "ADDED"))
+                && files.get(0).entities().contains(
+                        new AffectedDocumentsClient.ChangedEntity("METHOD", "Invoice.discount", "REMOVED"))));
+    }
+
+    @Test
+    void aiServiceError_isStoredAsDocumentsFailed_andRetryChecksOnlyTheDocumentsAgain() throws Exception {
+        String user = "change-docs-retry";
+        Repo repo = connectAndAddRepo(user);
+        String sha = newSha();
+        when(gitHubClient.getCommitFiles(TOKEN, "acme", "docs", sha)).thenReturn(List.of(invoiceFile(PATCH)));
+        mockInvoiceContentAndAnalyzer();
+        when(documentsClient.find(eq("acme/docs"), anyList()))
+                .thenThrow(new SourceChangeException("AI_SERVICE_UNAVAILABLE", "The AI service is down."))
+                .thenReturn(List.of(new AffectedDocumentsClient.Affected("doc-2", "Docs", 1, PATH, PATH, "direct",
+                        List.of("documents changed file " + PATH), List.of())));
+
+        sourceChangeService.detect(commit(repo.id(), sha));
+
+        String body = mvc.perform(get(sourceChangesUrl(repo.id())).header(USER_HEADER, user))
+                .andExpect(jsonPath("$[0].status").value("PENDING"))  // phát hiện thay đổi vẫn thành công
+                .andExpect(jsonPath("$[0].files[0].entities.length()").value(4))
+                .andExpect(jsonPath("$[0].documentsStatus").value("FAILED"))
+                .andExpect(jsonPath("$[0].documentsErrorCode").value("AI_SERVICE_UNAVAILABLE"))
+                .andExpect(jsonPath("$[0].affectedDocuments.length()").value(0))
+                .andReturn().getResponse().getContentAsString();
+        String changeId = json.readTree(body).get(0).get("id").asText();
+
+        mvc.perform(post(sourceChangesUrl(repo.id()) + "/" + changeId + "/retry").header(USER_HEADER, user))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.documentsStatus").value("FOUND"))
+                .andExpect(jsonPath("$.documentsErrorCode").doesNotExist())
+                .andExpect(jsonPath("$.affectedDocuments[0].documentId").value("doc-2"))
+                .andExpect(jsonPath("$.files[0].entities.length()").value(4));
+        verify(gitHubClient, times(1)).getCommitFiles(TOKEN, "acme", "docs", sha);  // không phát hiện lại
+
+        mvc.perform(post(sourceChangesUrl(repo.id()) + "/" + changeId + "/retry").header(USER_HEADER, user))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("SOURCE_CHANGE_NOT_FAILED"));
+    }
+
+    @Test
+    void failedSourceChange_hasNoDocumentsStep() throws Exception {
+        String user = "change-failed-no-docs";
+        Repo repo = connectAndAddRepo(user);
+        String sha = newSha();
+        when(gitHubClient.getCommitFiles(TOKEN, "acme", "docs", sha))
+                .thenThrow(new GitHubApiException("GitHub API returned HTTP 503.", 503, new HttpHeaders(), "{}"));
+
+        sourceChangeService.detect(commit(repo.id(), sha));
+
+        mvc.perform(get(sourceChangesUrl(repo.id())).header(USER_HEADER, user))
+                .andExpect(jsonPath("$[0].status").value("FAILED"))
+                .andExpect(jsonPath("$[0].documentsStatus").doesNotExist())
+                .andExpect(jsonPath("$[0].affectedDocuments.length()").value(0));
+        verify(documentsClient, never()).find(anyString(), anyList());
     }
 
     @Test

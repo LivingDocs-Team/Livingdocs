@@ -26,8 +26,8 @@ Công nghệ: Java 21, Spring Boot 3.5, PostgreSQL, Flyway, Swagger (springdoc).
 | GET | `/api/repositories/{id}/pull-requests` | Pull Request đã nhận của repo (LD-68), cập nhật gần nhất trước |
 | GET | `/api/repositories/{id}/commits` | Commit đã nhận của repo (LD-68), mới nhất trước |
 | POST | `/api/github/webhook` | GitHub gọi khi có `push` / `pull_request` (LD-68). Không qua Backend, xác thực bằng chữ ký `X-Hub-Signature-256` |
-| GET | `/api/repositories/{id}/source-changes` | Thay đổi mã nguồn đã phát hiện (LD-116): file Java/Python và code entity thay đổi, cho bước cập nhật tài liệu (LD-128) |
-| POST | `/api/repositories/{id}/source-changes/{changeId}/retry` | Chạy lại một source change `FAILED` |
+| GET | `/api/repositories/{id}/source-changes` | Thay đổi mã nguồn đã phát hiện (LD-116): file Java/Python và code entity thay đổi, cùng tài liệu bị ảnh hưởng (LD-122), cho bước cập nhật tài liệu (LD-128) |
+| POST | `/api/repositories/{id}/source-changes/{changeId}/retry` | Chạy lại một source change `FAILED`, hoặc chỉ bước tìm tài liệu khi `documentsStatus` là `FAILED` |
 | POST | `/api/repositories/{id}/drift/analyze` | Phân tích lệch tài liệu thủ công cho một Pull Request (LD-145), body: `{"pullRequestNumber":7}` |
 | GET | `/api/repositories/{id}/drift/reports?pullRequest=7` | Các báo cáo lệch tài liệu của repo, mới nhất trước |
 | GET | `/api/drift/reports/{reportId}` | Một báo cáo: findings, tài liệu bị ảnh hưởng, bằng chứng |
@@ -144,6 +144,43 @@ File không tìm được code entity vẫn có trong danh sách, kèm `skippedR
 
 `startLine`/`endLine` là dòng trong file sau thay đổi; với `REMOVED` là dòng trong file trước thay đổi. Cách đánh dấu một source change đã được cập nhật tài liệu sẽ thống nhất với LD-128.
 
+## Tài liệu bị ảnh hưởng (LD-122)
+
+Ngay sau khi lưu một source change `PENDING`, service hỏi ai-service phần tài liệu đã lưu nào có thể đã cũ:
+
+```
+ai-service GET /documents                        tài liệu của repo (target = owner/name), như LD-145
+ai-service POST /internal/affected-documents     file + code entity của source change, id các tài liệu đó
+  -> lưu vào bảng source_change_documents (migration V8)
+```
+
+Luật so khớp là của LD-148 (`ai-service/app/drift_affected.py`), không viết lại ở Java:
+
+- **LD-123, ánh xạ thay đổi với tài liệu:** một phần (theo file) của tài liệu bị ảnh hưởng nếu nó được sinh ra từ file thay đổi (kể cả file bị xoá, đổi tên, hay file LD-116 bỏ qua không tìm được entity), hoặc nếu nó nhắc tới entity, endpoint hay đường dẫn đã thay đổi. Tên phải khớp nguyên từ; entity `ADDED` chỉ tính cho phần của chính file đó.
+- **LD-124, tài liệu bị ảnh hưởng:** danh sách `affectedDocuments` của source change, mỗi phần tử là một phần của một tài liệu, kèm phiên bản hiện hành lúc kiểm tra và lý do (`documents changed file …`, ``mentions `…` ``).
+- **LD-125, phụ thuộc:** `DIRECT` là phần của chính file thay đổi, `DEPENDENT` là phần mô tả code khác nhưng nhắc tới code đã thay đổi. `DIRECT` đứng trước.
+- **LD-126, bằng chứng:** `evidence` của mỗi phần là các chỗ trong tài liệu nhắc tới code đã thay đổi: `target` (entity, endpoint hoặc đường dẫn), `kind`, `line` (dòng trong phần tài liệu) và `excerpt` (đoạn trích dòng đó), theo thứ tự dòng, tối đa 20 chỗ (bảng `source_change_document_evidence`). Phần `DIRECT` không nhắc tên nào thì `evidence` rỗng; lý do là chính file thay đổi, xem `files` của source change.
+- **Hiển thị:** frontend, màn hình Repository Management → "PRs & commits" → mục "Source changes", liệt kê tài liệu bị ảnh hưởng của từng source change kèm nhãn Direct / Dependent, lý do và bằng chứng theo dòng.
+
+Repo chưa có tài liệu nào thì không gọi ai-service. Chỉ tài liệu của repo được gửi đi, nên tài liệu của repo khác không bao giờ bị đọc. `documentsStatus`: `PENDING` (đang tìm), `FOUND` (xong, danh sách có thể rỗng), `FAILED` (ai-service lỗi, `documentsErrorCode` = `AI_SERVICE_UNAVAILABLE`; gọi retry để chỉ chạy lại bước này), `null` khi source change `FAILED`.
+
+```json
+{"id": "4f1c...", "status": "PENDING", "files": [...],
+ "documentsStatus": "FOUND", "documentsErrorCode": null, "documentsErrorMessage": null,
+ "affectedDocuments": [
+   {"documentId": "9b2e...", "title": "acme/docs", "version": 3,
+    "section": "src/main/java/acme/Invoice.java", "documentsFile": "src/main/java/acme/Invoice.java",
+    "dependency": "DIRECT", "reasons": ["documents changed file src/main/java/acme/Invoice.java"], "evidence": []},
+   {"documentId": "9b2e...", "title": "acme/docs", "version": 3,
+    "section": "src/main/java/acme/Checkout.java", "documentsFile": "src/main/java/acme/Checkout.java",
+    "dependency": "DEPENDENT", "reasons": ["mentions `Invoice.total`"],
+    "evidence": [{"target": "Invoice.total", "kind": "name", "line": 14,
+                  "excerpt": "Checkout charges `Invoice.total()` of the cart."}]}
+ ]}
+```
+
+Bước tiếp theo (LD-128, chưa vào `main`): gọi `POST /documents/{id}/updates` của ai-service cho từng `documentId` trong danh sách.
+
 ## Phát hiện lệch tài liệu (LD-145)
 
 `service/DriftAnalysisService` phân tích **thủ công** một Pull Request (người dùng nhập số PR):
@@ -175,8 +212,7 @@ này**, tài liệu của repo khác bị từ chối kèm cảnh báo), `includ
 
 ## Chưa làm (để sprint sau)
 
-- Tìm tài liệu bị ảnh hưởng bởi source change (LD-122) và cách đánh dấu source change đã cập nhật tài liệu (cùng LD-128)
-- Chạy phân tích lệch tài liệu tự động khi webhook nhận `pull_request` (hiện chạy thủ công)
+- Gọi LD-128 cập nhật từng tài liệu bị ảnh hưởng (LD-122) và đánh dấu source change đã cập nhật tài liệu, khi LD-128 vào `main`- Chạy phân tích lệch tài liệu tự động khi webhook nhận `pull_request` (hiện chạy thủ công)
 - Gửi event Kafka cho TV3 và TV4 khi nhận Pull Request và commit
 - Thông báo cho người dùng khi token hỏng (hiện tại mới đánh dấu trạng thái `INVALID`)
 - Duy trì credential service-to-service trong secret manager phù hợp với môi trường triển khai
