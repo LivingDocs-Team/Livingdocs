@@ -513,9 +513,12 @@ public class DocumentWorkflowService {
             }
             return pending;
         }
+        // LD-402: a newly generated owned document has no accepted version yet
+        // (current_version 0) and its proposal as pending_version 1; it must be submittable.
         int current = document.path("current_version").asInt(0);
-        if (current < 1) throw conflict("The document has no readable version.");
-        return pending > 0 ? pending : current;
+        int version = pending > 0 ? pending : current;
+        if (version < 1) throw conflict("The document has no readable version.");
+        return version;
     }
 
     private int visibleDocumentVersion(DocumentWorkflow workflow, JsonNode document) {

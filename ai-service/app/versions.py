@@ -4,6 +4,12 @@
 
 Documents are saved to a JSON file (DOCUMENTS_FILE, default data/documents.json, written
 atomically) so they survive a restart. Set DOCUMENTS_FILE= (empty) to keep them in memory only.
+
+LD-402 evidence persistence: a version made by an owner edit (after a review asked for changes)
+or by a rollback keeps the evidence of the version it was made from (`evidence_report` for the
+manager, `review_report` + `source_snapshot` for the staff reviewer) and says which one in
+`evidence_from_version`. Before, such versions had no evidence, so a resubmitted or restored
+document could not be reviewed (404). Files saved before the fix are repaired when loaded.
 """
 import json
 import logging
@@ -58,6 +64,46 @@ def assemble(doc: Document, sections: List[FileSection], skipped: List[SkippedFi
     return SEPARATOR.join([overview, *[s.markdown for s in sections]])
 
 
+EVIDENCE_FIELDS = ("evidence_report", "review_report", "source_snapshot")
+
+
+def _has_evidence(v: DocumentVersion) -> bool:
+    return any(getattr(v, f) is not None for f in EVIDENCE_FIELDS)
+
+
+def inherit_evidence(version: DocumentVersion, source: Optional[DocumentVersion]) -> None:
+    """LD-402: give `version` the generation evidence of `source` (deep copies), unless it has
+    its own. The text of an edit may differ, but the code it documents is the same."""
+    if source is None or _has_evidence(version) or not _has_evidence(source):
+        return
+    for f in EVIDENCE_FIELDS:
+        value = getattr(source, f)
+        setattr(version, f, value.model_copy(deep=True) if value is not None else None)
+    version.evidence_from_version = source.evidence_from_version or source.number
+
+
+def _evidence_source(versions: List[DocumentVersion], v: DocumentVersion) -> Optional[DocumentVersion]:
+    """The version an edit / rollback was made from, as recorded in the version history."""
+    if v.origin == VersionOrigin.rollback:
+        n = v.restored_from
+    elif v.origin == VersionOrigin.edit:
+        replaced = [x.number for x in versions if x.superseded_by == v.number]
+        n = replaced[0] if replaced else v.base_version
+    else:
+        return None
+    return versions[n - 1] if n and 1 <= n < v.number else None
+
+
+def repair_evidence(versions: List[DocumentVersion]) -> int:
+    """Fill the evidence of edits / rollbacks saved before LD-402; returns how many were fixed."""
+    fixed = 0
+    for v in versions:                                  # oldest first: a chain is fixed in order
+        if not _has_evidence(v):
+            inherit_evidence(v, _evidence_source(versions, v))
+            fixed += _has_evidence(v)
+    return fixed
+
+
 # ---------- Store ----------
 
 class DocumentStore:
@@ -92,6 +138,10 @@ class DocumentStore:
             self.path.rename(backup)
             log.error("Could not read %s (%s); moved it to %s", self.path, exc, backup.name)
             return
+        repaired = sum(repair_evidence(vs) for vs in versions.values())
+        if repaired:
+            log.info("Restored the evidence of %d edited / rolled back version(s) from %s",
+                     repaired, self.path)
         self._docs, self._versions, self._events, self._plans = docs, versions, events, plans
 
     def _save(self) -> None:
@@ -280,6 +330,7 @@ class DocumentStore:
                 note=note,
                 created_by=owner_user_id,
             )
+            inherit_evidence(version, base)     # LD-402: the resubmission can be reviewed
             self._versions[doc_id].append(version)
             doc.pending_version = number
             doc.versions_total = number
@@ -351,13 +402,9 @@ class DocumentStore:
                 manual=source.manual,
                 note=note,
                 created_by=actor_user_id,
-                evidence_report=(
-                    source.evidence_report.model_copy(deep=True)
-                    if source.evidence_report is not None
-                    else None
-                ),
                 sections_match_content=source.sections_match_content,
             )
+            inherit_evidence(version, source)   # LD-402: all evidence, not only evidence_report
 
             self._versions[doc_id].append(version)
             doc.pending_version = number

@@ -1,9 +1,43 @@
 import pytest
 import re
 from playwright.sync_api import Page, expect
+from fastapi.testclient import TestClient
+from app.main import app
 
 REPOSITORY_ID = "11111111-1111-1111-1111-111111111111"
 WORKSPACE_ID = "ws-42"
+
+client = TestClient(app)
+
+def test_evidence_and_submission_workflow():
+    # 1. Tạo Evidence
+    ev_response = client.post("/api/v1/evidences", json={
+        "task_id": "LD-106",
+        "evidence_type": "test_result",
+        "file_path": "artifacts/e2e_report.json",
+        "description": "E2E Test Output Evidence"
+    })
+    assert ev_response.status_code == 201
+    ev_data = ev_response.json()
+    assert ev_data["id"].startswith("ev-")
+
+    # 2. Tạo Submission ở dạng DRAFT
+    sub_response = client.post("/api/v1/submissions", json={
+        "task_id": "LD-106",
+        "title": "Nộp bài kiểm thử tự động LD-106",
+        "evidence_ids": [ev_data["id"]],
+        "notes": "Đã hoàn thành các test case"
+    })
+    assert sub_response.status_code == 201
+    sub_data = sub_response.json()
+    assert sub_data["status"] == "DRAFT"
+
+    # 3. Gửi yêu cầu Nộp bài (Submit)
+    submit_response = client.post(f"/api/v1/submissions/{sub_data['id']}/submit")
+    assert submit_response.status_code == 200
+    final_data = submit_response.json()
+    assert final_data["status"] == "SUBMITTED"
+    assert final_data["submitted_at"] is not None
 
 def test_frontend_homepage_title(page: Page):
     """LD-373: Kiểm tra tiêu đề giao diện Frontend Dashboard LivingDocs"""
@@ -531,3 +565,7 @@ def test_login_can_open_github_connection_and_view_status(page: Page):
     page.get_by_role("button", name="GitHub Connection").click()
     expect(page.get_by_role("heading", name="GitHub Integration")).to_be_visible()
     expect(page.get_by_role("status").filter(has_text="Connected as @test-user")).to_be_visible()
+
+def test_frontend_homepage_title(page: Page, base_url: str):
+    page.goto(f"{base_url}/")
+    expect(page).to_have_title("LivingDocs - Automated Documentation Generator")

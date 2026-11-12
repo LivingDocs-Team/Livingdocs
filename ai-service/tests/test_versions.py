@@ -454,7 +454,7 @@ def test_review_evidence_uses_requested_version(monkeypatch):
     doc = create_internal_review_document(monkeypatch, snapshot)
 
     # Tạo version 2 bằng chỉnh sửa thủ công.
-    # Version này không được kế thừa evidence/snapshot của version 1.
+    # LD-402: version này kế thừa evidence/snapshot của version 1 (evidence_from_version = 1).
     edit_response = client.put(
         f"/internal/documents/{doc['id']}/content",
         headers={
@@ -481,7 +481,7 @@ def test_review_evidence_uses_requested_version(monkeypatch):
     assert response_v1.status_code == 200, response_v1.text
     assert response_v1.json()["source_snapshot"]["commit_sha"] == "b" * 40
 
-    # Version 2 là bản chỉnh sửa thủ công, không có evidence.
+    # LD-402: version 2 là bản chỉnh sửa thủ công; staff vẫn review được với evidence của version 1.
     response_v2 = client.get(
         f"/internal/documents/{doc['id']}/review-evidence?version=2",
         headers={
@@ -489,43 +489,30 @@ def test_review_evidence_uses_requested_version(monkeypatch):
         },
     )
 
-    assert response_v2.status_code == 404
+    assert response_v2.status_code == 200, response_v2.text
+    assert response_v2.json()["source_snapshot"]["commit_sha"] == "b" * 40
+    assert edit_response.json()["evidence_from_version"] == 1
 
 
 def test_review_evidence_returns_404_when_report_is_missing(monkeypatch):
-    snapshot = {
-        "repository_id": "repo-no-evidence",
-        "repository_full_name": "acme/shop",
-        "branch": "main",
-        "commit_sha": "c" * 40,
-        "fetched_at": "2026-11-09T10:00:00Z",
-    }
+    # LD-402: an edit now keeps the evidence of its base, so "missing" means a version whose
+    # whole history has no review report (a document saved without a job report).
+    monkeypatch.setenv("INTERNAL_API_SECRET", "workflow-internal-secret")
+    store = DocumentStore()
+    out = JobOutput(scope=Scope.file, target="a.py", template_id="default", template_name=None,
+                    output_language="en", sections=[("a.py", "# A\n", "offline", 0.5)])
+    doc = store.create_from_job("no-report-job", out, actor="73", owner_user_id="73")
+    store.edit_owned(doc.id, "73", 1, "# Edited documentation")
+    monkeypatch.setattr("main.documents", store)
 
-    doc = create_internal_review_document(monkeypatch, snapshot)
-
-    # Tạo version chỉnh sửa thủ công không có review_report.
-    edit_response = client.put(
-        f"/internal/documents/{doc['id']}/content",
-        headers={
-            "Authorization": "Bearer workflow-internal-secret",
-            "X-User-Id": "73",
-        },
-        json={
-            "content": "# Edited documentation",
-            "expected_version": 1,
-        },
-    )
-
-    assert edit_response.status_code == 200, edit_response.text
-
-    response = client.get(
-        f"/internal/documents/{doc['id']}/review-evidence?version=2",
-        headers={
-            "Authorization": "Bearer workflow-internal-secret",
-        },
-    )
-
-    assert response.status_code == 404
+    for version in (1, 2):
+        response = client.get(
+            f"/internal/documents/{doc.id}/review-evidence?version={version}",
+            headers={
+                "Authorization": "Bearer workflow-internal-secret",
+            },
+        )
+        assert response.status_code == 404
 
 # ---------- Rollback approved document versions ----------
 

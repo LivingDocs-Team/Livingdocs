@@ -1,4 +1,6 @@
+from enum import Enum
 from typing import List, Optional
+from datetime import datetime
 from pydantic import BaseModel, Field
 
 class FileInput(BaseModel):
@@ -76,3 +78,56 @@ class RepoAnalysisResponse(BaseModel):
     target: str
     files: List[FileAnalysis] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+
+class EvidenceType(str, Enum):
+    LOG = "log"
+    SCREENSHOT = "screenshot"
+    TEST_RESULT = "test_result"
+    DOCUMENT_DIFF = "document_diff"
+
+class SubmissionStatus(str, Enum):
+    DRAFT = "DRAFT"
+    PENDING = "PENDING"
+    SUBMITTED = "SUBMITTED"
+    VERIFIED = "VERIFIED"
+    REJECTED = "REJECTED"
+
+class EvidenceCreate(BaseModel):
+    task_id: str
+    evidence_type: EvidenceType
+    file_path: str
+    description: Optional[str] = None
+    metadata: Optional[dict] = Field(default_factory=dict)
+
+class EvidenceResponse(EvidenceCreate):
+    """LD-402: the only EvidenceResponse (PR #108 declared it twice; the second one replaced the
+    first and dropped created_at and metadata from every response)."""
+    id: str
+    created_at: datetime
+
+class SubmissionCreate(BaseModel):
+    task_id: str
+    title: str
+    evidence_ids: List[str]
+    notes: Optional[str] = None
+
+class SubmissionRecord(BaseModel):
+    """What is stored for a submission (app/submissions.py): evidences by id."""
+    id: str
+    task_id: str
+    title: str
+    notes: Optional[str] = None
+    status: SubmissionStatus
+    evidence_ids: List[str] = Field(default_factory=list)
+    submitted_at: Optional[datetime] = None
+    created_at: datetime
+
+class SubmissionResponse(BaseModel):
+    id: str
+    task_id: str
+    title: str
+    notes: Optional[str] = None
+    status: SubmissionStatus
+    evidences: List[EvidenceResponse]
+    submitted_at: Optional[datetime] = None
+    created_at: datetime

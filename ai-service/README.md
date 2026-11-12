@@ -84,6 +84,15 @@ for the AI) and an ordered list of `sections` taken from `Overview`, `Classes`, 
 - `POST /documents {"job_id": ...}` stores a completed job as **version 1** (accepted). Every later
   change adds a new, immutable version; nothing is edited in place or deleted (LD-195).
 - Saved to `DOCUMENTS_FILE` (default `data/documents.json`, atomic writes; empty = memory only).
+  In Docker Compose the file is on the `ai-templates` volume, so documents and their evidence
+  survive a restart.
+- **Evidence of edits and rollbacks (LD-402)**: a version made by an owner edit (after a review
+  asked for changes) or by a rollback keeps the evidence of the version it was made from
+  (`evidence_report`, `review_report`, `source_snapshot`), and `evidence_from_version` says which
+  one. Before, such versions had none, so `GET /internal/documents/{id}/review-evidence` (staff)
+  and `/evidence` (manager) returned 404 for a resubmitted or restored document. Files saved
+  before the fix are repaired when loaded. Tests: `tests/test_evidence_persistence.py` (also a
+  real two-process restart with `DOCUMENTS_FILE`).
 - Details: `Docs/Linh/` FR6.md.
 
 ### Documentation drift detection (LD-145, LD-151)

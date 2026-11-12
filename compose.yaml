@@ -101,6 +101,11 @@
       context: .
       dockerfile: code-analyzer/Dockerfile
     image: livingdocs-code-analyzer:local
+    environment:
+      # LD-402: evidences and submissions (PR #108) survive restarts (named volume below)
+      SUBMISSIONS_FILE: /app/data/submissions.json
+    volumes:
+      - analyzer-data:/app/data
     ports:
       # Optional local debugging access; service-to-service traffic uses analysis-internal.
       - "127.0.0.1:8000:8000"
@@ -182,6 +187,7 @@ volumes:
   backend-db-data:
   github-db-data:
   ai-templates:
+  analyzer-data:
 
 networks:
   backend-network:

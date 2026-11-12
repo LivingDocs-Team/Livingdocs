@@ -13,6 +13,10 @@ COPY app/ ./app/
 
 # Run as an unprivileged user.
 RUN useradd --system --no-create-home --uid 10001 analyzer
+# LD-402: evidences and submissions are saved here (the analyzer-data volume in compose.yaml);
+# the folder must belong to the unprivileged user or the first save fails.
+RUN mkdir -p /app/data && chown analyzer /app/data
+ENV SUBMISSIONS_FILE=/app/data/submissions.json
 USER analyzer
 
 EXPOSE 8000
