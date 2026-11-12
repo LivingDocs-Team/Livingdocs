@@ -26,6 +26,7 @@ Severity (rules in app/drift_severity.py, LD-157): base `behaviour_changed` (Low
 import re
 from typing import Dict, List, Optional, Sequence, Set
 
+from .drift_compare import code_only, declaration_free
 from .drift_models import DRIFT_KINDS, DocMatch, SemanticSignal
 
 KIND_ORDER = DRIFT_KINDS["semantic"]
@@ -58,17 +59,13 @@ THROWS = re.compile(r"\)\s*throws\s+([\w.,\s]+?)\s*[{;]")
 NUMBER = re.compile(r"(?<![\w.$])-?\d+(?:\.\d+)?(?![\w.])")
 STRING = re.compile(r"\"([^\"\\\n]{2,40})\"|'([^'\\\n]{2,40})'")
 TRIPLE = re.compile(r"(\"\"\"|''')[\s\S]*?\1")
-COMMENT = re.compile(r"(^|\s)(#|//).*$", re.M)
-BLOCK_COMMENT = re.compile(r"/\*[\s\S]*?\*/")
 TRIVIAL_VALUES = {"0", "1", "-1", "0.0", "1.0", "2", "utf-8", "UTF-8"}
 
 
 # ---------- signals from code ----------
 
-def _code_only(text: str) -> str:
-    text = TRIPLE.sub(" ", text or "")
-    text = BLOCK_COMMENT.sub(" ", text)
-    return COMMENT.sub(" ", text)
+def _code_only(text: str, lang: Optional[str] = None) -> str:
+    return code_only(text, lang)          # LD-347: language-aware comments
 
 
 def _docstring_in(text: Optional[str]) -> Optional[str]:
@@ -106,11 +103,12 @@ def values_of(text: str, status_codes: Set[str]) -> Set[str]:
 
 
 def extract_signals(old_code: Optional[str], new_code: Optional[str],
-                    old_doc: Optional[str] = None, new_doc: Optional[str] = None) -> List[SemanticSignal]:
+                    old_doc: Optional[str] = None, new_doc: Optional[str] = None,
+                    lang: Optional[str] = None) -> List[SemanticSignal]:
     """What differs between the old and the new code of one entity (whole source, or only the
     removed / added diff lines)."""
     out: List[SemanticSignal] = []
-    old_c, new_c = _code_only(old_code or ""), _code_only(new_code or "")
+    old_c, new_c = _code_only(old_code or "", lang), _code_only(new_code or "", lang)
     old_status, new_status = status_codes_of(old_c), status_codes_of(new_c)
 
     def add(kind: str, old: Set[str], new: Set[str]) -> None:
@@ -120,7 +118,9 @@ def extract_signals(old_code: Optional[str], new_code: Optional[str],
 
     add("status_codes", old_status, new_status)
     add("exceptions", exceptions_of(old_c) - {"HTTPException"}, exceptions_of(new_c) - {"HTTPException"})
-    add("values", values_of(old_c, old_status), values_of(new_c, new_status))
+    # LD-347: defaults on the declaration are a signature change (LD-153), not a behaviour change
+    add("values", values_of(declaration_free(old_c), old_status),
+        values_of(declaration_free(new_c), new_status))
     if old_doc is None and new_doc is None:      # diff only: docstrings among the changed lines
         old_doc, new_doc = _docstring_in(old_code), _docstring_in(new_code)
     if (old_doc or None) != (new_doc or None):
@@ -129,16 +129,18 @@ def extract_signals(old_code: Optional[str], new_code: Optional[str],
     return out
 
 
-def without_renames(signals: List[SemanticSignal], renames: Sequence[tuple]) -> List[SemanticSignal]:
-    """Drop value changes that only follow a renamed parameter or entity
-    ("quantity must be positive" -> "qty must be positive")."""
-    if not renames:
+def without_renames(signals: List[SemanticSignal], renames: Sequence[tuple],
+                    names: Sequence[str] = ()) -> List[SemanticSignal]:
+    """Drop value changes that only follow the signature change: a renamed parameter or entity
+    ("quantity must be positive" -> "qty must be positive"), or the name of a parameter that was
+    added or removed ({"timeout": timeout} -> {}, LD-347)."""
+    if not renames and not names:
         return signals
     out = []
     for s in signals:
         if s.kind == "values":
             added = set(s.added)
-            explained = set()
+            explained = {v for v in [*s.removed, *s.added] if v in set(names)}
             for v in s.removed:
                 for old, new in renames:
                     w = re.sub(r"(?<![\w$])" + re.escape(old) + r"(?![\w$])", new, v)
@@ -173,7 +175,7 @@ def stale_details(doc, near: List[DocMatch], signals: Sequence[SemanticSignal],
     lines = doc.lines
     rows: Set[int] = set()
     for m in near:
-        rows.update(range(m.line - 1, min(len(lines), m.line - 1 + window)))
+        rows.update(doc.section(m.line - 1, window))         # LD-347: this entity's section only
     rows_sorted = sorted(rows)
     out: Dict[tuple, DocMatch] = {}
 
@@ -216,6 +218,34 @@ def stale_details(doc, near: List[DocMatch], signals: Sequence[SemanticSignal],
     return sorted(out.values(), key=lambda m: m.line)
 
 
+def documented_as_new(doc, near: List[DocMatch], signals: Sequence[SemanticSignal],
+                      window: int) -> bool:
+    """LD-347: the entity's section already states the new behaviour (a new status code,
+    exception, value or docstring sentence)."""
+    lines = doc.lines
+    rows = sorted({i for m in near for i in doc.section(m.line - 1, window)})
+
+    def stated(pattern: "re.Pattern", normalize: bool = False) -> bool:
+        return any(pattern.search(re.sub(r"\s+", " ", lines[i]) if normalize else lines[i]) for i in rows)
+
+    for s in signals:
+        for a in s.added:
+            if s.kind == "exceptions" and stated(re.compile(r"(?<![\w$])" + re.escape(a) + r"(?![\w$])")):
+                return True
+            if s.kind == "status_codes" and stated(re.compile(r"(?<![\w.])" + re.escape(a) + r"(?![\w.])")):
+                return True
+            if s.kind == "values" and not re.fullmatch(r"-?\d", a) and \
+                    stated(re.compile(r"(?<![\w.$])" + re.escape(a) + r"(?![\w$]|\.\d)")):
+                return True
+            if s.kind == "docstring":
+                old_text = re.sub(r"\s+", " ", " ".join(s.removed)).lower()
+                for sentence in _sentences(a):
+                    if sentence.lower() not in old_text and \
+                            stated(re.compile(re.escape(sentence), re.I), normalize=True):
+                        return True
+    return False
+
+
 def classify(hit):
     """LD-154: a hit on an entity whose behaviour changed (EntityChangeType.behavior_changed)."""
     from .drift_models import DriftType
@@ -225,6 +255,8 @@ def classify(hit):
     where = "this section" if hit.documents_file else "the documentation"
     kind = semantic_kind(c.signals)
     details = stale_details(hit.doc, hit.matches, c.signals, PARAM_WINDOW)
+    if not details and documented_as_new(hit.doc, hit.matches, c.signals, PARAM_WINDOW):
+        return None      # LD-347: the documentation already describes the new behaviour
     adjust = []
     contract = {s.kind for s in c.signals} & {"status_codes", "exceptions", "docstring"}
     if contract or "docstring changed" in c.details:

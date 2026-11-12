@@ -65,6 +65,8 @@ class DriftAnalyzeRequest(BaseModel):
     """Markdown files of the repository (README, docs/...) to check besides saved documents."""
     document_ids: Optional[List[str]] = None
     """Saved documents to check; None = every saved document."""
+    ai_review: bool = True
+    """LD-346: let the AI review every finding (offline explanation when no API key is set)."""
 
     @field_validator("files")
     @classmethod
@@ -294,6 +296,72 @@ class SeverityAssessment(BaseModel):
     summary: str = ""                  # one line: "High: breaking change (medium), ... (+1)."
 
 
+class AIVerdict(str, Enum):
+    confirmed = "confirmed"            # the documentation is outdated, as the rules found
+    disputed = "disputed"              # the AI thinks the documentation is still correct
+    uncertain = "uncertain"            # the evidence does not settle it
+    not_reviewed = "not_reviewed"      # offline mode, or the AI gave no valid answer
+
+
+class AIDriftReview(BaseModel):
+    """LD-346: AI second opinion on one finding. It never changes the rule-based type or severity;
+    reviewers see it and decide (resolution below)."""
+    mode: str = "offline"              # ai | offline
+    verdict: AIVerdict = AIVerdict.not_reviewed
+    explanation: str = ""              # plain-language explanation of the drift
+    evidence: List[str] = Field(default_factory=list)   # DriftEvidence ids the explanation cites
+    suggested_update: Optional[str] = None               # replacement text for the documentation
+    model: Optional[str] = None
+
+
+class ResolutionStatus(str, Enum):
+    open = "open"                      # not handled yet
+    acknowledged = "acknowledged"      # someone will update the documentation
+    resolved = "resolved"              # the documentation was updated
+    dismissed = "dismissed"            # not a real drift (a reason is required)
+
+
+class ResolutionEvent(BaseModel):
+    status: ResolutionStatus
+    actor: Optional[str] = None
+    note: Optional[str] = None
+    at: datetime = Field(default_factory=now)
+
+
+class FindingResolution(BaseModel):
+    """LD-346: review and resolution of one finding, with its history."""
+    status: ResolutionStatus = ResolutionStatus.open
+    actor: Optional[str] = None
+    note: Optional[str] = None
+    updated_at: Optional[datetime] = None
+    history: List[ResolutionEvent] = Field(default_factory=list)
+
+
+class ResolutionUpdate(BaseModel):
+    status: ResolutionStatus
+    actor: Optional[str] = Field(default=None, max_length=200)
+    note: Optional[str] = Field(default=None, max_length=2000)
+
+
+class ReviewStatus(str, Enum):
+    not_required = "not_required"      # no drift
+    pending = "pending"                # every finding still open
+    in_progress = "in_progress"
+    completed = "completed"            # no finding open
+
+
+class ReviewProgress(BaseModel):
+    status: ReviewStatus = ReviewStatus.not_required
+    open: int = 0
+    acknowledged: int = 0
+    resolved: int = 0
+    dismissed: int = 0
+    ai_mode: str = "offline"
+    ai_confirmed: int = 0
+    ai_disputed: int = 0
+    ai_uncertain: int = 0
+
+
 class DriftFinding(BaseModel):
     id: str                            # F1, F2, ...
     type: DriftType
@@ -315,6 +383,8 @@ class DriftFinding(BaseModel):
     factors: Dict[str, float] = Field(default_factory=dict)
     rules: List[str] = Field(default_factory=list)   # LD-151: classification rules that applied
     severity_assessment: Optional[SeverityAssessment] = None   # LD-156
+    ai_review: Optional[AIDriftReview] = None                  # LD-346
+    resolution: FindingResolution = Field(default_factory=FindingResolution)   # LD-346
 
 class DriftStatus(str, Enum):
     no_drift = "no_drift"
@@ -347,6 +417,7 @@ class DriftReport(BaseModel):
     analysis: PullRequestAnalysis
     warnings: List[str] = Field(default_factory=list)
     method: str = ""
+    review: ReviewProgress = Field(default_factory=ReviewProgress)   # LD-346
     created_at: datetime = Field(default_factory=now)
 
 
@@ -359,6 +430,7 @@ class DriftReportSummary(BaseModel):
     pull_request_title: str = ""
     head_sha: Optional[str] = None
     summary: DriftSummary
+    review: ReviewProgress = Field(default_factory=ReviewProgress)   # LD-346
     created_at: datetime
 
 

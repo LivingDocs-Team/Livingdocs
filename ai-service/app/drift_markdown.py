@@ -45,6 +45,29 @@ def _why(f: DriftFinding) -> List[str]:
     return out
 
 
+VERDICT = {"confirmed": "✅ confirmed", "disputed": "⚠️ disputed", "uncertain": "❔ uncertain",
+           "not_reviewed": "not reviewed (offline)"}
+
+
+def _ai(f: DriftFinding) -> List[str]:
+    """LD-346: the AI's verdict, explanation and suggested documentation update."""
+    r = f.ai_review
+    if r is None:
+        return []
+    out = [f"- **AI review:** {VERDICT.get(r.verdict.value, r.verdict.value)} — {r.explanation}"]
+    if r.suggested_update:
+        out += ["- **Suggested update:**", "", "  ```markdown",
+                *[f"  {x}" for x in r.suggested_update.splitlines()], "  ```"]
+    return out
+
+
+def _resolution(f: DriftFinding) -> str:
+    r = f.resolution
+    who = f" by {r.actor}" if r.actor else ""
+    note = f" — {r.note}" if r.note else ""
+    return f"{r.status.value}{who}{note}"
+
+
 def _evidence(f: DriftFinding) -> List[str]:
     out = ["<details><summary>Evidence</summary>", ""]
     for e in f.evidence:
@@ -77,6 +100,12 @@ def render(report: DriftReport, min_severity: Optional[Severity] = None) -> str:
     if top is None:
         out += ["✅ **No documentation drift.** The checked documentation matches the code.", ""]
         return "\n".join(out)
+    rv = report.review
+    review_line = (f"**Review:** {rv.status.value.replace('_', ' ')} — {rv.open} open, "
+                   f"{rv.acknowledged} acknowledged, {rv.resolved} resolved, {rv.dismissed} dismissed"
+                   + (f" · AI: {rv.ai_confirmed} confirmed, {rv.ai_disputed} disputed, "
+                      f"{rv.ai_uncertain} uncertain" if rv.ai_mode == "ai" else " · AI: offline"))
+    out += [review_line, ""]
     out += [f"**Overall severity:** {badge(top)} (score {report.summary.severity_score}) — "
             f"{SEVERITY_LEVELS[top.value]['action']}", "",
             "| Severity | Findings | Meaning |", "|---|---:|---|"]
@@ -106,6 +135,8 @@ def render(report: DriftReport, min_severity: Optional[Severity] = None) -> str:
                     f"- **Where:** {_where(f)}",
                     *_why(f),
                     f"- **Suggestion:** {f.suggestion}",
-                    f"- **Confidence:** {f.confidence:.2f} ({f.confidence_level})", "",
+                    f"- **Confidence:** {f.confidence:.2f} ({f.confidence_level})",
+                    *_ai(f),
+                    f"- **Resolution:** {_resolution(f)}", "",
                     *_evidence(f), ""]
     return "\n".join(out).rstrip() + "\n"
