@@ -79,7 +79,7 @@ class GitHubIntegrationFlowTest {
         assertThat(rawToken).isNotEqualTo("ghu_token_1");
 
         // Liệt kê repo có thể thêm
-        when(gitHubClient.listAccessibleRepositories("ghu_token_1")).thenReturn(List.of(REPO_A, REPO_B));
+        when(gitHubClient.listUserRepositories("ghu_token_1")).thenReturn(List.of(REPO_A, REPO_B));
         mvc.perform(get("/api/github/repos/available").header("X-User-Id", user))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(2));
@@ -169,7 +169,7 @@ class GitHubIntegrationFlowTest {
     void revokedTokenOnGitHub_marksConnectionInvalid() throws Exception {
         String user = "user-invalid";
         connect(user, "code-2");
-        when(gitHubClient.listAccessibleRepositories(anyString()))
+        when(gitHubClient.listUserRepositories(anyString()))
                 .thenThrow(new GitHubApiException("401 Bad credentials", true));
 
         mvc.perform(get("/api/github/repos/available").header("X-User-Id", user))

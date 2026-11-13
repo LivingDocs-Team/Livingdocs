@@ -243,7 +243,7 @@ public class RepositoryManagementService {
 
     private List<GitHubRepo> fetchAccessibleRepos(GitHubConnection connection) {
         try {
-            return gitHubClient.listAccessibleRepositories(connection.getAccessToken());
+            return gitHubClient.listUserRepositories(connection.getAccessToken());
         } catch (GitHubApiException e) {
             if (e.isUnauthorized()) {
                 connectionService.markInvalid(connection);

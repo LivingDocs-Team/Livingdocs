@@ -94,31 +94,31 @@ public class GitHubClient {
 
     // ------------------------------------------------------------------ Repository list (Epic 3)
 
-    /**
-     * Liệt kê các repo người dùng truy cập được THÔNG QUA GitHub App
-     * (tức là các repo đã chọn khi cài app).
-     */
-    public List<GitHubRepo> listAccessibleRepositories(String accessToken) {
+    /** Liệt kê các repository mà OAuth user access token có quyền xem. */
+    public List<GitHubRepo> listUserRepositories(String accessToken) {
         List<GitHubRepo> result = new ArrayList<>();
-        for (Installation installation : listInstallations(accessToken)) {
-            for (int page = 1; page <= MAX_PAGES; page++) {
-                final int p = page;
-                InstallationRepos repos = call(() -> apiClient.get()
-                        .uri("/user/installations/{id}/repositories?per_page={pp}&page={p}",
-                                installation.id(), PER_PAGE, p)
-                        .headers(auth(accessToken))
-                        .retrieve()
-                        .body(InstallationRepos.class));
-                if (repos == null || repos.repositories() == null || repos.repositories().isEmpty()) {
-                    break;
-                }
-                result.addAll(repos.repositories());
-                if (repos.repositories().size() < PER_PAGE) {
-                    break;
-                }
+        for (int page = 1; page <= MAX_PAGES; page++) {
+            final int currentPage = page;
+            List<GitHubRepo> repositories = call(() -> apiClient.get()
+                    .uri("/user/repos?per_page={pp}&page={p}", PER_PAGE, currentPage)
+                    .headers(auth(accessToken))
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<List<GitHubRepo>>() {}));
+            if (repositories == null || repositories.isEmpty()) {
+                break;
+            }
+            result.addAll(repositories);
+            if (repositories.size() < PER_PAGE) {
+                break;
             }
         }
         return result;
+    }
+
+    /** @deprecated use {@link #listUserRepositories(String)}. */
+    @Deprecated
+    public List<GitHubRepo> listAccessibleRepositories(String accessToken) {
+        return listUserRepositories(accessToken);
     }
 
     public GitHubRepo getRepository(String accessToken, String fullName) {
@@ -287,18 +287,6 @@ public class GitHubClient {
 
     // ------------------------------------------------------------------ helpers
 
-    private List<Installation> listInstallations(String accessToken) {
-        Installations installations = call(() -> apiClient.get()
-                .uri("/user/installations?per_page={pp}", PER_PAGE)
-                .headers(auth(accessToken))
-                .retrieve()
-                .body(Installations.class));
-        if (installations == null || installations.installations() == null) {
-            return List.of();
-        }
-        return installations.installations();
-    }
-
     private GitHubTokenResponse postToken(MultiValueMap<String, String> form) {
         GitHubTokenResponse response = call(() -> oauthClient.post()
                 .uri("/login/oauth/access_token")
@@ -340,18 +328,6 @@ public class GitHubClient {
         } catch (RestClientException e) {
             throw new GitHubApiException("Unable to contact GitHub API.", e);
         }
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public record Installation(Long id) {
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public record Installations(@JsonProperty("total_count") Integer totalCount, List<Installation> installations) {
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public record InstallationRepos(@JsonProperty("total_count") Integer totalCount, List<GitHubRepo> repositories) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
