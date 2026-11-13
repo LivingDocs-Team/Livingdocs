@@ -67,7 +67,8 @@ class FlywayMigrationLineageSelectorTest {
                 .contains("V5__documentation_code_relationships_and_pull_requests.sql");
         assertThat(tableNames(dataSource)).contains("documentation_artifacts", "code_entities",
                 "documentation_code_relationships", "github_commits", "github_pull_requests",
-                "document_workflows", "document_workflow_audit");
+                "document_workflows", "document_workflow_audit", "source_changes",
+                "source_change_files", "source_change_entities");
     }
 
     @Test
@@ -88,8 +89,9 @@ class FlywayMigrationLineageSelectorTest {
 
         assertThat(appliedChecksum(compatible, "5")).isEqualTo(originalChecksum);
         assertThat(compatible.info().applied()).extracting(migration -> migration.getVersion().getVersion())
-                .contains("6");
-        assertThat(tableNames(dataSource)).contains("documentation_code_relationships", "github_pull_requests");
+                .contains("6", "7");
+        assertThat(tableNames(dataSource)).contains("documentation_code_relationships", "github_pull_requests",
+                "source_changes", "source_change_files", "source_change_entities");
     }
 
     @Test
@@ -110,8 +112,46 @@ class FlywayMigrationLineageSelectorTest {
 
         assertThat(appliedChecksum(compatible, "5")).isEqualTo(originalChecksum);
         assertThat(compatible.info().applied()).extracting(migration -> migration.getVersion().getVersion())
-                .contains("6");
-        assertThat(tableNames(dataSource)).contains("documentation_code_relationships", "github_pull_requests");
+                .contains("6", "7");
+        assertThat(tableNames(dataSource)).contains("documentation_code_relationships", "github_pull_requests",
+                "source_changes", "source_change_files", "source_change_entities");
+    }
+
+    @Test
+    void preservesDocumentationV5AndSourceChangesV6HistoryAndAddsPullRequestsAtV7() throws Exception {
+        assertThatExistingV6SourceChangesHistoryIsPreserved(
+                "classpath:db/migration-current-documents-v5-source-changes-v6",
+                FlywayMigrationLineageSelector.Lineage.CURRENT_DOCUMENTATION_V5_SOURCE_CHANGES_V6,
+                "V7__pull_requests_and_commits.sql");
+    }
+
+    @Test
+    void preservesPullRequestsV5AndSourceChangesV6HistoryAndAddsDocumentationAtV7() throws Exception {
+        assertThatExistingV6SourceChangesHistoryIsPreserved(
+                "classpath:db/migration-current-pull-requests-v5-source-changes-v6",
+                FlywayMigrationLineageSelector.Lineage.CURRENT_PULL_REQUESTS_V5_SOURCE_CHANGES_V6,
+                "V7__documentation_code_relationships.sql");
+    }
+
+    private void assertThatExistingV6SourceChangesHistoryIsPreserved(String originalLocation,
+            FlywayMigrationLineageSelector.Lineage expectedLineage, String expectedV7Script) throws Exception {
+        DataSource dataSource = dataSource();
+        Flyway original = Flyway.configure().dataSource(dataSource)
+                .locations(originalLocation).target("6").load();
+        original.migrate();
+        int originalChecksum = appliedChecksum(original, "6");
+
+        assertThat(selector.select(dataSource)).isEqualTo(expectedLineage);
+        Flyway compatible = Flyway.configure().dataSource(dataSource)
+                .locations(selector.select(dataSource).location()).load();
+        compatible.migrate();
+        compatible.validate();
+
+        assertThat(appliedChecksum(compatible, "6")).isEqualTo(originalChecksum);
+        assertThat(compatible.info().applied()).extracting(migration -> migration.getScript())
+                .contains(expectedV7Script);
+        assertThat(tableNames(dataSource)).contains("source_changes", "source_change_files",
+                "source_change_entities", "documentation_code_relationships", "github_pull_requests");
     }
 
     @Test
@@ -133,7 +173,8 @@ class FlywayMigrationLineageSelectorTest {
 
         assertThat(appliedChecksum(compatible, "2")).isEqualTo(legacyChecksum);
         assertThat(relationshipCount(dataSource)).isEqualTo(1);
-        assertThat(tableNames(dataSource)).contains("github_commits", "github_pull_requests");
+        assertThat(tableNames(dataSource)).contains("github_commits", "github_pull_requests", "source_changes",
+                "source_change_files", "source_change_entities");
     }
 
     @Test
@@ -209,6 +250,23 @@ class FlywayMigrationLineageSelectorTest {
                 .isEqualTo(resourceBytes("db/migration/V5__documentation_code_relationships.sql"));
         assertThat(resourceBytes("db/migration-current-pull-requests-v5/V5__pull_requests_and_commits.sql"))
                 .isEqualTo(resourceBytes("db/migration-legacy/V5__pull_requests_and_commits.sql"));
+        for (String resource : new String[] {
+                "db/migration-legacy/V6__source_changes.sql",
+                "db/migration-current/V6__source_changes.sql",
+                "db/migration-current-documents-v5/V7__source_changes.sql",
+                "db/migration-current-pull-requests-v5/V7__source_changes.sql",
+                "db/migration-current-documents-v5-source-changes-v6/V6__source_changes.sql",
+                "db/migration-current-pull-requests-v5-source-changes-v6/V6__source_changes.sql"}) {
+            assertThat(resourceBytes(resource))
+                    .as("preserve the source changes V6 migration byte-for-byte at %s", resource)
+                    .isEqualTo(resourceBytes("db/migration-current/V6__source_changes.sql"));
+        }
+        assertThat(resourceBytes(
+                "db/migration-current-documents-v5-source-changes-v6/V7__pull_requests_and_commits.sql"))
+                .isEqualTo(resourceBytes("db/migration-current-documents-v5/V6__pull_requests_and_commits.sql"));
+        assertThat(resourceBytes(
+                "db/migration-current-pull-requests-v5-source-changes-v6/V7__documentation_code_relationships.sql"))
+                .isEqualTo(resourceBytes("db/migration-current-pull-requests-v5/V6__documentation_code_relationships.sql"));
     }
 
     private DataSource dataSource() {
