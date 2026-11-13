@@ -15,6 +15,7 @@ import DocumentationDrift from './DocumentationDrift';
 function App() {
   const [page, setPage] = useState('login');
   const [userId, setUserId] = useState(null);
+  const [userRole, setUserRole] = useState('');
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -43,6 +44,7 @@ function App() {
         sessionStorage.removeItem('livingdocs.userId');
         if (!cancelled) {
           setUserId(null);
+          setUserRole('');
           setPage('login');
         }
         return;
@@ -56,12 +58,14 @@ function App() {
 
       if (!cancelled) {
         setUserId(String(user.id));
+        setUserRole(typeof user.role === 'string' ? user.role : '');
         sessionStorage.setItem('livingdocs.userId', String(user.id));
         setPage('github');
       }
     } catch {
       if (!cancelled) {
         setUserId(null);
+        setUserRole('');
         setPage('login');
       }
     } finally {
@@ -81,6 +85,7 @@ function App() {
     const handleSessionExpired = () => {
       sessionStorage.removeItem('livingdocs.userId');
       setUserId(null);
+      setUserRole('');
       setPage('login');
       setLoginError('Your LivingDocs session has expired. Please sign in again.');
     };
@@ -136,6 +141,7 @@ function App() {
 
       sessionStorage.setItem('livingdocs.userId', String(result.id));
       setUserId(String(result.id));
+      setUserRole(result.role);
       setLoginSuccess('Signed in successfully as ' + result.email + '.');
     } catch {
       setLoginError('Could not connect to the backend. Check the backend URL and try again.');
@@ -160,6 +166,7 @@ function App() {
       }
       sessionStorage.removeItem('livingdocs.userId');
       setUserId(null);
+      setUserRole('');
       setPage('login');
     } catch {
       setLogoutError('Could not connect to the backend to end the session.');
@@ -232,7 +239,7 @@ function App() {
       case 'documentation':
         return (
           <>
-            <DocumentationManagement userId={userId} />
+            <DocumentationManagement userId={userId} userRole={userRole} />
             <p className="switch-page">
               <button type="button" onClick={() => setPage('login')}>
                 Back to login
@@ -258,8 +265,8 @@ function App() {
           <>
             <DocumentationDrift userId={userId} />
             <p className="switch-page">
-              <button type="button" onClick={() => setPage('documentation')}>
-                Back to Documentation Management
+              <button type="button" onClick={() => setPage('login')}>
+                Back to Login
               </button>
             </p>
           </>
