@@ -22,6 +22,10 @@ public class FlywayMigrationLineageSelector {
     public static final String LEGACY_LOCATION = "classpath:db/migration-legacy";
     public static final String CURRENT_DOCUMENTATION_V5_LOCATION = "classpath:db/migration-current-documents-v5";
     public static final String CURRENT_PULL_REQUESTS_V5_LOCATION = "classpath:db/migration-current-pull-requests-v5";
+    public static final String CURRENT_DOCUMENTATION_V5_SOURCE_CHANGES_V6_LOCATION =
+            "classpath:db/migration-current-documents-v5-source-changes-v6";
+    public static final String CURRENT_PULL_REQUESTS_V5_SOURCE_CHANGES_V6_LOCATION =
+            "classpath:db/migration-current-pull-requests-v5-source-changes-v6";
 
     static final String LEGACY_V2_SCRIPT = "V2__documentation_code_relationships.sql";
     static final int LEGACY_V2_CHECKSUM = -1_628_419_878;
@@ -30,6 +34,9 @@ public class FlywayMigrationLineageSelector {
     private static final String DOCUMENTATION_V5_SCRIPT = "V5__documentation_code_relationships.sql";
     private static final String PULL_REQUESTS_V5_SCRIPT = "V5__pull_requests_and_commits.sql";
     private static final String COMBINED_V5_SCRIPT = "V5__documentation_code_relationships_and_pull_requests.sql";
+    private static final String SOURCE_CHANGES_V6_SCRIPT = "V6__source_changes.sql";
+    private static final String PULL_REQUESTS_V6_SCRIPT = "V6__pull_requests_and_commits.sql";
+    private static final String DOCUMENTATION_V6_SCRIPT = "V6__documentation_code_relationships.sql";
     private static final String V1_SCRIPT = "V1__init_github_integration.sql";
     private static final Set<String> REQUIRED_LEGACY_RELATIONSHIP_TABLES = Set.of(
             "documentation_artifacts", "code_entities", "documentation_code_relationships");
@@ -87,6 +94,12 @@ public class FlywayMigrationLineageSelector {
                     throw new IllegalStateException("Legacy V2 history records an unsupported V5 migration; "
                             + "refusing to choose a migration lineage.");
                 }
+                HistoryEntry v6 = history.stream().filter(entry -> "6".equals(entry.version()))
+                        .findFirst().orElse(null);
+                if (v6 != null && !SOURCE_CHANGES_V6_SCRIPT.equals(v6.script())) {
+                    throw new IllegalStateException("Legacy V2 history records an unsupported V6 migration; "
+                            + "refusing to choose a migration lineage.");
+                }
                 return Lineage.LEGACY_RELATIONSHIPS_V2;
             }
 
@@ -94,13 +107,33 @@ public class FlywayMigrationLineageSelector {
                     && Integer.valueOf(CURRENT_V2_CHECKSUM).equals(v2.checksum())) {
                 HistoryEntry v5 = history.stream().filter(entry -> "5".equals(entry.version()))
                         .findFirst().orElse(null);
+                HistoryEntry v6 = history.stream().filter(entry -> "6".equals(entry.version()))
+                        .findFirst().orElse(null);
                 if (v5 == null || COMBINED_V5_SCRIPT.equals(v5.script())) {
+                    if (v6 != null && !SOURCE_CHANGES_V6_SCRIPT.equals(v6.script())) {
+                        throw new IllegalStateException("Current V2 history records an unsupported V6 migration; "
+                                + "refusing to choose a migration lineage.");
+                    }
                     return Lineage.CURRENT;
                 }
                 if (DOCUMENTATION_V5_SCRIPT.equals(v5.script())) {
+                    if (SOURCE_CHANGES_V6_SCRIPT.equals(v6 == null ? null : v6.script())) {
+                        return Lineage.CURRENT_DOCUMENTATION_V5_SOURCE_CHANGES_V6;
+                    }
+                    if (v6 != null && !PULL_REQUESTS_V6_SCRIPT.equals(v6.script())) {
+                        throw new IllegalStateException("Current V2 history records an unsupported V6 migration; "
+                                + "refusing to choose a migration lineage.");
+                    }
                     return Lineage.CURRENT_DOCUMENTATION_V5;
                 }
                 if (PULL_REQUESTS_V5_SCRIPT.equals(v5.script())) {
+                    if (SOURCE_CHANGES_V6_SCRIPT.equals(v6 == null ? null : v6.script())) {
+                        return Lineage.CURRENT_PULL_REQUESTS_V5_SOURCE_CHANGES_V6;
+                    }
+                    if (v6 != null && !DOCUMENTATION_V6_SCRIPT.equals(v6.script())) {
+                        throw new IllegalStateException("Current V2 history records an unsupported V6 migration; "
+                                + "refusing to choose a migration lineage.");
+                    }
                     return Lineage.CURRENT_PULL_REQUESTS_V5;
                 }
                 throw new IllegalStateException("Current V2 history records an unsupported V5 migration; "
@@ -192,7 +225,9 @@ public class FlywayMigrationLineageSelector {
         CURRENT(CURRENT_LOCATION),
         LEGACY_RELATIONSHIPS_V2(LEGACY_LOCATION),
         CURRENT_DOCUMENTATION_V5(CURRENT_DOCUMENTATION_V5_LOCATION),
-        CURRENT_PULL_REQUESTS_V5(CURRENT_PULL_REQUESTS_V5_LOCATION);
+        CURRENT_PULL_REQUESTS_V5(CURRENT_PULL_REQUESTS_V5_LOCATION),
+        CURRENT_DOCUMENTATION_V5_SOURCE_CHANGES_V6(CURRENT_DOCUMENTATION_V5_SOURCE_CHANGES_V6_LOCATION),
+        CURRENT_PULL_REQUESTS_V5_SOURCE_CHANGES_V6(CURRENT_PULL_REQUESTS_V5_SOURCE_CHANGES_V6_LOCATION);
 
         private final String location;
 
