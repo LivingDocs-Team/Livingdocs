@@ -1,5 +1,6 @@
 """Shared browser-test setup for the local Vite frontend."""
 
+import os
 import socket
 import shutil
 import subprocess
@@ -32,9 +33,18 @@ def start_frontend_for_browser_tests(request):
         return
 
     if _port_is_open():
+        if os.environ.get("FRONTEND_E2E_REQUIRED") == "true":
+            try:
+                with urllib.request.urlopen(FRONTEND_URL, timeout=5) as response:
+                    if response.status != 200:
+                        pytest.fail(f"Prestarted frontend returned HTTP {response.status}.")
+            except (urllib.error.URLError, TimeoutError) as error:
+                pytest.fail(f"Port 3000 is occupied but the prestarted frontend is unavailable: {error}")
+            yield
+            return
         pytest.fail(
             "Port 3000 is already in use. Stop the existing frontend server and "
-            "rerun pytest so this session can start a fresh Vite server."
+            "rerun pytest, or set FRONTEND_E2E_REQUIRED=true when reusing the CI frontend."
         )
 
     log_file = tempfile.NamedTemporaryFile(prefix="livingdocs-vite-", suffix=".log", delete=False)
