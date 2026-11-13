@@ -246,8 +246,8 @@ function App() {
           <>
             <DocumentationSearch userId={userId} />
             <p className="switch-page">
-              <button type="button" onClick={() => setPage('documentation')}>
-                Back to Documentation Management
+              <button type="button" onClick={() => setPage('login')}>
+                Back to Login
               </button>
             </p>
           </>

@@ -86,7 +86,7 @@ class GitHubErrorHandlingTest {
                 .andExpect(jsonPath("$.code").value("GITHUB_API_ERROR"));
 
         assertThat(statusOf(user)).isEqualTo(ConnectionStatus.ACTIVE);
-        verify(gitHubClient, never()).listAccessibleRepositories(anyString());
+        verify(gitHubClient, never()).listUserRepositories(anyString());
     }
 
     @Test
@@ -179,7 +179,7 @@ class GitHubErrorHandlingTest {
         mvc.perform(delete("/api/github/connection").header(USER_HEADER, user))
                 .andExpect(status().isNoContent());
         assertThat(statusOf(user)).isEqualTo(ConnectionStatus.REVOKED);
-        verify(gitHubClient, never()).listAccessibleRepositories(anyString());
+        verify(gitHubClient, never()).listUserRepositories(anyString());
         verify(gitHubClient, never()).revokeGrant(anyString());
     }
 
@@ -189,7 +189,7 @@ class GitHubErrorHandlingTest {
     void addRepositories_withOneNotAllowedId_savesNothing() throws Exception {
         String user = "err-add-partial";
         saveConnection(user, "ghu_add", "ghr_add", Instant.now().plus(Duration.ofHours(8)));
-        when(gitHubClient.listAccessibleRepositories("ghu_add")).thenReturn(List.of(SHOP));
+        when(gitHubClient.listUserRepositories("ghu_add")).thenReturn(List.of(SHOP));
 
         mvc.perform(post("/api/workspaces/ws-" + user + "/repositories").header(USER_HEADER, user)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -274,7 +274,7 @@ class GitHubErrorHandlingTest {
 
     /** Thêm repo acme/shop vào workspace riêng của user; trả về id repo. */
     private String addShop(String user, String accessToken) throws Exception {
-        when(gitHubClient.listAccessibleRepositories(accessToken)).thenReturn(List.of(SHOP));
+        when(gitHubClient.listUserRepositories(accessToken)).thenReturn(List.of(SHOP));
         String body = mvc.perform(post("/api/workspaces/ws-" + user + "/repositories").header(USER_HEADER, user)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"githubRepoIds\":[" + SHOP.id() + "]}"))
