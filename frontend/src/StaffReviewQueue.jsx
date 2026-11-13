@@ -96,12 +96,17 @@ export default function StaffReviewQueue({ userId }) {
         if (cancelled) return;
         if (!Array.isArray(result?.content)) throw new Error('The Staff queue response did not include a workflow list.');
         const content = result.content;
+        const totalPages = result?.totalPages ?? (content.length ? 1 : 0);
+        if (pageIndex > 0 && pageIndex >= totalPages) {
+          setPageIndex(Math.max(0, totalPages - 1));
+          return;
+        }
         setQueue({
           content,
           page: result?.page ?? 0,
           size: result?.size ?? 20,
           totalElements: result?.totalElements ?? content.length,
-          totalPages: result?.totalPages ?? (content.length ? 1 : 0),
+          totalPages,
           first: result?.first ?? true,
           last: result?.last ?? true,
         });

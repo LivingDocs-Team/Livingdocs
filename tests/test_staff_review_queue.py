@@ -2,6 +2,7 @@
 
 import json
 import os
+from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import Page, expect
 
@@ -13,11 +14,11 @@ DOCUMENT_ID = "22222222-2222-4222-8222-222222222222"
 WORKFLOW_ID = "33333333-3333-4333-8333-333333333333"
 
 
-def workflow(status="PENDING_STAFF_REVIEW", reviewer=None):
+def workflow(status="PENDING_STAFF_REVIEW", reviewer=None, workflow_id=WORKFLOW_ID, title="Shop API Guide"):
     return {
-        "id": WORKFLOW_ID,
+        "id": workflow_id,
         "documentId": DOCUMENT_ID,
-        "documentTitle": "Shop API Guide",
+        "documentTitle": title,
         "ownerUserId": "7",
         "status": status,
         "submittedDocumentVersion": 2,
@@ -35,7 +36,7 @@ def workflow(status="PENDING_STAFF_REVIEW", reviewer=None):
 
 class FakeApi:
     def __init__(self, item=None, *, queue_status=200, workflow_status=200, claim_status=200,
-                 release_status=200, review_status=200, queue_response=None):
+                 release_status=200, review_status=200, queue_response=None, queue_pages=None):
         self.item = item
         self.queue_status = queue_status
         self.workflow_status = workflow_status
@@ -43,6 +44,9 @@ class FakeApi:
         self.release_status = release_status
         self.review_status = review_status
         self.queue_response = queue_response
+        self.queue_pages = queue_pages
+        self.review_submitted = False
+        self.requested_queue_pages = []
         self.requests = []
         self.review_bodies = []
 
@@ -75,9 +79,28 @@ class FakeApi:
                 return route.fulfill(status=self.queue_status, json={"message": "Staff queue unavailable."})
             if self.queue_response is not None:
                 return route.fulfill(status=200, json=self.queue_response)
+            if self.queue_pages is not None:
+                page = int(parse_qs(urlparse(request.url).query).get("page", ["0"])[0])
+                self.requested_queue_pages.append(page)
+                if self.review_submitted:
+                    items = [] if page > 0 else self.queue_pages.get(0, [])
+                    return route.fulfill(status=200, json={"content": items, "page": page, "size": 20,
+                        "totalElements": 20, "totalPages": 1, "first": page == 0, "last": True})
+                items = self.queue_pages.get(page, [])
+                return route.fulfill(status=200, json={"content": items, "page": page, "size": 20,
+                    "totalElements": 21, "totalPages": 2, "first": page == 0, "last": page == 1})
             items = [self.item] if self.item and self.item["status"] in ("PENDING_STAFF_REVIEW", "STAFF_REVIEWING") else []
             return route.fulfill(status=200, json={"content": items, "page": 0, "size": 20,
                 "totalElements": len(items), "totalPages": 1 if items else 0, "first": True, "last": True})
+        if self.queue_pages is not None and request.method == "GET":
+            workflow_id = path.removeprefix("/api/document-workflows/").split("/", 1)[0]
+            for item in (entry for items in self.queue_pages.values() for entry in items):
+                if str(item["id"]) == workflow_id and path.endswith(f"/{workflow_id}"):
+                    return route.fulfill(status=200, json=item)
+            if path.endswith("/document"):
+                return route.fulfill(status=200, json={
+                    "documentId": DOCUMENT_ID, "version": 2, "content": "# Shop guide\n\nCurrent API content.\n",
+                })
         if (request.method, path) == ("GET", f"/api/document-workflows/{WORKFLOW_ID}"):
             if self.workflow_status != 200:
                 return route.fulfill(status=self.workflow_status, json={"message": "Workflow not found."})
@@ -124,6 +147,7 @@ class FakeApi:
                 staffComment=body.get("comment"),
                 status="PENDING_MANAGER_APPROVAL" if result == "PASSED" else "CHANGES_REQUESTED",
             )
+            self.review_submitted = True
             return route.fulfill(status=200, json=self.item)
         return route.fulfill(status=404, json={"message": f"Unexpected request: {request.method} {path}"})
 
@@ -209,6 +233,23 @@ def test_staff_review_passed_submits_comment_and_displays_backend_result(page: P
     expect(page.get_by_label("Submitted Staff review result")).to_contain_text("PENDING_MANAGER_APPROVAL")
     assert api.review_bodies == [{"result": "PASSED", "comment": "The document matches the source."}]
     assert ("POST", f"/api/document-workflows/{WORKFLOW_ID}/staff-review", api.review_bodies[0]) in api.requests
+
+
+def test_reviewing_last_item_on_last_page_returns_to_remaining_queue_items(page: Page):
+    remaining = workflow(workflow_id="44444444-4444-4444-8444-444444444444", title="Remaining guide")
+    assigned = workflow("STAFF_REVIEWING", USER_ID)
+    api = FakeApi(assigned, queue_pages={0: [remaining], 1: [assigned]})
+    open_documentation(page, api)
+
+    page.get_by_role("button", name="Next").click()
+    expect(page.get_by_role("status").filter(has_text="Page 2 of 2")).to_be_visible()
+    page.get_by_label("Decision").select_option("PASSED")
+    page.get_by_label("Review comment").fill("Reviewed against the source.")
+    page.get_by_role("button", name="Submit review").click()
+
+    expect(page.get_by_label("Staff review queue items").get_by_role("button", name="Remaining guide")).to_be_visible()
+    expect(page.get_by_role("button", name="Next")).to_have_count(0)
+    assert api.requested_queue_pages[-1] == 0
 
 
 def test_changes_requested_requires_comment_and_backend_response_is_shown(page: Page):

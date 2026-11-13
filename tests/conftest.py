@@ -51,8 +51,9 @@ def start_frontend_for_browser_tests(request):
     log_path = Path(log_file.name)
     process = None
     try:
+        npm_executable = "npm.cmd" if os.name == "nt" else "npm"
         build = subprocess.run(
-            "npm.cmd run build",
+            f"{npm_executable} run build",
             cwd=FRONTEND,
             shell=True,
             stdout=log_file,
