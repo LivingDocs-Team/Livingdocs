@@ -31,7 +31,35 @@ def entities(f: FileAnalysis) -> List[Entity]:
     return out
 
 
-def _excerpt(obj) -> Optional[str]:
+def _handler(f: FileAnalysis, ep: Endpoint) -> Optional[Function]:
+    """The function or method in the same file that serves an endpoint (LD-355)."""
+    if not ep.handler:
+        return None
+    name = ep.handler.split(".")[-1].split("::")[-1].strip()
+    owner = ep.handler.rsplit(".", 1)[0] if "." in ep.handler else None
+    for fn in f.functions:
+        if fn.name == name:
+            return fn
+    for c in f.classes:
+        if owner and c.name != owner.split(".")[-1]:
+            continue
+        for m in c.methods:
+            if m.name == name:
+                return m
+    return None
+
+
+def _lines(f: FileAnalysis, obj) -> Tuple[Optional[int], Optional[int]]:
+    start, end = getattr(obj, "line_start", None), getattr(obj, "line_end", None)
+    if start is None and isinstance(obj, Endpoint):
+        # analyzers often give no lines for a route: point at its handler instead
+        fn = _handler(f, obj)
+        if fn is not None:
+            start, end = fn.line_start, fn.line_end
+    return start, end
+
+
+def _excerpt(obj, f: Optional[FileAnalysis] = None) -> Optional[str]:
     if isinstance(obj, Function):
         text = obj.source or obj.signature or obj.name
     elif isinstance(obj, ClassInfo):
@@ -42,6 +70,9 @@ def _excerpt(obj) -> Optional[str]:
             text += "\n" + obj.docstring.strip()
     elif isinstance(obj, Endpoint):
         text = f"{obj.http_method} {obj.path}" + (f" -> {obj.handler}" if obj.handler else "")
+        fn = _handler(f, obj) if f is not None else None
+        if fn is not None and (fn.source or fn.signature):
+            text += "\n" + (fn.source or fn.signature)
     else:
         return None
     return text[:EXCERPT_CHARS]
@@ -51,6 +82,7 @@ def _excerpt(obj) -> Optional[str]:
 class EvidenceCatalog:
     by_id: Dict[str, Evidence] = field(default_factory=dict)
     own: Dict[str, Evidence] = field(default_factory=dict)          # entity key -> its E id
+    own_ids: Dict[str, List[str]] = field(default_factory=dict)     # key -> all E ids (overloads)
     retrieved: List[Evidence] = field(default_factory=list)          # C.. and D..
 
     def resolve(self, ids: List[str]) -> Tuple[List[Evidence], List[str]]:
@@ -68,12 +100,12 @@ class EvidenceCatalog:
 def build_catalog(f: FileAnalysis, retrieved: Optional[Retrieved] = None) -> EvidenceCatalog:
     cat = EvidenceCatalog()
     for n, ent in enumerate(entities(f), start=1):
+        start, end = _lines(f, ent.obj)
         ev = Evidence(id=f"E{n}", kind=EvidenceKind.source, path=f.path, name=ent.key,
-                      line_start=getattr(ent.obj, "line_start", None),
-                      line_end=getattr(ent.obj, "line_end", None),
-                      excerpt=_excerpt(ent.obj))
+                      line_start=start, line_end=end, excerpt=_excerpt(ent.obj, f))
         cat.by_id[ev.id] = ev
-        cat.own[ent.key] = ev
+        cat.own.setdefault(ent.key, ev)     # overloads share a key: the first one is shown
+        cat.own_ids.setdefault(ent.key, []).append(ev.id)
     if retrieved:
         for ch in retrieved.code + retrieved.docs:
             ev = Evidence(id=ch.ref, kind=EvidenceKind.code if ch.kind == "code" else EvidenceKind.doc,
