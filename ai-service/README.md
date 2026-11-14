@@ -56,6 +56,8 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | POST | `/drift/changes` | Changed code entities of a Pull Request (LD-146); nothing is stored |
 | POST | `/suggestions/updates` | Proposed edits (original → proposed text, reason, confidence) to the docs describing code changed by a PR (LD-353); kept for review |
 | POST | `/drift/reports/{id}/suggestions` | Concrete fixes for the findings of a drift report, same format as `/suggestions/updates`; send the repository Markdown again in `docs` (LD-354) |
+| POST | `/suggestions/{id}/review` | Accept (optionally with edited text) or reject a suggestion (LD-357) |
+| POST | `/suggestions/apply` | Apply accepted suggestions: one new version per saved document, new text + diff for repository Markdown; conflicts leave the document unchanged (LD-357) |
 | GET | `/suggestions`, `/suggestions/{id}`, `/suggestions/batches/{id}` | Read kept suggestions; filter by `batch_id`, `status`, `document_id` (LD-353) |
 | POST | `/drift/context` | Context to update the docs of each changed entity: diff (X1), related code (C), docs naming it first (D), prompt text (LD-338); nothing is stored |
 | POST | `/drift/analyze` | Drift report of a Pull Request: findings, affected docs, evidence (LD-147/148/149) |
