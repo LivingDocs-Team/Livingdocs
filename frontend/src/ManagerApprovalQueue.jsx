@@ -218,7 +218,9 @@ export default function ManagerApprovalQueue({ userId, userRole }) {
     setActionMessage(null);
     try {
       const response = await githubApi(`/api/document-workflows/${encodeURIComponent(workflow.id)}/${decision === 'APPROVED' ? 'approve' : 'reject'}`, {
-        method: 'POST', userId, ...(decision === 'REJECTED' ? { body: { comment: comment.trim() } } : {}),
+        // Approve also sends a JSON body (an empty one): a POST without Content-Type reaches GitHub Integration as
+        // form-urlencoded through the Backend and is answered with HTTP 415.
+        method: 'POST', userId, body: decision === 'REJECTED' ? { comment: comment.trim() } : {},
       });
       const expected = decision;
       if (String(response?.id) !== String(workflow.id) || response?.managerDecision !== expected

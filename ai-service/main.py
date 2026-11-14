@@ -27,9 +27,10 @@ from app.version_models import (Document, DocumentContentEdit, DocumentCreate, D
                                 InternalRollbackRequest, VersionComparison,
                                 VersionSummary)
 from app.versions import VersionError, documents
-from app.internal_auth import require_internal_service
+from app.internal_auth import require_internal_service, require_service_credential_when_configured
 
-app = FastAPI(title="LivingDocs AI Service", version="0.1.0")
+app = FastAPI(title="LivingDocs AI Service", version="0.1.0",
+              dependencies=[Depends(require_service_credential_when_configured)])
 
 
 @app.get("/health")
