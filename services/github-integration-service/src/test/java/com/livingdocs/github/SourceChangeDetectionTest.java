@@ -360,7 +360,7 @@ class SourceChangeDetectionTest {
 
         long githubId = NEXT_GITHUB_REPO_ID.incrementAndGet();
         GitHubRepo docs = new GitHubRepo(githubId, "acme/docs", false, "main", "https://github.com/acme/docs");
-        when(gitHubClient.listAccessibleRepositories(TOKEN)).thenReturn(List.of(docs));
+        when(gitHubClient.listUserRepositories(TOKEN)).thenReturn(List.of(docs));
         String body = mvc.perform(post("/api/workspaces/ws-" + user + "/repositories").header(USER_HEADER, user)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"githubRepoIds\":[" + githubId + "]}"))
