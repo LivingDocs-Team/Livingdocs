@@ -16,6 +16,7 @@ from app.drift_changes import analyze_pull_request
 from app.drift_markdown import at_least, render as render_drift_markdown
 from app.drift_models import (DriftAnalyzeRequest, DriftReport, DriftReportSummary,
                               PullRequestAnalysis, Severity)
+from app.suggestion_api import router as suggestion_router
 from app.drift_severity import CAPS, SCORE_BANDS, SEVERITY_LEVELS, rules_table
 from app.generator import get_generator
 from app.jobs import jobs, run_job
@@ -392,6 +393,9 @@ def drift_context(req: ChangeContextRequest):
     and documentation (D: passages naming the entity first, then related ones), plus a prompt
     text citing them. Nothing is stored and no AI is called."""
     return change_context(req, documents)
+
+
+app.include_router(suggestion_router)   # LD-353 documentation update suggestions
 
 
 @app.post("/drift/analyze", response_model=DriftReport, status_code=201)
