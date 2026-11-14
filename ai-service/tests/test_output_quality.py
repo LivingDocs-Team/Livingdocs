@@ -209,3 +209,6 @@ def test_java_kinds_get_their_label():
         {"name": "Repo", "kind": "interface"}, {"name": "Dto", "kind": "record"}]})
     assert "### Enum `Status`" in r.markdown
     assert "### Interface `Repo`" in r.markdown and "### Record `Dto`" in r.markdown
+
+
+

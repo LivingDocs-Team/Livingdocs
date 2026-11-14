@@ -78,3 +78,6 @@ public class CodeEntity {
     public void setActive(boolean active) { this.active = active; }
     public Instant getLastSeenAt() { return lastSeenAt; }
 }
+
+
+

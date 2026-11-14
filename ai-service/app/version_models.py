@@ -174,3 +174,5 @@ class VersionComparison(BaseModel):
     has_approved_version: bool = False
     diff: str = ""
     changes: List[SectionChange] = Field(default_factory=list)
+
+

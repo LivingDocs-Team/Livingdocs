@@ -82,3 +82,6 @@ Từ LD-396, bước 2–4 chạy tự động khi Developer bấm Generate docu
 |---|---|---|
 | `sync/AnalysisInputTest` | 2 | Repo `acme/shop` có 3 file, một file `TOO_LARGE` không có nội dung: kết quả có `scope = "repository"`, `target = "acme/shop"` và đúng 2 file có nội dung; JSON đúng từng tên trường mà Code Analyzer nhận |
 | `RepositorySyncApiTest` (`latestAndAnalysisInput_returnLastSyncResult`) | 1 | Trước khi đồng bộ, xem kết quả trả `404`; sau khi đồng bộ, `/sync/latest` không kèm nội dung file, còn `/sync/latest/analysis-input` trả đúng file `src/App.java`, `language = "java"` và nội dung |
+
+
+

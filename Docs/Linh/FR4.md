@@ -77,3 +77,6 @@ Ví dụ một thực thể trong báo cáo:
 ## 8. Kiểm thử
 
 `ai-service/tests/test_evidence_confidence.py` (16 test: công thức điểm, mã sai, offline/dự phòng, báo cáo qua API, số dòng), `tests/integration/test_ai_service_integration.py` (số dòng từ analyzer thật, báo cáo đủ thực thể, điểm offline ≤ 0,60).
+
+
+

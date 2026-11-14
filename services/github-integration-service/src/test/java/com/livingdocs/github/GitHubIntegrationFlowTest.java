@@ -198,3 +198,6 @@ class GitHubIntegrationFlowTest {
                 .andExpect(jsonPath("$.githubLogin").value("d3r-bbb"));
     }
 }
+
+
+

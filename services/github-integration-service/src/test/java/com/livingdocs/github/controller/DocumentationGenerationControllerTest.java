@@ -57,3 +57,6 @@ class DocumentationGenerationControllerTest {
                 new DocumentationGenerationRequest("default", "vi"), null);
     }
 }
+
+
+

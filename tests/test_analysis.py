@@ -236,3 +236,6 @@ def test_bom_language_case_duplicates():                              # A10, A11
     out = analyze("c.py", "x = 1\n", extra=[{"path": "c.py", "content": "y = 2\n"}])
     assert [f["path"] for f in out["files"]] == ["c.py"]
     assert out["warnings"] == ["c.py: duplicate path, only the first copy was analyzed."]
+
+
+

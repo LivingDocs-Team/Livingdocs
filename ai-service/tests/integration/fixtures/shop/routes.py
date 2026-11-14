@@ -16,3 +16,6 @@ def get_cart_total(cart_id: int) -> float:
 def add_cart_item(cart_id: int, product_id: int, quantity: int = 1) -> dict:
     cart = service.add_item(cart_id, product_id, quantity)
     return {"items": cart.items}
+
+
+

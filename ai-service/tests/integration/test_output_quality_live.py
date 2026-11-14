@@ -246,3 +246,6 @@ def test_offline_doc_uses_docstrings(generated):
     assert "| `name` | str | - | Item name. |" in md                   # Args section of get_item
     assert "The stored item." in md                                     # Returns section
     assert "Args:" not in md
+
+
+

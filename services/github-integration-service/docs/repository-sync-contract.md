@@ -203,3 +203,6 @@ Token hỏng (`TOKEN_INVALID`) thì kết nối GitHub chuyển sang `INVALID`; 
 `RepositorySyncApiTest` gọi thẳng API (MockMvc, database H2, GitHub giả): đồng bộ thành công và trạng thái `SYNCING` → `CONNECTED`, `lastSyncedAt`, `/sync/latest`, `/sync/latest/analysis-input`, người khác gọi (`403`), repo không tồn tại (`404`), body sai (`400`), nhánh không tồn tại, repo bị xoá trên GitHub (`ERROR`), token hỏng (kết nối `INVALID`), rate limit (`429` + `Retry-After`).
 
 **Chạy thử với GitHub thật** (repo public, không cần token): chạy `GitHubRepositoryFetcherLiveTest` với biến môi trường `GITHUB_LIVE_TEST=true`. Kết quả JSON thật sẽ in ra màn hình.
+
+
+

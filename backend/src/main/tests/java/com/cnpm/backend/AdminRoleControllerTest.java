@@ -70,3 +70,6 @@ class AdminRoleControllerTest {
                 .satisfies(error -> assertThat(((ResponseStatusException) error).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
     }
 }
+
+
+

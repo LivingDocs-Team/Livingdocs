@@ -116,3 +116,6 @@ Cảnh báo (đồng bộ vẫn thành công) cũng có test: repo archived, rep
 - Webhook và đồng bộ chạy nền: chưa làm.
 - Kết quả đồng bộ chỉ giữ trong bộ nhớ, khởi động lại service thì phải đồng bộ lại.
 - Chạy cả chuỗi từ giao diện: frontend vẫn dùng dữ liệu mẫu (hướng dẫn nối API: [frontend-api-guide.md](frontend-api-guide.md)).
+
+
+

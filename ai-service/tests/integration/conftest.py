@@ -134,3 +134,6 @@ def cart_head_version(before):
     total["signature"] = total["signature"].replace("def total", "def grand_total")
     total["source"] = total["source"].replace("def total", "def grand_total")
     return after
+
+
+

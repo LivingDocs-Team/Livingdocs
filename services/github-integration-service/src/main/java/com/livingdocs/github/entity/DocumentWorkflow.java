@@ -177,3 +177,6 @@ public class DocumentWorkflow {
                 ? DocumentWorkflowStatus.APPROVED : DocumentWorkflowStatus.REJECTED;
     }
 }
+
+
+

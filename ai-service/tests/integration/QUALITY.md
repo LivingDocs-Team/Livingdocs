@@ -102,3 +102,6 @@ python -m pytest -q                       # unit test, gồm tests/test_output_q
 ANALYZER_URL=http://localhost:8000 AI_SERVICE_URL=http://localhost:8001 \
   python -m pytest -m live -v tests/integration
 ```
+
+
+

@@ -66,3 +66,6 @@ public class DocumentationTemplateController {
         return ResponseEntity.noContent().build();
     }
 }
+
+
+
