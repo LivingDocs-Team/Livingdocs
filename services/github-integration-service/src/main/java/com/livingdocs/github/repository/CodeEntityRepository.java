@@ -12,3 +12,4 @@ public interface CodeEntityRepository extends JpaRepository<CodeEntity, UUID> {
     List<CodeEntity> findByRepositoryIdAndActiveTrueOrderByPathAscLineStartAsc(UUID repositoryId);
     List<CodeEntity> findByIdInAndRepositoryIdAndActiveTrue(List<UUID> ids, UUID repositoryId);
 }
+

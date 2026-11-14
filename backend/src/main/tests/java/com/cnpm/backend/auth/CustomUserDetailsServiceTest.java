@@ -86,3 +86,4 @@ class CustomUserDetailsServiceTest {
         verify(roles).findWithPermissionsByName(expectedRole.substring("ROLE_".length()));
     }
 }
+

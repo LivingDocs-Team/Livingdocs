@@ -37,3 +37,4 @@ class GitHubWebhookControllerTest {
         verifyNoInteractions(ingestionService);
     }
 }
+

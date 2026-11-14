@@ -174,3 +174,4 @@ class DocumentationCodeRelationshipApiTest {
                 .andExpect(jsonPath("$[0].id").value(entityId.toString()));
     }
 }
+

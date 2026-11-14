@@ -34,3 +34,4 @@ public record GitHubPullRequest(
     public record Account(String login) {
     }
 }
+

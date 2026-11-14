@@ -14,3 +14,4 @@ public record ConnectionResponse(
         return new ConnectionResponse(false, null, "NOT_CONNECTED", null, null);
     }
 }
+

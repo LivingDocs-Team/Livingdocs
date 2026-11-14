@@ -15,3 +15,4 @@ public record CodeEntity(String kind, String name, int startLine, int endLine) {
         return kind + " " + name;
     }
 }
+

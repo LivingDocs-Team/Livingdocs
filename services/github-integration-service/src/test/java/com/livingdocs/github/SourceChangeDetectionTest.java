@@ -377,3 +377,4 @@ class SourceChangeDetectionTest {
         return "/api/repositories/" + repoId + "/source-changes";
     }
 }
+

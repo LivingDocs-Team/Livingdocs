@@ -44,7 +44,9 @@ public class RoleCatalogInitializer implements ApplicationRunner {
             Map.entry("DOCUMENT_APPROVE", "Approve a business document"),
             Map.entry("DOCUMENT_REJECT", "Reject a business document"),
             Map.entry("DOCUMENT_ROLLBACK", "Rollback an approved document to a previous version"),
-            Map.entry("DOCUMENT_TECHNICAL_REVIEW", "Perform technical review of a document"));
+            Map.entry("DOCUMENT_TECHNICAL_REVIEW", "Perform technical review of a document"),
+            Map.entry("SYSTEM_CONFIG_VIEW", "View system configuration"),
+            Map.entry("SYSTEM_CONFIG_UPDATE", "Update or reset system configuration"));
 
     // Business workflow grants are enforced by the GitHub Integration document-workflow API.
     // TECHNICAL_LEAD is catalogued for the planned technical-review endpoint, which is not yet present.
@@ -117,3 +119,4 @@ public class RoleCatalogInitializer implements ApplicationRunner {
         return defaults.stream().anyMatch(newlyCreated::contains);
     }
 }
+

@@ -131,3 +131,4 @@ public class SourceChange {
 
     public List<SourceChangeFile> getFiles() { return files; }
 }
+

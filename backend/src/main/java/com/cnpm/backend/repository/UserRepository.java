@@ -40,3 +40,4 @@ public interface UserRepository extends JpaRepository<User, Long> {
             @Param("active") Boolean active,
             Pageable pageable);
 }
+

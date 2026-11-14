@@ -34,3 +34,4 @@ public final class SpaCsrfTokenRequestHandler implements CsrfTokenRequestHandler
                 : xorHandler.resolveCsrfTokenValue(request, csrfToken);
     }
 }
+

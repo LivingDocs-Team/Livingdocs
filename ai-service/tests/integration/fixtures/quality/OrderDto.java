@@ -8,3 +8,4 @@ public record OrderDto(Long id, String code) {
             """.formatted(code);
     }
 }
+

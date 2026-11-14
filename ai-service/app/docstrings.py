@@ -172,3 +172,4 @@ def parse_docstring(doc: Optional[str]) -> ParsedDoc:
         elif kind == "return" and text_:
             returns = text_
     return ParsedDoc(summary=_paragraphs(summary), params=params, returns=returns, attributes=attributes)
+

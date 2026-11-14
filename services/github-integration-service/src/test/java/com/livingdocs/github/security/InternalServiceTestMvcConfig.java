@@ -16,3 +16,4 @@ public class InternalServiceTestMvcConfig {
                 .header(HttpHeaders.AUTHORIZATION, "Bearer test-only-internal-credential"));
     }
 }
+

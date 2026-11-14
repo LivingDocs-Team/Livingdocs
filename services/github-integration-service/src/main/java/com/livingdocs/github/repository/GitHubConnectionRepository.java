@@ -31,3 +31,4 @@ public interface GitHubConnectionRepository extends JpaRepository<GitHubConnecti
                      @Param("status") ConnectionStatus status,
                      @Param("updatedAt") Instant updatedAt);
 }
+

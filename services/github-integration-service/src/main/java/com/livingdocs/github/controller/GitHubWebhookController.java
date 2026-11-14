@@ -73,3 +73,4 @@ public class GitHubWebhookController {
         return ResponseEntity.accepted().body(Map.of("status", result.name()));
     }
 }
+

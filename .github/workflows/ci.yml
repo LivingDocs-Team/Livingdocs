@@ -178,6 +178,11 @@ jobs:
       - name: Build and test (H2 database, mocked GitHub)
         run: mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml verify
 
+      - name: Verify webhook secret, signature and duplicate-delivery handling (LD-275)
+        run: >-
+          mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml test
+          -Dtest=WebhookSignatureVerifierTest,GitHubWebhookControllerTest,GitHubWebhookIngestionTest
+
       - name: Live test against real GitHub API
         env:
           GITHUB_LIVE_TEST: "true"
@@ -287,6 +292,11 @@ jobs:
 
       - name: Validate Docker Compose configuration
         run: docker compose -f compose.yaml config --quiet
+
+      - name: Verify the GitHub webhook secret is passed to the github-integration service (LD-275)
+        run: |
+          docker compose -f compose.yaml config > "$RUNNER_TEMP/compose.rendered.yaml"
+          grep -q GITHUB_WEBHOOK_SECRET "$RUNNER_TEMP/compose.rendered.yaml"
 
       - name: Build application images
         run: docker compose -f compose.yaml build backend ai-service code-analyzer github-integration frontend

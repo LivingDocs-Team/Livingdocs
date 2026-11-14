@@ -3,11 +3,11 @@
     image: postgres:16
     environment:
       POSTGRES_DB: cnpm
-      POSTGRES_USER: livingdocs
-      POSTGRES_PASSWORD: livingdocs
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD:
     ports:
       # Local developer database access only; keep PostgreSQL off host network interfaces.
-      - "127.0.0.1:5434:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - backend-db-data:/var/lib/postgresql/data
     healthcheck:
@@ -26,7 +26,7 @@
       POSTGRES_PASSWORD: livingdocs
     ports:
       # Local developer database access only; keep PostgreSQL off host network interfaces.
-      - "127.0.0.1:5433:5432"
+      - "127.0.0.1:15433:5432"
     volumes:
       - github-db-data:/var/lib/postgresql/data
     healthcheck:
@@ -187,3 +187,4 @@ networks:
   backend-network:
   github-internal:
   analysis-internal:
+

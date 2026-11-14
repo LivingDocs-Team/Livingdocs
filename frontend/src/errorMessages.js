@@ -71,3 +71,4 @@ export function gitHubConnectErrorMessage(reason) {
   }
   return `GitHub connection failed: ${MESSAGES_BY_CODE[reason] || 'unknown error. Please try again.'}`;
 }
+

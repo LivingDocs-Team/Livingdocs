@@ -304,3 +304,4 @@ class RepositoryManagementServiceTest {
                 false, "main", "https://github.com/livingdocs/other");
     }
 }
+

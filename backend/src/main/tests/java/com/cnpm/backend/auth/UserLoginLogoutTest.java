@@ -25,3 +25,4 @@ class UserLoginLogoutTest {
         assertThat(session.isInvalid()).isTrue();
     }
 }
+

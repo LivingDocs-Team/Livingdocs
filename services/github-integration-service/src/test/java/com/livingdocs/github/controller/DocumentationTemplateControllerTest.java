@@ -75,3 +75,4 @@ class DocumentationTemplateControllerTest {
         verify(templateService).delete("a1b2c3d4");
     }
 }
+

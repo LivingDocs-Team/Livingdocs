@@ -1,0 +1,61 @@
+--- a/backend/src/main/java/com/cnpm/backend/service/RoleCatalogInitializer.java
++++ b/backend/src/main/java/com/cnpm/backend/service/RoleCatalogInitializer.java
+@@ -44,7 +44,9 @@
+             Map.entry("DOCUMENT_APPROVE", "Approve a business document"),
+             Map.entry("DOCUMENT_REJECT", "Reject a business document"),
+             Map.entry("DOCUMENT_ROLLBACK", "Rollback an approved document to a previous version"),
+-            Map.entry("DOCUMENT_TECHNICAL_REVIEW", "Perform technical review of a document"));
++            Map.entry("DOCUMENT_TECHNICAL_REVIEW", "Perform technical review of a document"),
++            Map.entry("SYSTEM_CONFIG_VIEW", "View system configuration"),
++            Map.entry("SYSTEM_CONFIG_UPDATE", "Update or reset system configuration"));
+ 
+     // Business workflow grants are enforced by the GitHub Integration document-workflow API.
+     // TECHNICAL_LEAD is catalogued for the planned technical-review endpoint, which is not yet present.
+--- a/backend/src/main/java/com/cnpm/backend/controller/AdminRoleController.java
++++ b/backend/src/main/java/com/cnpm/backend/controller/AdminRoleController.java
+@@ -26,7 +26,7 @@
+ @RequestMapping("/api/admin")
+ public class AdminRoleController {
+     private static final Set<String> FIXED_ROLES = Set.of("DEVELOPER", "STAFF", "MANAGER", "TECHNICAL_LEAD", "ADMINISTRATOR", "ADMIN");
+-    private static final Set<String> ADMIN_PERMISSIONS = Set.of("USER_VIEW", "USER_UPDATE", "USER_DISABLE", "USER_ASSIGN_ROLE", "ROLE_VIEW", "PERMISSION_VIEW", "ROLE_ASSIGN_PERMISSION", "DOCUMENT_REASSIGN");
++    private static final Set<String> ADMIN_PERMISSIONS = Set.of("USER_VIEW", "USER_UPDATE", "USER_DISABLE", "USER_ASSIGN_ROLE", "ROLE_VIEW", "PERMISSION_VIEW", "ROLE_ASSIGN_PERMISSION", "DOCUMENT_REASSIGN", "SYSTEM_CONFIG_VIEW", "SYSTEM_CONFIG_UPDATE");
+     private final RoleRepository roles;
+     private final PermissionRepository permissions;
+ 
+--- a/backend/src/main/tests/java/com/cnpm/backend/RoleCatalogInitializerTest.java
++++ b/backend/src/main/tests/java/com/cnpm/backend/RoleCatalogInitializerTest.java
+@@ -67,7 +67,7 @@
+         );
+         assertThat(permissionCodes(roles.get("TECHNICAL_LEAD"))).contains("DOCUMENT_TECHNICAL_REVIEW");
+         assertThat(permissionCodes(roles.get("ADMINISTRATOR")))
+-        .contains("DOCUMENT_REASSIGN")
++        .contains("DOCUMENT_REASSIGN", "SYSTEM_CONFIG_VIEW", "SYSTEM_CONFIG_UPDATE")
+         .doesNotContain(
+                 "DOCUMENT_APPROVE",
+                 "DOCUMENT_REJECT",
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -178,6 +178,11 @@
+       - name: Build and test (H2 database, mocked GitHub)
+         run: mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml verify
+ 
++      - name: Verify webhook secret, signature and duplicate-delivery handling (LD-275)
++        run: >-
++          mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml test
++          -Dtest=WebhookSignatureVerifierTest,GitHubWebhookControllerTest,GitHubWebhookIngestionTest
++
+       - name: Live test against real GitHub API
+         env:
+           GITHUB_LIVE_TEST: "true"
+@@ -288,6 +293,11 @@
+       - name: Validate Docker Compose configuration
+         run: docker compose -f compose.yaml config --quiet
+ 
++      - name: Verify the GitHub webhook secret is passed to the github-integration service (LD-275)
++        run: |
++          docker compose -f compose.yaml config > "$RUNNER_TEMP/compose.rendered.yaml"
++          grep -q GITHUB_WEBHOOK_SECRET "$RUNNER_TEMP/compose.rendered.yaml"
++
+       - name: Build application images
+         run: docker compose -f compose.yaml build backend ai-service code-analyzer github-integration frontend
+ 

@@ -309,3 +309,4 @@ class RepositorySyncApiTest {
         return new GitHubApiException("GitHub API trả lỗi " + status, status, headers, "{\"message\":\"error\"}");
     }
 }
+

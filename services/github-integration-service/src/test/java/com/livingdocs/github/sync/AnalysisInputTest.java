@@ -54,3 +54,4 @@ class AnalysisInputTest {
                 List.of(), Instant.now());
     }
 }
+

@@ -52,3 +52,4 @@ class ASTAnalyzer:
             return parse_java(code)
         except Exception as e:
             return None, f"Java AST Parse Error: {str(e)}"
+

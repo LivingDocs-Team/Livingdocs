@@ -11,3 +11,4 @@ public interface DocumentationCodeRelationshipRepository extends JpaRepository<D
     List<DocumentationCodeRelationship> findByCodeEntityId(UUID codeEntityId);
     void deleteByDocumentationId(UUID documentationId);
 }
+
