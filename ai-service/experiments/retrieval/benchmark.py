@@ -27,9 +27,10 @@ import urllib.request
 from collections import Counter
 from typing import Callable, Dict, List, Optional, Tuple
 
-from app.models import GenerateRequest
+from app.models import FileAnalysis, GenerateRequest
 from app.normalize import normalize
-from app.retrieval import MIN_SCORE, Chunk, RetrievalIndex, build_index, file_query, tokenize
+from app.retrieval import (MIN_SCORE, Chunk, RetrievalIndex, build_index, file_links, file_query,
+                           tokenize)
 
 from .dataset import GOLD, request
 
@@ -39,9 +40,9 @@ CACHE = pathlib.Path(os.getenv("LIVINGDOCS_CACHE", pathlib.Path.home() / ".cache
 K = {"code": 4, "doc": 3}
 
 Ranked = List[Tuple[float, Chunk]]
-# A ranker gets the index, the query terms and the kind; it returns (score, chunk) for every
-# candidate, best first. The threshold below which nothing is returned is per method.
-Ranker = Callable[[RetrievalIndex, Counter, str, str], Ranked]
+# A ranker gets the index, the file being documented and the kind ("code" / "doc"); it returns
+# (score, chunk) for every candidate, best first. The threshold is per method.
+Ranker = Callable[[RetrievalIndex, FileAnalysis, str], Ranked]
 
 
 def key(c: Chunk) -> str:
@@ -50,17 +51,37 @@ def key(c: Chunk) -> str:
 
 # ---------------- rankers ----------------
 
-def tfidf_rank(index: RetrievalIndex, q: Counter, kind: str, exclude: str) -> Ranked:
-    qw = index._weights(q)
+def _exclude(c: Chunk, kind: str, f: FileAnalysis) -> bool:
+    return c.kind != kind or (kind == "code" and c.path == f.path)
+
+
+def tfidf_rank(index: RetrievalIndex, f: FileAnalysis, kind: str) -> Ranked:
+    """Plain TF-IDF cosine on the full query (the LD-336 baseline ranking)."""
+    qw = index._weights(file_query(f))
     qn = math.sqrt(sum(w * w for w in qw.values())) or 1.0
     out = []
     for c, cn in zip(index.chunks, index._norms):
-        if c.kind != kind or (kind == "code" and c.path == exclude):
+        if _exclude(c, kind, f):
             continue
         cw = index._weights(c.tokens)
         out.append((sum(qw[t] * cw[t] for t in qw.keys() & cw.keys()) / (qn * cn), c))
     out.sort(key=lambda x: (-x[0], x[1].path, x[1].name))
     return out
+
+
+def production_ranker(path_filter: bool = True, bonuses: bool = True) -> Ranker:
+    """app.retrieval as used by jobs (LD-337); the switches allow an ablation study."""
+    def rank(index: RetrievalIndex, f: FileAnalysis, kind: str) -> Ranked:
+        saved = index.common_terms
+        if not path_filter:
+            index.common_terms = set()
+        try:
+            hits = index.search(file_query(f), kind, f.path if kind == "code" else None, 10 ** 6,
+                                file_links(f) if bonuses else None)
+        finally:
+            index.common_terms = saved
+        return [(c.score, c) for c in hits]
+    return rank
 
 
 class Glove:
@@ -89,11 +110,11 @@ class Glove:
 def embedding_ranker(glove: Glove) -> Ranker:
     cache: Dict[int, Optional[List[float]]] = {}
 
-    def rank(index: RetrievalIndex, q: Counter, kind: str, exclude: str) -> Ranked:
-        qv = glove.embed(q)
+    def rank(index: RetrievalIndex, f: FileAnalysis, kind: str) -> Ranked:
+        qv = glove.embed(file_query(f))
         out = []
         for c in index.chunks:
-            if c.kind != kind or (kind == "code" and c.path == exclude):
+            if _exclude(c, kind, f):
                 continue
             if id(c) not in cache:
                 cache[id(c)] = glove.embed(c.tokens)
@@ -106,9 +127,9 @@ def embedding_ranker(glove: Glove) -> Ranker:
 
 
 def hybrid_ranker(emb: Ranker, weight: float = 0.5) -> Ranker:
-    def rank(index: RetrievalIndex, q: Counter, kind: str, exclude: str) -> Ranked:
-        lex = {id(c): s for s, c in tfidf_rank(index, q, kind, exclude)}
-        out = [(weight * lex.get(id(c), 0.0) + (1 - weight) * s, c) for s, c in emb(index, q, kind, exclude)]
+    def rank(index: RetrievalIndex, f: FileAnalysis, kind: str) -> Ranked:
+        lex = {id(c): s for s, c in tfidf_rank(index, f, kind)}
+        out = [(weight * lex.get(id(c), 0.0) + (1 - weight) * s, c) for s, c in emb(index, f, kind)]
         out.sort(key=lambda x: (-x[0], x[1].path, x[1].name))
         return out
     return rank
@@ -123,7 +144,7 @@ def evaluate(index: RetrievalIndex, files, rank: Ranker, threshold: float) -> Di
         rec, prec, mrr, ndcg, noise, n_eval = 0.0, 0.0, 0.0, 0.0, 0, 0
         for f in files:
             gold = set(GOLD[f.path][label])
-            hits = [c for s, c in rank(index, file_query(f), kind, f.path) if s >= threshold][:k]
+            hits = [c for s, c in rank(index, f, kind) if s >= threshold][:k]
             got = [key(c) for c in hits]
             noise += sum(1 for g in got if g not in gold)
             if not gold:
@@ -144,7 +165,7 @@ def evaluate(index: RetrievalIndex, files, rank: Ranker, threshold: float) -> Di
 
 def per_file(index, files, rank: Ranker, threshold: float, label: str) -> Dict[str, List[str]]:
     kind = "code" if label == "code" else "doc"
-    return {f.path: [key(c) for s, c in rank(index, file_query(f), kind, f.path) if s >= threshold][:K[kind]]
+    return {f.path: [key(c) for s, c in rank(index, f, kind) if s >= threshold][:K[kind]]
             for f in files}
 
 
@@ -188,7 +209,12 @@ def timed(index, files, rank, thr):
     return r, (time.perf_counter() - t) * 1000 / len(files)
 
 
-RANKERS: Dict[str, Tuple[Ranker, float]] = {"tfidf": (tfidf_rank, MIN_SCORE)}
+RANKERS: Dict[str, Tuple[Ranker, float]] = {
+    "tfidf": (tfidf_rank, MIN_SCORE),
+    "LD-337 path filter only": (production_ranker(bonuses=False), MIN_SCORE),
+    "LD-337 call bonuses only": (production_ranker(path_filter=False), MIN_SCORE),
+    "LD-337 (production)": (production_ranker(), MIN_SCORE),
+}
 THRESHOLDS = [round(0.05 * i, 2) for i in range(0, 19)]
 
 

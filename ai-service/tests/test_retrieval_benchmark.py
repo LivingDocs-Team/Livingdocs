@@ -23,11 +23,11 @@ def test_tfidf_metrics_are_in_range_and_reproducible():
 
 
 def test_benchmark_ranker_matches_production_retrieval():
-    from app.retrieval import file_query, retrieve
+    from app.retrieval import retrieve
     index, files = b.load_corpus()
     f = files[1]
     prod = [b.key(c) for c in retrieve(index, f).code]
-    bench = [b.key(c) for s, c in b.tfidf_rank(index, file_query(f), "code", f.path) if s >= b.MIN_SCORE][:4]
+    bench = [b.key(c) for s, c in b.production_ranker()(index, f, "code") if s >= b.MIN_SCORE][:4]
     assert prod == bench
 
 
