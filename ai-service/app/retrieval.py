@@ -1,4 +1,4 @@
-"""Retrieval of related code and existing documentation (LD-340, LD-335).
+"""Retrieval of related code and existing documentation (LD-340, LD-335, LD-337).
 
 For each file being documented we retrieve:
   - related code: classes / functions defined in OTHER analyzed files that this file
@@ -17,15 +17,21 @@ HTTP endpoints of every analysed file, and the sections of every context documen
 """
 import math
 import re
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from .models import ClassInfo, ContextDocument, Endpoint, FileAnalysis, Function, GenerateRequest
 
 MAX_DOC_CHUNK_CHARS = 1200
 MAX_EXCERPT_CHARS = 600
 MIN_SCORE = 0.05
+CALL_BONUS = 0.25        # LD-337: the file calls this code (its name is in the file's source)
+CLASS_BONUS = 0.10       # the file uses the class, not necessarily this method
+CALLER_BONUS = 0.20      # this code uses something the file defines
+DOC_MENTION_BONUS = 0.15  # the passage names a class / function of the file
+COMMON_PATH_SHARE = 0.6  # path terms found in at least this share of the files are ignored
 
 _STOP = {
     "the", "and", "for", "with", "this", "that", "from", "into", "are", "was", "not", "def",
@@ -36,13 +42,59 @@ _STOP = {
 }
 
 
+def fold(text: str) -> str:
+    """Lower case without Vietnamese diacritics: 'Hóa Đơn' -> 'hoa don' (LD-337)."""
+    text = unicodedata.normalize("NFD", text.lower().replace("đ", "d").replace("Đ", "d"))
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+
+
+_STOP_FOLDED = {fold(w) for w in _STOP}
+
+
 def tokenize(text: str) -> List[str]:
-    """Identifier-aware tokens: getUserById -> get user by id; snake_case split too."""
+    """Identifier-aware tokens: getUserById -> get user by id; snake_case split too.
+    Diacritics are folded, so Vietnamese text matches identifiers such as HoaDon / hoa_don."""
     if not text:
         return []
-    text = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text)
-    words = re.findall(r"[A-Za-zÀ-ỹ0-9]+", text.lower())
-    return [w for w in words if len(w) >= 2 and w not in _STOP and not w.isdigit()]
+    words = re.findall(r"[a-z0-9]+", fold(_split_camel(text)))
+    return [singular(w) for w in words if len(w) >= 2 and w not in _STOP_FOLDED and not w.isdigit()]
+
+
+def _split_camel(text: str) -> str:
+    """getCartTotal -> get Cart Total; works for accented letters too (HóaĐơn -> Hóa Đơn)."""
+    out = []
+    for i, ch in enumerate(text):
+        if i and ch.isupper() and (text[i - 1].islower() or text[i - 1].isdigit()):
+            out.append(" ")
+        out.append(ch)
+    return "".join(out)
+
+
+def singular(word: str) -> str:
+    """Light English plural folding so 'products' matches product, 'categories' category."""
+    if len(word) > 4 and word.endswith("ies"):
+        return word[:-3] + "y"
+    if len(word) > 3 and word.endswith("s") and not word.endswith(("ss", "us", "is")):
+        return word[:-1]
+    return word
+
+
+_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_CODE_NAME = re.compile(r"\b(?:[A-Za-z]+[a-z0-9][A-Z][A-Za-z0-9]*|[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+)\b")
+
+
+def code_names(text: str) -> Set[str]:
+    """Words in prose that look like code: CartService, getTotal, cart_id (not 'cart')."""
+    return set(_CODE_NAME.findall(text or ""))
+
+
+def identifiers(*texts: Optional[str]) -> Set[str]:
+    """Names written in code or types: 'CartService().total(x)' -> {CartService, total, x}."""
+    out: Set[str] = set()
+    for t in texts:
+        if t:
+            out.update(_IDENT.findall(t))
+    return out
 
 
 @dataclass
@@ -58,6 +110,7 @@ class Chunk:
     entity: str = ""              # class | method | function | endpoint | section
     section: str = ""             # doc passages: heading path, e.g. "Shop > Cart"
     score: float = 0.0            # similarity to the query that retrieved it
+    refs: Set[str] = field(default_factory=set)   # names this code uses (calls, types)
 
 
 @dataclass
@@ -80,6 +133,10 @@ def _function_excerpt(fn: Function, owner: str = "") -> str:
     return text[:MAX_EXCERPT_CHARS]
 
 
+def _function_refs(fn: Function) -> Set[str]:
+    return identifiers(fn.source, fn.signature, fn.return_type, *(p.type for p in fn.parameters))
+
+
 def _class_chunks(path: str, c: ClassInfo) -> List[Chunk]:
     chunks = []
     method_names = " ".join(m.name for m in c.methods)
@@ -93,12 +150,13 @@ def _class_chunks(path: str, c: ClassInfo) -> List[Chunk]:
                  + (f"\nmethods: {method_names}" if method_names else ""))[:MAX_EXCERPT_CHARS],
         tokens=Counter(tokenize(" ".join([c.name, " ".join(c.bases), c.docstring or "", method_names,
                                           field_text]))),
-        line_start=c.line_start, line_end=c.line_end))
+        line_start=c.line_start, line_end=c.line_end,
+        refs=identifiers(" ".join(c.bases), " ".join(x.type or "" for x in c.fields))))
     for m in c.methods:
         chunks.append(Chunk(kind="code", path=path, name=f"{c.name}.{m.name}", entity="method",
                             excerpt=_function_excerpt(m, c.name),
                             tokens=Counter(tokenize(_function_text(m) + " " + c.name)),
-                            line_start=m.line_start, line_end=m.line_end))
+                            line_start=m.line_start, line_end=m.line_end, refs=_function_refs(m)))
     return chunks
 
 
@@ -120,7 +178,8 @@ def _endpoint_chunk(path: str, e: Endpoint) -> Chunk:
         lines.append(f"response: {e.response}")
     return Chunk(kind="code", path=path, name=f"{e.http_method} {e.path}", entity="endpoint",
                  excerpt="\n".join(lines)[:MAX_EXCERPT_CHARS], tokens=Counter(tokenize(_endpoint_text(e))),
-                 line_start=e.line_start, line_end=e.line_end)
+                 line_start=e.line_start, line_end=e.line_end,
+                 refs=identifiers(e.handler, e.request_body, e.response, *(p.type for p in e.parameters)))
 
 
 _FENCE = re.compile(r"^\s{0,3}(```|~~~)")
@@ -146,12 +205,13 @@ def split_document(doc: ContextDocument) -> List[Chunk]:
 
     def flush(end_line: int) -> None:
         text = "\n".join(buf).strip()
-        if text:
+        body = [x for i, x in enumerate(buf) if x.strip() and not (i == 0 and _HEADING.match(x))]
+        if text and body:          # LD-337: a passage that is only a heading is not indexed
             name, section = current()
             chunks.append(Chunk(kind="doc", path=doc.path, name=name, entity="section",
                                 section=section, excerpt=text[:MAX_EXCERPT_CHARS],
                                 tokens=Counter(tokenize(section + " " + text)),
-                                line_start=start, line_end=end_line))
+                                line_start=start, line_end=end_line, refs=code_names(text)))
 
     for i, line in enumerate(lines, start=1):
         if _FENCE.match(line):
@@ -181,10 +241,37 @@ class IndexStats:
     vocabulary: int
 
 
+@dataclass
+class Links:
+    """What a file being documented uses and defines (LD-337 bonuses)."""
+    uses: Set[str] = field(default_factory=set)
+    defines: Set[str] = field(default_factory=set)
+
+
+def _bonus(c: Chunk, links: Optional[Links]) -> float:
+    if links is None:
+        return 0.0
+    bonus = 0.0
+    if c.kind == "code":
+        if c.entity in ("class", "function") and c.name in links.uses:
+            bonus += CALL_BONUS
+        elif c.entity == "method":
+            owner, _, method = c.name.partition(".")
+            if owner in links.uses:
+                bonus += CALL_BONUS if method in links.uses else CLASS_BONUS
+        if c.refs & links.defines:
+            bonus += CALLER_BONUS
+    elif c.refs & links.defines:
+        bonus += DOC_MENTION_BONUS
+    return bonus
+
+
 class RetrievalIndex:
-    def __init__(self, chunks: List[Chunk], files: int = 0, documents: int = 0) -> None:
+    def __init__(self, chunks: List[Chunk], files: int = 0, documents: int = 0,
+                 common_terms: Optional[Set[str]] = None) -> None:
         self.chunks = chunks
         self.files, self.documents = files, documents
+        self.common_terms: Set[str] = set(common_terms or ())
         df: Counter = Counter()
         for c in chunks:
             df.update(set(c.tokens))
@@ -203,7 +290,10 @@ class RetrievalIndex:
                           chunks=dict(sorted(Counter(c.entity or c.kind for c in self.chunks).items())),
                           vocabulary=len(self.idf))
 
-    def search(self, query: Counter, kind: str, exclude_path: Optional[str], k: int) -> List[Chunk]:
+    def search(self, query: Counter, kind: str, exclude_path: Optional[str], k: int,
+               links: Optional[Links] = None) -> List[Chunk]:
+        """TF-IDF cosine similarity, plus the LD-337 bonuses when `links` is given; capped at 1."""
+        query = Counter({t: n for t, n in query.items() if t not in self.common_terms})
         q = self._weights(query)
         q_norm = math.sqrt(sum(w * w for w in q.values())) or 1.0
         scored = []
@@ -212,7 +302,7 @@ class RetrievalIndex:
                 continue
             cw = self._weights(c.tokens)
             dot = sum(q[t] * cw[t] for t in q.keys() & cw.keys())
-            score = dot / (q_norm * c_norm)
+            score = min(1.0, dot / (q_norm * c_norm) + _bonus(c, links))
             if score >= MIN_SCORE:
                 scored.append((score, c))
         scored.sort(key=lambda x: (-x[0], x[1].path, x[1].name))
@@ -222,6 +312,17 @@ class RetrievalIndex:
             hit.score = round(score, 4)
             out.append(hit)
         return out
+
+
+def common_path_terms(paths: List[str]) -> Set[str]:
+    """Terms present in most file paths (repository name, src/main/java/com/...). They match
+    every file, so using them in queries only pulls in generic passages (LD-336 finding)."""
+    if len(paths) < 3:
+        return set()
+    counts: Counter = Counter()
+    for p in paths:
+        counts.update(set(tokenize(p.rsplit(".", 1)[0])))
+    return {t for t, n in counts.items() if n >= COMMON_PATH_SHARE * len(paths)}
 
 
 def build_index(req: GenerateRequest) -> RetrievalIndex:
@@ -236,12 +337,14 @@ def build_index(req: GenerateRequest) -> RetrievalIndex:
         for fn in f.functions:
             chunks.append(Chunk(kind="code", path=f.path, name=fn.name, entity="function",
                                 excerpt=_function_excerpt(fn), tokens=Counter(tokenize(_function_text(fn))),
-                                line_start=fn.line_start, line_end=fn.line_end))
+                                line_start=fn.line_start, line_end=fn.line_end, refs=_function_refs(fn)))
         for e in f.endpoints:
             chunks.append(_endpoint_chunk(f.path, e))
     for doc in req.context:
         chunks.extend(split_document(doc))
-    return RetrievalIndex(chunks, files=files, documents=len(req.context))
+    paths = [f.path for f in req.files if f.status.value == "ok"]
+    return RetrievalIndex(chunks, files=files, documents=len(req.context),
+                          common_terms=common_path_terms(paths))
 
 
 def file_query(f: FileAnalysis) -> Counter:
@@ -255,14 +358,28 @@ def file_query(f: FileAnalysis) -> Counter:
     return Counter(tokenize(" ".join(parts)))
 
 
+def file_links(f: FileAnalysis) -> Links:
+    """Names the file defines (classes, functions) and names its code uses."""
+    defines = {c.name for c in f.classes} | {fn.name for fn in f.functions}
+    texts: List[Optional[str]] = []
+    for fn in [m for c in f.classes for m in c.methods] + list(f.functions):
+        texts += [fn.source, fn.signature, fn.return_type, *(p.type for p in fn.parameters)]
+    for c in f.classes:
+        texts += [" ".join(c.bases), *(x.type for x in c.fields)]
+    for e in f.endpoints:
+        texts += [e.request_body, e.response, *(p.type for p in e.parameters)]
+    return Links(uses=identifiers(*texts) - defines, defines=defines)
+
+
 def retrieve(index: Optional[RetrievalIndex], f: FileAnalysis,
              k_code: int = 4, k_docs: int = 3) -> Retrieved:
     """Related code from other files + documentation passages for one file."""
     if index is None:
         return Retrieved()
     q = file_query(f)
-    code = index.search(q, "code", f.path, k_code)
-    docs = index.search(q, "doc", None, k_docs)
+    links = file_links(f)
+    code = index.search(q, "code", f.path, k_code, links)
+    docs = index.search(q, "doc", None, k_docs, links)
     for i, c in enumerate(code, start=1):
         c.ref = f"C{i}"
     for i, d in enumerate(docs, start=1):
