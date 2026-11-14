@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import './App.css';
 import { githubApi, githubApiText } from './githubApi';
 import { TemplateManager, TemplatePicker } from './DocumentationTemplates';
@@ -206,6 +206,10 @@ export default function DocumentationManagement({ userId, userRole }) {
   const [submitError, setSubmitError] = useState('');
   const [submitNotice, setSubmitNotice] = useState('');
   const [workflowsRefresh, setWorkflowsRefresh] = useState(0);
+  // Bumped by every new generation, by Reset and on unmount: a generation whose number is outdated stops
+  // instead of writing its late result over the screen.
+  const generationRun = useRef(0);
+  useEffect(() => () => { generationRun.current += 1; }, []);
   const [job, setJob] = useState(null);
 
   const [workflowPageIndex, setWorkflowPageIndex] = useState(0);
@@ -386,6 +390,9 @@ export default function DocumentationManagement({ userId, userRole }) {
 
     }
 
+    const runId = ++generationRun.current;
+    const isCurrent = () => runId === generationRun.current;
+
     setStatus('generating');
 
     setError('');
@@ -428,6 +435,8 @@ export default function DocumentationManagement({ userId, userRole }) {
 
       if (!createdJob?.id) throw new Error('The documentation service returned an invalid job.');
 
+      if (!isCurrent()) return;
+
       setJobId(createdJob.id);
       setJob(createdJob);
 
@@ -439,7 +448,12 @@ export default function DocumentationManagement({ userId, userRole }) {
 
         await new Promise((resolve) => window.setTimeout(resolve, 750));
 
+        if (!isCurrent()) return;
+
         currentJob = await githubApi(`/api/documentation/jobs/${encodeURIComponent(createdJob.id)}`, { userId });
+
+        if (!isCurrent()) return;
+
         setJob(currentJob);
       }
 
@@ -464,6 +478,8 @@ export default function DocumentationManagement({ userId, userRole }) {
         githubApi(`${jobPath}/report`, { userId }),
 
       ]);
+
+      if (!isCurrent()) return;
 
       if (!markdown.trim()) throw new Error('The documentation service returned an empty document.');
 
@@ -500,6 +516,8 @@ export default function DocumentationManagement({ userId, userRole }) {
         + (templateName ? ` using the "${templateName}" template.` : '.'));
     } catch (requestError) {
 
+      if (!isCurrent()) return;
+
       setStatus('failed');
       if (requestError.code === 'TEMPLATE_NOT_FOUND') {
         templateList.reload();
@@ -530,8 +548,10 @@ export default function DocumentationManagement({ userId, userRole }) {
     try {
       let documentId = submittedDocumentId;
       if (!documentId) {
+        // An empty JSON body is required: a POST without Content-Type reaches GitHub Integration as
+        // form-urlencoded through the Backend and is answered with HTTP 415.
         const saved = await githubApi(`/api/documentation/jobs/${encodeURIComponent(jobId)}/document`, {
-          method: 'POST', userId,
+          method: 'POST', userId, body: {},
         });
         if (!saved?.id) throw new Error('The backend did not return the saved document.');
         documentId = String(saved.id);
@@ -570,6 +590,8 @@ export default function DocumentationManagement({ userId, userRole }) {
   }
 
   function handleReset() {
+
+    generationRun.current += 1;
 
     setStatus('idle');
 

@@ -111,6 +111,13 @@ class StatefulBackend:
         deny = lambda: send(403, {"message": STATUS_FOR_ROLE_ERROR})
         method = request.method
         base = "/api/document-workflows"
+        # Same as the real stack: the Backend forwards a body-less POST as form-urlencoded and the endpoints
+        # whose @RequestBody is optional answer HTTP 415 (found on the real stack during LD-403).
+        optional_body = (method == "POST" and body is None and (
+            path.endswith("/approve") or path.endswith("/reject")
+            or (path.startswith("/api/documentation/jobs/") and path.endswith("/document"))))
+        if optional_body:
+            return send(415, {"status": 415, "code": "UNSUPPORTED_MEDIA_TYPE", "message": "Request failed (HTTP 415)."})
 
         if (method, path) == ("GET", "/api/auth/me"):
             return send(200, {"id": self.user["id"], "email": f"{self.current}@example.test", "role": self.user["role"]})
@@ -488,6 +495,8 @@ def test_ui_submit_then_claim_review_approve_and_full_history(page: Page):
     assert actions_in(approval_history) == ["CREATED", "SUBMITTED"]
     assert backend.mutating_posts() == ["generate", "document", "document-workflows", "submit"]
     assert backend.item["status"] == "PENDING_STAFF_REVIEW"
+    # the save step sends an empty JSON body (a body-less POST is answered with 415 on the real stack)
+    assert ("POST", "/api/documentation/jobs/job-1/document", {}) in backend.requests
 
     switch_user(page, backend, "staff")
     page.get_by_role("button", name="Open Staff Review Queue").click()
