@@ -66,3 +66,6 @@ Frontend lấy tài liệu đã sinh từ AI Service để hiển thị và dùn
 ## 8. Kiểm thử
 
 Kiểm thử theo các tiêu chí chấp nhận ở mục 7 trên giao diện web; Jira có subtask riêng LD-105 "Test Documentation Preview & Editing". LD-101 hoàn thành trong Sprint 4 (26/10/2026), có 3 pull request đã merge trên GitHub và 1 build thành công.
+
+
+

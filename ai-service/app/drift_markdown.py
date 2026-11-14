@@ -109,3 +109,6 @@ def render(report: DriftReport, min_severity: Optional[Severity] = None) -> str:
                     f"- **Confidence:** {f.confidence:.2f} ({f.confidence_level})", "",
                     *_evidence(f), ""]
     return "\n".join(out).rstrip() + "\n"
+
+
+

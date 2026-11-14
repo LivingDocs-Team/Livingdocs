@@ -121,3 +121,6 @@ Không cấu hình `FRONTEND_URL` thì callback trả JSON `"Kết nối GitHub 
 | `BAD_REQUEST`, `VALIDATION_ERROR`, `INVALID_REQUEST` | 400 | Hiện `message` |
 
 Response lỗi thật của từng mã: `docs/samples/sync-errors.sample.json`. Chi tiết: mục 4 của [repository-sync-contract.md](repository-sync-contract.md).
+
+
+

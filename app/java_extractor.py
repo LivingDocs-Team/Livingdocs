@@ -316,3 +316,6 @@ def java_imports(tree: Tree) -> List[str]:
         if c.type == "import_declaration":
             out.append(_text(c).removeprefix("import").removesuffix(";").replace("static ", "").strip())
     return sorted(set(out))
+
+
+

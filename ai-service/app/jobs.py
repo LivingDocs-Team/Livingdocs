@@ -196,3 +196,6 @@ def run_job(job_id: str, req: GenerateRequest, generator: Optional[DocGenerator]
     except Exception as exc:
         jobs.update(job_id, status=JobStatus.failed, message="Failed", error=str(exc),
                     file_results=results, warnings=warnings)
+
+
+

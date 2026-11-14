@@ -47,3 +47,6 @@ class ChangedEntityDetectorTest {
                 new ChangedEntity("METHOD", "S.latestOrSync", "MODIFIED", 2, 3));
     }
 }
+
+
+

@@ -461,3 +461,6 @@ def test_report_store_lists_newest_first_and_filters():
     assert [x.id for x in store.list(pull_request=7)] == [reports[2].id]
     assert store.list(repository="other/repo") == []
     assert rows[0].summary.findings == len(reports[2].findings)
+
+
+

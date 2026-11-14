@@ -113,3 +113,6 @@ Cách tính điểm nằm trong trường `method` của báo cáo và trong `ap
   dẫn chứng (trích code của chính thực thể = 1; chỉ trích nguồn khác = 0,5; không trích = 0)
   + 0,20 × có mô tả + 0,20 × điểm AI tự đánh giá; trừ 0,10 nếu trích mã không tồn tại.
 - Không có AI (offline hoặc dự phòng): 0,60 × chất lượng đầu vào.
+
+
+

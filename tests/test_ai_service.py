@@ -19,3 +19,6 @@ def test_ai_service_timeout_handling():
     """LD-374: Kiểm tra xử lý timeout khi kết nối AI Gateway"""
     with pytest.raises(TimeoutError):
         mock_generate_ai_docs({"timeout": True}, api_key="sk-test-key")
+
+
+

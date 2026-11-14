@@ -63,3 +63,6 @@ the verified user and filters repositories by that user's GitHub connection. Rep
 disconnect, sync, snapshot, and documentation job access check the same connection/job owner.
 This MVP does not model shared workspaces. Sync snapshots and documentation job ownership remain
 in memory, so restart loses them and multiple replicas are unsupported.
+
+
+

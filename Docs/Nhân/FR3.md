@@ -66,3 +66,6 @@ Lưu ý: luồng documentation generation có thể chủ động gọi lại sy
 - **AC-GH-04.2:** `scope`, `target`, thứ tự file và tên field khớp contract.
 - **AC-GH-04.3:** JSON trả về có thể gửi thẳng tới `POST /api/v1/analyze-repo` mà không cần đổi field.
 - **AC-GH-04.4:** Không có snapshot trả 404; user không sở hữu repo trả 403.
+
+
+

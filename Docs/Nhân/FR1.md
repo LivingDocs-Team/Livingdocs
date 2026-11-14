@@ -120,3 +120,6 @@ Tên field HTTP phải khớp DTO/controller hiện có. Nếu API downstream d�
 - **AC-INT-01.12:** Cache miss không được coi là bằng chứng snapshot được lưu bền vững; tài liệu phải nêu rõ giới hạn in-memory.
 - **AC-INT-01.13:** Compose truyền `FRONTEND_URL` cho Backend; OAuth redirect hoạt động với URL frontend được cấu hình.
 - **AC-INT-01.14:** Backend production/default log không bật DEBUG hoặc SQL statement logging; profile development có thể bật các log này.
+
+
+

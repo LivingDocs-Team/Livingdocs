@@ -175,3 +175,6 @@ def test_built_in_templates_shown_when_template_list_unavailable(page: Page):
 
     expect(page.get_by_text("Could not load templates from the server")).to_be_visible()
     expect(page.get_by_role("radio", name="Brief summary")).to_be_visible()
+
+
+

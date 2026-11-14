@@ -35,3 +35,6 @@ Kiểm thử và CI không phải chức năng của sản phẩm nên không c�
 
 - LD-390: kiểm thử tích hợp AI Service (`ai-service/tests/integration/`, job CI `ai-service-integration`), danh sách test case ở `ai-service/tests/integration/README.md`.
 - Job CI `ai-service-test` chạy toàn bộ `pytest` của `ai-service/`.
+
+
+

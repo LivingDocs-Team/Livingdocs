@@ -148,3 +148,6 @@ def test_activity_error_is_shown_in_english(page: Page):
 
     expect(activity(page).get_by_role("alert")).to_have_text("You do not have access to this item.")
     expect(page.get_by_text(service_message)).to_have_count(0)
+
+
+

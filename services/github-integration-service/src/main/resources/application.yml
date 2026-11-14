@@ -55,3 +55,6 @@ services:
     base-url: ${CODE_ANALYZER_BASE_URL:http://localhost:8000}
   ai-service:
     base-url: ${AI_SERVICE_BASE_URL:http://localhost:8001}
+
+
+

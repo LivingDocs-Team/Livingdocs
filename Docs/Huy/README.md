@@ -33,3 +33,6 @@ Kiểm thử và cấu hình hạ tầng CI/CD không phải chức năng giao d
 
 - **LD-364 / LD-376 / LD-391:** Thiết lập và kiểm thử đường ống tích hợp liên tục GitHub Actions CI/CD Pipeline (job `test-ai-service` chạy `pytest tests/ -v`).
 - **LD-105-Tests / LD-390:** Kịch bản kiểm thử tích hợp giao diện Preview và Unit Test Backend cho các endpoints `GroundingEvidence` & `Submission` (tệp `ai-service/tests/test_evidence_submission.py`).
+
+
+

@@ -17,3 +17,6 @@ def test_missing_local_markdown_link_is_reported(tmp_path: Path):
     errors = check_file(source)
     assert len(errors) == 1
     assert "missing local link" in errors[0]
+
+
+

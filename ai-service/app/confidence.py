@@ -102,3 +102,6 @@ def score_entity(ent: Entity, doc: Optional[ItemDoc], catalog: EvidenceCatalog,
 
 def average(scores: List[float]) -> Optional[float]:
     return round(sum(scores) / len(scores), 2) if scores else None
+
+
+

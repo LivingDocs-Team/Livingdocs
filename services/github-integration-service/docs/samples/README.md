@@ -48,3 +48,6 @@ mvn test
 | `REPOSITORY_NOT_FOUND` (404) | Gỡ GitHub App khỏi repo trên GitHub, rồi đồng bộ lại |
 | `TOKEN_INVALID` (401) | Thu hồi quyền app trên GitHub (Settings → Applications), rồi đồng bộ lại |
 | `EMPTY_REPOSITORY` (409) | Tạo một repo trống, cài app cho repo đó, thêm vào workspace rồi đồng bộ |
+
+
+

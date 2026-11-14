@@ -11,10 +11,12 @@ import RepositoryManagement from './RepositoryManagement';
 import DocumentationManagement from './DocumentationManagement';
 import DocumentationSearch from './DocumentationSearch';
 import DocumentationDrift from './DocumentationDrift';
+import AdminDashboard from './AdminDashboard';
 
 function App() {
   const [page, setPage] = useState('login');
   const [userId, setUserId] = useState(null);
+  const [userRole, setUserRole] = useState('');
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -56,6 +58,7 @@ function App() {
 
       if (!cancelled) {
         setUserId(String(user.id));
+        setUserRole(String(user.role || ''));
         sessionStorage.setItem('livingdocs.userId', String(user.id));
         setPage('github');
       }
@@ -81,6 +84,7 @@ function App() {
     const handleSessionExpired = () => {
       sessionStorage.removeItem('livingdocs.userId');
       setUserId(null);
+      setUserRole('');
       setPage('login');
       setLoginError('Your LivingDocs session has expired. Please sign in again.');
     };
@@ -136,6 +140,7 @@ function App() {
 
       sessionStorage.setItem('livingdocs.userId', String(result.id));
       setUserId(String(result.id));
+      setUserRole(result.role);
       setLoginSuccess('Signed in successfully as ' + result.email + '.');
     } catch {
       setLoginError('Could not connect to the backend. Check the backend URL and try again.');
@@ -160,11 +165,14 @@ function App() {
       }
       sessionStorage.removeItem('livingdocs.userId');
       setUserId(null);
+      setUserRole('');
       setPage('login');
     } catch {
       setLogoutError('Could not connect to the backend to end the session.');
     }
   }
+
+  const isAdmin = ['ADMIN', 'ADMINISTRATOR'].includes(userRole);
 
   const renderPage = () => {
     switch (page) {
@@ -260,6 +268,20 @@ function App() {
             <p className="switch-page">
               <button type="button" onClick={() => setPage('documentation')}>
                 Back to Documentation Management
+              </button>
+            </p>
+          </>
+        );
+
+      case 'admin':
+        return (
+          <>
+            {isAdmin
+              ? <AdminDashboard userId={userId} />
+              : <p role="alert">Administrator access is required.</p>}
+            <p className="switch-page">
+              <button type="button" onClick={() => setPage('login')}>
+                Back to login
               </button>
             </p>
           </>
@@ -422,6 +444,20 @@ function App() {
                   </span>
                   <span className="quick-access-link">Open feature →</span>
                 </button>
+                {isAdmin && (
+                  <button
+                    className="quick-access-card"
+                    type="button"
+                    onClick={() => setPage('admin')}
+                  >
+                    <span className="quick-access-icon" aria-hidden="true">⚙</span>
+                    <span className="quick-access-title">Administration</span>
+                    <span className="quick-access-description">
+                      Manage users, workspaces, system health and audit logs.
+                    </span>
+                    <span className="quick-access-link">Open feature →</span>
+                  </button>
+                )}
               </div>
             </section>
           </main>
@@ -458,6 +494,12 @@ function App() {
               Documentation Drift
             </button>
 
+            {isAdmin && (
+              <button type="button" onClick={() => setPage('admin')}>
+                Administration
+              </button>
+            )}
+
             <button type="button" onClick={() => setPage('profile')}>
               Profile
             </button>
@@ -480,3 +522,6 @@ function App() {
 }
 
 export default App;
+
+
+

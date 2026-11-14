@@ -6,3 +6,6 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record GitHubBlob(String sha, Long size, String encoding, String content) {
 }
+
+
+

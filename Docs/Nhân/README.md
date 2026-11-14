@@ -19,3 +19,6 @@ Tài liệu này tổng hợp các task và phần việc Nhân đã tham gia tr
 - Các yêu cầu kỹ thuật được đặt tên `ENG-OPS`, không gọi nhầm là Functional Requirement của người dùng cuối.
 - Snapshot repository và một số job/state hiện dùng in-memory store. Tự đồng bộ lại khi cache miss là cơ chế phục hồi bằng cách gọi GitHub, không phải persistent storage.
 - Khi implementation hoặc API contract thay đổi, cần cập nhật tài liệu và test tương ứng. Tài liệu không thay thế việc kiểm tra source code thực tế.
+
+
+

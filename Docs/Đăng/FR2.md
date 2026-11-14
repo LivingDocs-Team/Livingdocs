@@ -117,3 +117,6 @@ Ràng buộc duy nhất `(workspace_id, github_repo_id)`; index theo `workspace_
 - Người dùng khác xem danh sách, thêm repo vào `ws-user-flow`, xem chi tiết hoặc gỡ repo đều bị `403`; chủ repo gỡ được (`204`), sau đó xem chi tiết bị `404`.
 - Sau khi ngắt kết nối GitHub, liệt kê repo có thể thêm trả `409 GITHUB_NOT_CONNECTED`.
 - GitHub trả 401 khi liệt kê repo thì API trả `401 GITHUB_REAUTH_REQUIRED` và kết nối chuyển `INVALID`.
+
+
+

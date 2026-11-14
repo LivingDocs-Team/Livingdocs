@@ -203,3 +203,6 @@ class DocumentationSearchControllerTest {
                         "https://github.com/acme/shop/commit/abc123"), Map.of(), List.of(), List.of(), null, List.of(), Instant.EPOCH);
     }
 }
+
+
+

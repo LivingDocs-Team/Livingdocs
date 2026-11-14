@@ -273,3 +273,6 @@ def classify_added(hit):
                       f"New {c.kind} {code(c.name)} in {code(f.path)} is not described in this section.",
                       f"Document {code(c.new_signature or c.name)}.", after=c.new_signature or c.name,
                       certainty=0.8)
+
+
+

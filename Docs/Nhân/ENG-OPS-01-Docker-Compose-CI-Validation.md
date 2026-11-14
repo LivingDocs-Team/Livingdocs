@@ -42,3 +42,6 @@
 3. Không dùng lệnh nuốt lỗi hoặc biến test fail thành success.
 4. Không sửa `.env`, xóa volume, commit/push/merge nếu chưa được cho phép.
 5. Báo cáo chính xác test nào pass, fail, skipped hoặc chưa chạy.
+
+
+

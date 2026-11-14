@@ -304,3 +304,6 @@ class Job(BaseModel):
     error: Optional[str] = None
     created_at: datetime = Field(default_factory=now)
     updated_at: datetime = Field(default_factory=now)
+
+
+

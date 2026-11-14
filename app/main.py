@@ -140,3 +140,6 @@ def java_module(path: str):
             break
     folder = p.rsplit("/", 1)[0] if "/" in p else ""
     return folder.replace("/", ".") or None
+
+
+

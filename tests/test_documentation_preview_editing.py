@@ -436,3 +436,6 @@ def test_reset_returns_to_initial_state(page: Page):
     expect(page.get_by_text("Ready to generate")).to_be_visible()
     expect(page.get_by_role("heading", name="Generated Documentation")).to_have_count(0)
     expect(page.get_by_text(re.compile(r"Generation job:"))).to_have_count(0)
+
+
+

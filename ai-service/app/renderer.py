@@ -430,3 +430,6 @@ def unknown_entities(f: FileAnalysis, doc: FileDoc) -> List[str]:
     fnames = {fn.name for fn in f.functions}
     extra += [fd.name for fd in doc.functions if fd.name not in fnames]
     return extra
+
+
+

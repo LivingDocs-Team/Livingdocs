@@ -236,3 +236,6 @@ def test_job_keeps_template_snapshot_after_template_changes():
     run_job(job.id, req, template=tpl)
     done = jobs.get(job.id)
     assert done.status.value == "completed" and headings(done.result) == ["Các hàm"]
+
+
+

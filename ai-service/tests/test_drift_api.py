@@ -102,3 +102,6 @@ def test_errors():
     bad_status = [{"path": "a.py", "status": "exploded"}]
     assert client.post("/drift/changes", json=body(files=bad_status)).status_code == 422
     assert client.get("/drift/reports", params={"pull_request": 0}).status_code == 422
+
+
+

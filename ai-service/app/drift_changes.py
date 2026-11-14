@@ -770,3 +770,6 @@ def analyze_pull_request(pr: PullRequestInfo, files: List[ChangedFile],
                                additions=sum(s.additions for s in summaries),
                                deletions=sum(s.deletions for s in summaries),
                                entity_changes=sum(len(s.entity_changes) for s in summaries))
+
+
+

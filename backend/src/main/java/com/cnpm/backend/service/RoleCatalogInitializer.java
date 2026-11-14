@@ -117,3 +117,6 @@ public class RoleCatalogInitializer implements ApplicationRunner {
         return defaults.stream().anyMatch(newlyCreated::contains);
     }
 }
+
+
+

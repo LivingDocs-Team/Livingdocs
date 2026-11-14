@@ -64,3 +64,6 @@ Không có endpoint riêng. Dùng trường `context` của `POST /generate` (FR
 ## 8. Kiểm thử
 
 `ai-service/tests/test_evidence_confidence.py` (tách từ, tách đoạn và số dòng, truy xuất code và tài liệu, không có nhiễu khi không có ngữ cảnh), `tests/integration/test_ai_service_integration.py` (prompt của `routes.py` có code liên quan và README).
+
+
+

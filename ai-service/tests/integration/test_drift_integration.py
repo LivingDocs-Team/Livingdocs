@@ -124,3 +124,6 @@ def test_report_is_kept_and_listed(pr_body):
     assert client.get(f"/drift/reports/{rep['id']}").json()["findings"] == rep["findings"]
     rows = client.get("/drift/reports", params={"repository": "acme/shop", "pull_request": 7}).json()
     assert rows[0]["id"] == rep["id"] and rows[0]["head_sha"] == "abc1234"
+
+
+

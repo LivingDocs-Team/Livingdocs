@@ -135,3 +135,6 @@ Test nằm trong `services/github-integration-service/src/test/java/com/livingdo
 | `client/GitHubClientRepositoryApiTest` | 8 | HTTP server giả: đọc đúng JSON của repo, commit, tree, blob, languages, danh sách commit; giữ mã lỗi 404; nhận diện rate limit, 401; 403 không kèm rate limit thì không phải rate limit; không đưa nội dung lỗi của GitHub vào thông báo; không có token thì không gửi `Authorization` |
 | `RepositorySyncApiTest` | 9 | `@SpringBootTest` + MockMvc + H2: đồng bộ thành công và cập nhật repo; xem lại kết quả và dữ liệu cho phân tích; chưa có kết quả trong bộ nhớ thì bước sinh tài liệu tự đồng bộ lại, đã có thì không gọi GitHub; người khác `403`, repo không có `404`; tham số sai `400` không gọi GitHub; sai nhánh `404` giữ trạng thái; repo bị xoá trên GitHub thì `ERROR`; token bị thu hồi thì kết nối `INVALID`; rate limit `429` kèm `Retry-After`, giữ trạng thái |
 | `sync/GitHubRepositoryFetcherLiveTest` | 1 | Đồng bộ repo thật trên GitHub (25 file); chỉ chạy khi có `GITHUB_LIVE_TEST=true`, CI chạy ở mỗi lần push và pull request |
+
+
+

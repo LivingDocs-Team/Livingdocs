@@ -219,3 +219,6 @@ def test_api_severity_rules_filter_and_markdown():
     assert md.status_code == 200 and md.headers["content-type"].startswith("text/markdown")
     assert md.text.startswith("## Documentation drift") and "### 🔵 Low" not in md.text
     assert client.get("/drift/reports/nope/markdown").status_code == 404
+
+
+

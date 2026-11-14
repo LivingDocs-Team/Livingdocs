@@ -6,3 +6,6 @@ package com.livingdocs.github.sync;
  */
 public record SyncWarning(String code, String message) {
 }
+
+
+

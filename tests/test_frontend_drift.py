@@ -248,3 +248,6 @@ def test_invalid_number_and_unknown_pull_request(page: Page):
     expect(page.get_by_role("alert")).to_have_text(
         "The pull request was not found in this repository. Check the number and try again.")
     assert state["analyze_bodies"] == [{"pullRequestNumber": 404, "includeRepositoryDocs": False}]
+
+
+

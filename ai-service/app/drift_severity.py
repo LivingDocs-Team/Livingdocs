@@ -215,3 +215,6 @@ def rules_table() -> List[dict]:
     """GET /drift/severity-rules: every rule, for the UI legend and the documentation."""
     return [{"id": r.id, "kind": r.kind, "label": r.label, "description": r.description,
              "level": r.level.value if r.level else None, "delta": r.delta} for r in RULES.values()]
+
+
+

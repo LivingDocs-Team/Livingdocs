@@ -235,3 +235,6 @@ class EntityExtractor:
                 raise ValueError(error)
         classes, functions, endpoints, _ = extract_java(tree, full_code)
         return classes, functions, endpoints
+
+
+

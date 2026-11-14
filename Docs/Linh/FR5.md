@@ -92,3 +92,6 @@ Frontend gọi qua Backend BFF → GitHub Integration, cùng cấu trúc dưới
 - AI Service: `ai-service/tests/test_templates.py` (24 test: xem, kiểm tra hợp lệ, trùng tên, sửa/xoá, mẫu có sẵn chỉ đọc, lưu file và khởi động lại, file hỏng, tài liệu đúng mục và thứ tự, phạm vi prompt và điểm, chụp mẫu cho job).
 - GitHub Integration: `DocumentationTemplateServiceTest`, `DocumentationTemplateControllerTest`, `DocumentationGenerationServiceTest.reportsUnknownTemplateAsBadRequest`.
 - Frontend: `tests/test_frontend_templates.py` (Playwright, 3 test: xem và chọn mẫu, quản lý mẫu riêng, dự phòng khi server lỗi).
+
+
+

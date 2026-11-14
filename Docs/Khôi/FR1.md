@@ -73,3 +73,6 @@ Frontend gọi API của GitHub Integration Service để lấy trạng thái k�
 ## 8. Kiểm thử
 
 Kiểm thử theo các tiêu chí chấp nhận ở mục 7 trên giao diện web. Jira ghi nhận LD-298 hoàn thành trong Sprint 3 (21/10/2026), có 1 pull request đã merge trên GitHub và 1 build thành công.
+
+
+

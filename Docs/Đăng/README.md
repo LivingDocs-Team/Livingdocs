@@ -39,3 +39,6 @@ Kiểm thử và CI không phải chức năng của sản phẩm nên không c�
 - `services/github-integration-service/docs/repository-sync-contract.md`: contract của API đồng bộ.
 - `services/github-integration-service/docs/frontend-api-guide.md`: hướng dẫn gọi API cho frontend.
 - `services/github-integration-service/docs/samples/`: file JSON mẫu của kết quả đồng bộ, lỗi và dữ liệu cho phân tích.
+
+
+

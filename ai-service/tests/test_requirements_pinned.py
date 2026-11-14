@@ -22,3 +22,6 @@ def test_direct_dependencies_match_requirements_in():
     for r in _requirements("requirements.in"):
         name, version = r.split("==")
         assert pins.get(name.split("[")[0].lower()) == version, f"{r} differs from requirements.txt"
+
+
+
