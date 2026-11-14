@@ -54,6 +54,7 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | GET | `/documents/{id}/versions`, `/versions/{n}` | Version history (newest first) / one version |
 | GET | `/documents/{id}/history` | Audit trail: created, proposed, accepted, edited, dismissed, ... |
 | POST | `/drift/changes` | Changed code entities of a Pull Request (LD-146); nothing is stored |
+| POST | `/drift/context` | Context to update the docs of each changed entity: diff (X1), related code (C), docs naming it first (D), prompt text (LD-338); nothing is stored |
 | POST | `/drift/analyze` | Drift report of a Pull Request: findings, affected docs, evidence (LD-147/148/149) |
 | GET | `/drift/reports?repository=&pull_request=` | Drift reports, newest first |
 | GET | `/drift/reports/{id}?min_severity=high` | One drift report (optionally only findings at or above a level) |
