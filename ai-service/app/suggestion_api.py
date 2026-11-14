@@ -1,10 +1,12 @@
-"""HTTP API of documentation suggestions (LD-353)."""
+"""HTTP API of documentation suggestions (LD-353, LD-354)."""
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
 from . import suggestions as sg
-from .suggestions import Suggestion, SuggestionBatch, UpdateSuggestionRequest, suggestion_store
+from .drift import drift_reports
+from .suggestions import (DriftSuggestionRequest, Suggestion, SuggestionBatch, UpdateSuggestionRequest,
+                          suggestion_store)
 from .versions import documents
 
 router = APIRouter(tags=["suggestions"])
@@ -16,6 +18,18 @@ def create_update_suggestions(req: UpdateSuggestionRequest):
     request) that describes the code changed by a Pull Request. Same body as /drift/context,
     plus `output_language` and `use_ai`. The batch is kept for review."""
     return sg.update_suggestions(req, documents, sg.get_client(req.use_ai))
+
+
+@router.post("/drift/reports/{report_id}/suggestions", response_model=SuggestionBatch, status_code=201)
+def create_drift_suggestions(report_id: str, req: Optional[DriftSuggestionRequest] = None):
+    """LD-354: a concrete fix for the findings of a drift report: which passage of which document
+    to change and how. Saved documents are read at the version the report checked; Markdown
+    files of the repository must be sent again in `docs`."""
+    report = drift_reports.get(report_id)
+    if report is None:
+        raise HTTPException(404, "Drift report not found")
+    req = req or DriftSuggestionRequest()
+    return sg.drift_suggestions(report, req, documents, sg.get_client(req.use_ai))
 
 
 @router.get("/suggestions", response_model=List[Suggestion])

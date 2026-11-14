@@ -1,4 +1,4 @@
-"""Documentation update suggestions (LD-353).
+"""Documentation update suggestions (LD-353) and drift resolution suggestions (LD-354).
 
 When a Pull Request changes code, propose concrete edits to the documentation that describes
 it: for each passage that must change, the text it has now (`original`), the text it should
@@ -12,6 +12,9 @@ How the proposed text is made:
 - AI (when a client is configured): rewrites the passage from the LD-338 context; its answer
   replaces the rule result only when it is valid.
 A behaviour change that the rules cannot express gives a `review` suggestion without text.
+
+LD-354 turns the findings of a drift report (LD-145) into the same kind of suggestion: each one
+says which findings it resolves; stale line references get the entity's new line range.
 """
 import difflib
 import json
@@ -29,8 +32,8 @@ from pydantic import BaseModel, Field
 from .change_context import ChangeContextRequest, entity_context, build_change_index, endpoint_handlers
 from .drift_affected import DocText, Hit, collect_docs, find_affected
 from .drift_changes import analyze_pull_request
-from .drift_models import (DocMatch, DocSource, EntityChange, EntityChangeType, FileChangeSummary,
-                           ParameterChangeKind, PullRequestInfo)
+from .drift_models import (DocMatch, DocSource, DriftFinding, DriftReport, EntityChange,
+                           EntityChangeType, FileChangeSummary, ParameterChangeKind, PullRequestInfo)
 from .models import ContextDocument, now
 from .renderer import LABELS
 from .retrieval import Chunk, split_document
@@ -601,6 +604,183 @@ def get_client(use_ai: bool = True):
         return None
     from .generator import AnthropicClient
     return AnthropicClient()
+
+
+# ---------- LD-354: drift findings -> suggestions ----------
+
+class DriftSuggestionRequest(BaseModel):
+    docs: List[ContextDocument] = Field(default_factory=list)
+    """Markdown files of the repository named by the report (their text is not kept in it)."""
+    output_language: str = Field(default="vi", pattern="^(vi|en)$")
+    use_ai: bool = True
+
+
+SEMANTIC_REVIEW = {"status_codes_changed", "exceptions_changed", "values_changed",
+                   "implementation_changed"}
+_REF = re.compile(r"^(?P<path>.+?)(?P<sep>:|#L)(?P<a>\d+)(?:-L?(?P<b>\d+))?$")
+_NOW = re.compile(r"now (?P<path>\S+?):(?P<a>\d+)(?:-(?P<b>\d+))?$")
+
+
+def _ref_text(term: str, path: str, a: int, b: int) -> str:
+    m = _REF.match(term)
+    sep = m.group("sep") if m else ":"
+    if sep == "#L":
+        return f"{path}#L{a}" + (f"-L{b}" if b != a else "")
+    return f"{path}:{a}" + (f"-{b}" if b != a else "")
+
+
+def line_ref_edit(m: DocMatch, analysis) -> Optional[Edit]:
+    """A stale `path:a-b` reference: its new place, from the note or from the entity that
+    occupied exactly those lines before the change. An Edit that changes nothing means the
+    reference is still right; None means its new place is unknown."""
+    now_ = _NOW.search(m.note or "")
+    if now_:
+        path, a = now_.group("path"), int(now_.group("a"))
+        b = int(now_.group("b") or a)
+    else:
+        ref = _REF.match(m.term)
+        if not ref:
+            return None
+        a0, b0 = int(ref.group("a")), int(ref.group("b") or ref.group("a"))
+        hit = next((c for f in analysis.files for c in f.entity_changes
+                    if c.old_line_start == a0 and (c.old_line_end or c.old_line_start) == b0
+                    and c.line_start), None)
+        if hit is None:
+            return None
+        path, a, b = m.target, hit.line_start, hit.line_end or hit.line_start
+    new = _ref_text(m.term, path, a, b)
+    return Edit(f"`{m.term}` now points to `{new}`", lambda t, o=m.term, n=new: t.replace(o, n), 0.9)
+
+
+def finding_doc(f: DriftFinding, store, files: Dict[str, str], warnings: List[str]) -> Optional[DocText]:
+    d = f.document
+    if d.source == DocSource.repository:
+        text = files.get(d.path)
+        if text is None:
+            msg = f"{d.path}: the Markdown file is not in the request; its findings got no suggestion."
+            if msg not in warnings:
+                warnings.append(msg)
+            return None
+        return DocText(DocSource.repository, d.path, text)
+    try:
+        doc = store.get(d.document_id)
+        v = store.version(d.document_id, d.version)
+    except Exception:
+        msg = f"Document '{d.document_id}' version {d.version} not found; its findings got no suggestion."
+        if msg not in warnings:
+            warnings.append(msg)
+        return None
+    for sec in v.sections if v.sections_match_content else []:
+        if sec.path == d.path:
+            return DocText(DocSource.document, sec.path, sec.markdown, doc.id, doc.title, v.number,
+                           documents_file=sec.path)
+    return DocText(DocSource.document, d.path, v.content, doc.id, doc.title, v.number)
+
+
+def _change_of(report: DriftReport, f: DriftFinding) -> Optional[EntityChange]:
+    for fs in report.analysis.files:
+        if fs.path != f.file:
+            continue
+        for c in fs.entity_changes:
+            if f.entity in (c.name, c.old_name):
+                return c
+    return None
+
+
+def _diff_evidence(f: DriftFinding) -> List[str]:
+    out = []
+    for e in f.evidence:
+        if e.kind.value == "code_diff" and e.path:
+            a, b = e.line_start, e.line_end
+            out.append(f"{e.id} {e.path}" + (f":{a}" + (f"-{b}" if b and b != a else "") if a else ""))
+    return out[:1]
+
+
+def drift_passages(report: DriftReport, store, files: Dict[str, str], lang_of,
+                   warnings: List[str]) -> Passages:
+    out = Passages()
+    texts: Dict[Tuple, DocText] = {}
+    for f in report.findings:
+        key = (f.document.source.value, f.document.document_id, f.document.path)
+        if key not in texts:
+            doc = finding_doc(f, store, files, warnings)
+            if doc is None:
+                continue
+            texts[key] = doc
+        doc = texts[key]
+        c = _change_of(report, f)
+        why = f"{f.id}: {f.message}"
+        if f.kind == "undocumented_entity" and c is not None:
+            anchor, level = insert_anchor(doc, c)
+            if anchor is None:
+                continue
+            p = out.at(doc, anchor.line_start)
+            section = new_section(c, level, lang_of(doc), report.pull_request)
+            p.add(c.name, f.kind, [Edit(f"`{c.name}` was added: describe it",
+                                        lambda t, s=section: t.rstrip("\n") + "\n\n" + s, 0.6,
+                                        SuggestionOperation.insert)], [why])
+            p.finding_ids.append(f.id)
+            continue
+        groups: "OrderedDict[int, Tuple[Passage, List[DocMatch]]]" = OrderedDict()
+        for m in f.document.matches:
+            p = out.at(doc, m.line)
+            groups.setdefault(id(p), (p, []))[1].append(m)
+        for p, matches in groups.values():
+            edits: List[Edit] = []
+            reasons = [why] + ([f.suggestion] if f.kind in SEMANTIC_REVIEW and f.suggestion else [])
+            evidence = _diff_evidence(f)
+            if f.kind == "line_reference_stale":
+                # the report's message lists every reference of the document: say only ours
+                reasons, evidence = [], []
+                for m in matches:
+                    e = line_ref_edit(m, report.analysis)
+                    if e is None:
+                        reasons.append(f"{f.id}: `{m.term}`: {m.note}; check the reference")
+                    elif e.apply(m.term) != m.term:
+                        edits.append(e)
+            elif f.kind in ("file_moved", "module_moved") and f.before and f.after:
+                edits = [Edit(f"`{f.before}` is now `{f.after}`",
+                              lambda t, o=f.before, n=f.after: _word(o).sub(n, t), 0.85)]
+            elif f.kind in ("file_removed", "module_removed"):
+                edits = [delete_edit(f.before or f.file, False, [m.term for m in matches])]
+            elif f.kind not in SEMANTIC_REVIEW and c is not None:
+                edits = edits_for_change(c, matches, p.chunk)
+            p.add(f.entity or f.file, f.kind, edits, reasons, evidence)
+            if f.id not in p.finding_ids:
+                p.finding_ids.append(f.id)
+    return out
+
+
+def drift_suggestions(report: DriftReport, req: DriftSuggestionRequest, store, client=None) -> SuggestionBatch:
+    warnings: List[str] = []
+    files = {d.path: d.content for d in req.docs}
+
+    def lang_of(d: DocText) -> str:
+        if d.document_id:
+            try:
+                return store.get(d.document_id).output_language
+            except Exception:
+                pass
+        return req.output_language
+
+    batch = SuggestionBatch(id=uuid.uuid4().hex[:12], source="drift", repository=report.repository,
+                            pull_request=report.pull_request, report_id=report.id, warnings=warnings)
+    passages = drift_passages(report, store, files, lang_of, warnings)
+    for p in passages.items.values():
+        if client is not None and not p.context:
+            p.context = [f"Drift findings for this passage: {'; '.join(p.reasons)}"]
+        s = to_suggestion(p, batch.id, "drift", client)
+        if s is not None:
+            batch.suggestions.append(s)
+    batch.warnings = list(warnings)       # the model keeps its own copy of the list
+    if not report.findings:
+        batch.warnings.append("The drift report has no finding: nothing to resolve.")
+    covered = {i for s in batch.suggestions for i in s.finding_ids}
+    missing = [f.id for f in report.findings if f.id not in covered]
+    if missing and report.findings:
+        batch.warnings.append(f"No suggestion for finding(s) {', '.join(missing)}.")
+    suggestion_store.add(batch, files)
+    return batch
 
 
 # ---------- store (in memory, like drift reports) ----------
