@@ -33,11 +33,14 @@ def test_code_names_in_prose():
 # ---------- index ----------
 
 def test_terms_common_to_most_paths_are_not_used_in_queries():
-    assert common_path_terms(["shop/a.py", "shop/b.py", "shop/c/d.py"]) == {"shop"}
+    assert common_path_terms(["shop/a.py", "shop/b.py", "shop/c/d.py", "shop/e.py"]) == {"shop"}
     assert common_path_terms(["src/main/java/com/acme/A.java", "src/main/java/com/acme/B.java",
-                              "src/main/java/com/acme/x/C.java", "tools/run.py"]) == \
-        {"src", "main", "java", "com", "acme"}
-    assert common_path_terms(["shop/a.py", "shop/b.py"]) == set()          # too few files to tell
+                              "src/main/java/com/acme/x/C.java", "src/main/java/com/acme/D.java",
+                              "tools/run.py"]) == {"src", "main", "java", "com", "acme"}
+    assert common_path_terms(["shop/a.py", "shop/b.py", "shop/c.py"]) == set()   # too few files to tell
+    # a domain word shared by most but not almost all files is kept (it is what the file is about)
+    assert common_path_terms(["shop/cart/a.py", "shop/cart/b.py", "shop/cart/c.py",
+                              "shop/pay/d.py", "shop/pay/e.py"]) == {"shop"}
 
 
 def test_heading_only_passages_are_not_indexed():
@@ -52,7 +55,8 @@ def test_generic_intro_no_longer_wins_every_file():
     files = [{"path": "shop/pricing/voucher.py", "functions": [{"name": "validate_voucher",
                                                                "parameters": [{"name": "code", "type": "str"}]}]},
              {"path": "shop/a.py", "functions": [{"name": "a"}]},
-             {"path": "shop/b.py", "functions": [{"name": "b"}]}]
+             {"path": "shop/b.py", "functions": [{"name": "b"}]},
+             {"path": "shop/c.py", "functions": [{"name": "c"}]}]
     r = req(files, [intro])
     docs = retrieve(build_index(r), r.files[0]).docs
     assert [d.name for d in docs] == ["Vouchers"]
