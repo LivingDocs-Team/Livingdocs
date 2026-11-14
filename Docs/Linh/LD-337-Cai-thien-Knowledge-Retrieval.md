@@ -24,7 +24,7 @@ Embedding (GloVe) không giải quyết được các điểm trên mà còn là
 | 1 | Bỏ dấu tiếng Việt khi tách từ | `Hóa đơn`, `HóaĐơn`, `HoaDon`, `hoa_don` đều thành `hoa don`; từ dừng tiếng Việt cũng so sánh không dấu. Tách chữ hoa/thường đúng cả với chữ có dấu. |
 | 2 | Gộp số nhiều tiếng Anh | `products` → `product`, `categories` → `category`; không đổi từ kết thúc `ss`, `us`, `is` (`class`, `status`, `basis`). |
 | 3 | Bỏ đoạn chỉ có tiêu đề | Đoạn không có nội dung ngoài dòng tiêu đề không vào chỉ mục; tiêu đề vẫn nằm trong đường dẫn tiêu đề của các đoạn con. |
-| 4 | Bỏ từ chung của đường dẫn khỏi truy vấn | Từ có trong ít nhất 60 % đường dẫn file (khi có từ 3 file trở lên) không dùng để truy vấn: tên repository (`shop`), `src main java com <công ty>`… |
+| 4 | Bỏ từ chung của đường dẫn khỏi truy vấn | Từ có trong ít nhất 60 % đường dẫn file (khi có từ 3 file trở lên) không dùng để truy vấn: tên repository (`shop`), `src main java com <công ty>`… (LD-339 đổi thành ≥ 80 % của ≥ 4 file cộng tên repository, xem `LD-339-Kiem-thu-RAG.md`) |
 | 5 | Ưu tiên code được gọi thật sự | Tên lớp/hàm xuất hiện trong `source`, chữ ký, kiểu tham số/trả về của file đang viết: hàm hoặc lớp được gọi +0,25; phương thức `Lớp.m` +0,25 khi file dùng cả `Lớp` và `m`, +0,10 khi chỉ dùng `Lớp`. |
 | 6 | Ưu tiên code gọi tới file | Mục code có `source`/kiểu dữ liệu nhắc tới lớp hoặc hàm của file đang viết: +0,20 (ví dụ route gọi `CartService()` khi đang viết `cart/service.py`). |
 | 7 | Ưu tiên đoạn tài liệu nhắc tên code của file | Đoạn có từ dạng code (`CartService`, `cart_id`) trùng tên lớp/hàm của file: +0,15. Từ thường (`cart`) không tính. |

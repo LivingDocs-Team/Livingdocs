@@ -31,7 +31,8 @@ CALL_BONUS = 0.25        # LD-337: the file calls this code (its name is in the 
 CLASS_BONUS = 0.10       # the file uses the class, not necessarily this method
 CALLER_BONUS = 0.20      # this code uses something the file defines
 DOC_MENTION_BONUS = 0.15  # the passage names a class / function of the file
-COMMON_PATH_SHARE = 0.6  # path terms found in at least this share of the files are ignored
+COMMON_PATH_SHARE = 0.8  # path terms found in at least this share of the files are ignored
+COMMON_PATH_MIN_FILES = 4  # ... when there are at least this many files
 
 _STOP = {
     "the", "and", "for", "with", "this", "that", "from", "into", "are", "was", "not", "def",
@@ -306,8 +307,14 @@ class RetrievalIndex:
             if score >= MIN_SCORE:
                 scored.append((score, c))
         scored.sort(key=lambda x: (-x[0], x[1].path, x[1].name))
-        out = []
-        for score, c in scored[:k]:
+        out, seen = [], set()
+        for score, c in scored:
+            if len(out) == k:
+                break
+            text = " ".join(c.excerpt.split())
+            if text in seen:          # LD-339: the same passage twice (copied docs) uses one slot
+                continue
+            seen.add(text)
             hit = Chunk(**{**c.__dict__})
             hit.score = round(score, 4)
             out.append(hit)
@@ -317,7 +324,7 @@ class RetrievalIndex:
 def common_path_terms(paths: List[str]) -> Set[str]:
     """Terms present in most file paths (repository name, src/main/java/com/...). They match
     every file, so using them in queries only pulls in generic passages (LD-336 finding)."""
-    if len(paths) < 3:
+    if len(paths) < COMMON_PATH_MIN_FILES:
         return set()
     counts: Counter = Counter()
     for p in paths:
@@ -343,8 +350,12 @@ def build_index(req: GenerateRequest) -> RetrievalIndex:
     for doc in req.context:
         chunks.extend(split_document(doc))
     paths = [f.path for f in req.files if f.status.value == "ok"]
-    return RetrievalIndex(chunks, files=files, documents=len(req.context),
-                          common_terms=common_path_terms(paths))
+    common = common_path_terms(paths)
+    if req.scope.value == "repository":
+        # the repository name used as a folder ("shop/...") says nothing about a single file
+        path_terms = {t for p in paths for t in tokenize(p)}
+        common |= {t for t in tokenize(req.target) if t in path_terms}
+    return RetrievalIndex(chunks, files=files, documents=len(req.context), common_terms=common)
 
 
 def file_query(f: FileAnalysis) -> Counter:
