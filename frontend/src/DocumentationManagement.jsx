@@ -3,6 +3,9 @@ import './App.css';
 import { githubApi, githubApiText } from './githubApi';
 import { TemplateManager, TemplatePicker } from './DocumentationTemplates';
 import { useTemplates } from './templateApi';
+import DocumentationSuggestionReview from './DocumentationSuggestionReview';
+import StaffReviewQueue from './StaffReviewQueue';
+import ManagerApprovalQueue from './ManagerApprovalQueue';
 
 
 function escapeHtml(value) {
@@ -153,7 +156,7 @@ function workflowRequestError(error, resource) {
   return error?.message || `Could not load ${resource}. Please try again.`;
 }
 
-export default function DocumentationManagement({ userId }) {
+export default function DocumentationManagement({ userId, userRole }) {
 
   const workspaceId = userId ? `ws-${userId}` : '';
 
@@ -356,7 +359,10 @@ export default function DocumentationManagement({ userId }) {
     })
       .then((result) => {
         if (cancelled) return;
-        const content = Array.isArray(result?.content) ? result.content : [];
+        if (!Array.isArray(result?.content)) {
+          throw new Error('The workflow list response was invalid.');
+        }
+        const content = result.content;
         const totalPages = Number.isInteger(result?.totalPages)
           ? result.totalPages
           : (content.length ? 1 : 0);
@@ -415,7 +421,10 @@ export default function DocumentationManagement({ userId }) {
       return githubApi(`/api/document-workflows/${encodeURIComponent(selectedWorkflowId)}/history`, { userId });
     })
       .then((events) => {
-        if (!cancelled) setHistory(Array.isArray(events) ? events : []);
+        if (!cancelled) {
+          if (!Array.isArray(events)) throw new Error('The approval history response was invalid.');
+          setHistory(events);
+        }
       })
       .catch((requestError) => {
         if (cancelled) return;
@@ -1082,6 +1091,21 @@ export default function DocumentationManagement({ userId }) {
           )}
 
         </section>
+
+        <DocumentationSuggestionReview
+          workflows={workflowPage.content}
+          selectedWorkflowId={selectedWorkflowId}
+          onSelectWorkflow={setSelectedWorkflowId}
+          userId={userId}
+          repositories={repositories}
+          currentRepositoryId={repositoryId}
+          isLoadingWorkflows={isLoadingWorkflows}
+          workflowsError={workflowsError}
+        />
+
+        <StaffReviewQueue userId={userId} />
+
+        <ManagerApprovalQueue userId={userId} userRole={userRole} />
 
         {isManagingTemplates && (
           <TemplateManager
