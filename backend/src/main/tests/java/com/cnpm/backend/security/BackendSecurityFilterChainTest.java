@@ -6,6 +6,7 @@ import com.cnpm.backend.repository.RoleRepository;
 import com.cnpm.backend.repository.PermissionRepository;
 import com.cnpm.backend.auth.CustomUserDetailsService;
 import com.cnpm.backend.auth.GitHubOAuth2UserService;
+import com.cnpm.backend.service.WorkspaceService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -59,6 +60,7 @@ import org.springframework.web.util.UriUtils;
 
 import java.nio.charset.StandardCharsets;
 @WebMvcTest(controllers = {
+        com.cnpm.backend.controller.WorkspaceController.class,
         com.cnpm.backend.controller.GitHubIntegrationBffController.class,
         com.cnpm.backend.security.CsrfTokenController.class,
         com.cnpm.backend.auth.CurrentUserController.class,
@@ -72,7 +74,8 @@ import java.nio.charset.StandardCharsets;
         "spring.security.oauth2.client.registration.github.client-id=test-client",
         "spring.security.oauth2.client.registration.github.client-secret=test-secret",
         "SESSION_COOKIE_SECURE=false",
-        "SESSION_COOKIE_SAME_SITE=Lax"
+        "SESSION_COOKIE_SAME_SITE=Lax",
+        "FRONTEND_URL=http://localhost:3000"
 })
 @Import({SecurityConfig.class, AccountStatusFilter.class, SpaCsrfTokenRequestHandler.class,
         BackendSecurityFilterChainTest.TestBeans.class})
@@ -101,6 +104,9 @@ class BackendSecurityFilterChainTest {
 
     @Autowired
     private GitHubOAuth2UserService gitHubUserService;
+
+    @Autowired
+    private WorkspaceService workspaceService;
 
     private User testUser;
 
@@ -135,7 +141,7 @@ class BackendSecurityFilterChainTest {
 
         MockHttpSession session = githubCallback("/api/auth/oauth2/success");
         mvc.perform(get("/api/auth/oauth2/success").session(session))
-                .andExpect(redirectedUrl("/?oauth=success"));
+                .andExpect(redirectedUrl("http://localhost:3000/?oauth=success"));
         mvc.perform(get("/api/auth/me").session(session))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(73))
@@ -185,6 +191,21 @@ class BackendSecurityFilterChainTest {
                         .cookie(new Cookie("JSESSIONID", expiredSessionId))
                         .header("X-User-Id", "forged-user"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void managedWorkspaceListRequiresSessionAndReturnsEmptyListForAuthenticatedUserWithoutWorkspaces()
+            throws Exception {
+        mvc.perform(get("/api/managed-workspaces"))
+                .andExpect(status().isUnauthorized());
+
+        when(workspaceService.listForUser(testUser)).thenReturn(java.util.List.of());
+        MockHttpSession session = login(fetchCsrf());
+
+        mvc.perform(get("/api/managed-workspaces").session(session))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                        .json("[]"));
     }
 
     @Test
@@ -367,6 +388,12 @@ class BackendSecurityFilterChainTest {
         @Primary
         PermissionRepository testPermissionRepository() {
             return mock(PermissionRepository.class);
+        }
+
+        @Bean
+        @Primary
+        WorkspaceService testWorkspaceService() {
+            return mock(WorkspaceService.class);
         }
 
         @Bean
