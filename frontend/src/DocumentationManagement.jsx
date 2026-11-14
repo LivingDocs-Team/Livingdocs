@@ -156,6 +156,15 @@ function workflowRequestError(error, resource) {
   return error?.message || `Could not load ${resource}. Please try again.`;
 }
 
+function submitErrorMessage(error, step) {
+  if (error?.status === 401) return 'Your session has expired. Sign in again to submit this document.';
+  if (error?.status === 403) return `You are not allowed to ${step}. Your role may not be permitted to submit documents.`;
+  if (error?.status === 404) {
+    return `Could not ${step}: the generation job was not found. It may have expired after a service restart, so generate the documentation again.`;
+  }
+  return error?.message || `Could not ${step}. Please try again.`;
+}
+
 export default function DocumentationManagement({ userId, userRole }) {
 
   const workspaceId = userId ? `ws-${userId}` : '';
@@ -190,6 +199,13 @@ export default function DocumentationManagement({ userId, userRole }) {
   const [isLoadingRepositories, setIsLoadingRepositories] = useState(Boolean(userId));
 
   const [jobId, setJobId] = useState('');
+  const [submittedDocumentId, setSubmittedDocumentId] = useState('');
+  const [createdWorkflowId, setCreatedWorkflowId] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const [submitNotice, setSubmitNotice] = useState('');
+  const [workflowsRefresh, setWorkflowsRefresh] = useState(0);
   const [job, setJob] = useState(null);
 
   const [workflowPageIndex, setWorkflowPageIndex] = useState(0);
@@ -266,7 +282,7 @@ export default function DocumentationManagement({ userId, userRole }) {
       });
 
     return () => { cancelled = true; };
-  }, [userId, workflowPageIndex]);
+  }, [userId, workflowPageIndex, workflowsRefresh]);
 
   useEffect(() => {
     if (!userId || !selectedWorkflowId) {
@@ -384,6 +400,8 @@ export default function DocumentationManagement({ userId, userRole }) {
 
    setJob(null);
 
+   resetSubmission();
+
    setEvidence([]);
 
     setVersions([]);
@@ -493,6 +511,64 @@ export default function DocumentationManagement({ userId, userRole }) {
 
   }
 
+  function resetSubmission() {
+    setSubmittedDocumentId('');
+    setCreatedWorkflowId('');
+    setIsSubmitted(false);
+    setSubmitError('');
+    setSubmitNotice('');
+  }
+
+  // Saves the generated document, opens its review workflow and submits it for Staff review.
+  // Each step is remembered, so a retry after a failure continues from the step that failed.
+  async function handleSubmitForReview() {
+    if (!userId || !jobId || isSubmitting || isSubmitted) return;
+    setIsSubmitting(true);
+    setSubmitError('');
+    setSubmitNotice('');
+    let step = 'save the generated document';
+    try {
+      let documentId = submittedDocumentId;
+      if (!documentId) {
+        const saved = await githubApi(`/api/documentation/jobs/${encodeURIComponent(jobId)}/document`, {
+          method: 'POST', userId,
+        });
+        if (!saved?.id) throw new Error('The backend did not return the saved document.');
+        documentId = String(saved.id);
+        setSubmittedDocumentId(documentId);
+      }
+
+      step = 'create the review workflow';
+      let workflowId = createdWorkflowId;
+      if (!workflowId) {
+        const created = await githubApi('/api/document-workflows', {
+          method: 'POST', userId, body: { documentId },
+        });
+        if (!created?.id) throw new Error('The backend did not return the review workflow.');
+        workflowId = String(created.id);
+        setCreatedWorkflowId(workflowId);
+      }
+
+      step = 'submit the workflow for staff review';
+      const submitted = await githubApi(`/api/document-workflows/${encodeURIComponent(workflowId)}/submit`, {
+        method: 'POST', userId,
+      });
+      if (String(submitted?.id) !== workflowId || submitted?.status !== 'PENDING_STAFF_REVIEW') {
+        throw new Error('The backend did not confirm the submission. Refresh Approval History to verify the workflow.');
+      }
+
+      setIsSubmitted(true);
+      setSubmitNotice('Submitted for Staff review. Follow its progress in Approval History.');
+      setSelectedWorkflowId(workflowId);
+      setWorkflowPageIndex(0);
+      setWorkflowsRefresh((value) => value + 1);
+    } catch (requestError) {
+      setSubmitError(submitErrorMessage(requestError, step));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   function handleReset() {
 
     setStatus('idle');
@@ -504,6 +580,8 @@ export default function DocumentationManagement({ userId, userRole }) {
     setSavedDocument('');
 
     setJob(null);
+
+    resetSubmission();
 
     setEvidence([]);
 
@@ -933,6 +1011,29 @@ export default function DocumentationManagement({ userId, userRole }) {
           <div className="documentation-result">
 
             <h2>Generated Documentation</h2>
+
+            <section className="documentation-panel" aria-labelledby="submit-review-heading">
+              <h3 id="submit-review-heading">Submit for review</h3>
+              <p className="documentation-hint">
+                Saves the generated document and sends it to Staff for review, then to a Manager for approval.
+              </p>
+              {markdown !== originalDocument && (
+                <p className="documentation-hint">
+                  Local edits are not part of the submission. Use Restore original to submit the generated version.
+                </p>
+              )}
+              <div className="documentation-actions">
+                <button
+                  type="button"
+                  onClick={handleSubmitForReview}
+                  disabled={!userId || isSubmitting || isSubmitted || markdown !== originalDocument}
+                >
+                  {isSubmitting ? 'Submitting…' : isSubmitted ? 'Submitted for review' : 'Submit for review'}
+                </button>
+              </div>
+              {submitError && <p className="documentation-error" role="alert">{submitError}</p>}
+              {submitNotice && <p className="documentation-notice" role="status">{submitNotice}</p>}
+            </section>
 
             <div className="documentation-tabs" role="tablist" aria-label="Documentation views">
 

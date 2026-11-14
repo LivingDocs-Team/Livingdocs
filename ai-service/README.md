@@ -185,6 +185,13 @@ POST /generate
 
 Poll `GET /jobs/{id}` until `status` is `completed` (or `failed`), then read `/jobs/{id}/result`.
 
+## Service credential
+
+When `INTERNAL_API_SECRET` is set (Docker Compose always sets it, from `GITHUB_INTEGRATION_INTERNAL_SECRET`),
+every endpoint except `GET /health` needs `Authorization: Bearer <secret>`; a missing or wrong value returns
+401. GitHub Integration already sends it. Without `INTERNAL_API_SECRET` (unit tests, running `uvicorn`
+alone for development) the public endpoints stay open, while `/internal/*` still fails closed (503).
+
 ## Tests
 
 ```bash
