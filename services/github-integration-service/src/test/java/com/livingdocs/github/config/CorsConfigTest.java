@@ -55,3 +55,4 @@ class CorsConfigTest {
                 .andExpect(status().isForbidden());
     }
 }
+

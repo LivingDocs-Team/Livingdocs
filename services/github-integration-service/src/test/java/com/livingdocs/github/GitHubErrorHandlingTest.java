@@ -295,3 +295,4 @@ class GitHubErrorHandlingTest {
         return connectionRepository.findByUserId(user).orElseThrow().getStatus();
     }
 }
+

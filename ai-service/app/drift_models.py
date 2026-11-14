@@ -363,3 +363,4 @@ class DriftReportSummary(BaseModel):
 
 
 AffectedDocument.model_rebuild()
+

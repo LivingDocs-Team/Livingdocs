@@ -221,3 +221,4 @@ class AdminUserControllerTest {
         return user;
     }
 }
+

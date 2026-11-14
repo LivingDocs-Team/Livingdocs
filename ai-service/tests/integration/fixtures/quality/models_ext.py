@@ -12,3 +12,4 @@ class Order(models.Model):
 
 class Box(typing.Generic[T]):
     pass
+

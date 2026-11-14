@@ -66,3 +66,4 @@ class FileSelectionRulesTest {
         assertThat(new SyncOptions(null, true, 1, 1, 0, null).languages()).isEqualTo(SyncOptions.ANALYZER_LANGUAGES);
     }
 }
+

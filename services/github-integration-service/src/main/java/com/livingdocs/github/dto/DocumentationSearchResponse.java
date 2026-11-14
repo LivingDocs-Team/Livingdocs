@@ -22,3 +22,4 @@ public record DocumentationSearchResponse(String query, int total, List<SearchRe
             String url,
             int score) { }
 }
+

@@ -52,3 +52,4 @@ public final class LanguageDetector {
         return BY_EXTENSION.get(extension);
     }
 }
+

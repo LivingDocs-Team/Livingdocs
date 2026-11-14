@@ -7,3 +7,4 @@ import java.util.List;
 import java.util.UUID;
 
 public record ReplaceDocumentationCodeLinksRequest(@NotNull @Size(max = 500) List<UUID> codeEntityIds) { }
+

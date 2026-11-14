@@ -51,3 +51,4 @@ public interface DocumentWorkflowRepository extends JpaRepository<DocumentWorkfl
             @Param("reviewing") DocumentWorkflowStatus reviewing,
             @Param("reviewer") String reviewer, Pageable pageable);
 }
+

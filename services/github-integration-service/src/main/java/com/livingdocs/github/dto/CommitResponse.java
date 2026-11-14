@@ -20,3 +20,4 @@ public record CommitResponse(
                 c.getAuthorLogin(), c.getCommittedAt(), c.getHtmlUrl(), c.getSource().name());
     }
 }
+

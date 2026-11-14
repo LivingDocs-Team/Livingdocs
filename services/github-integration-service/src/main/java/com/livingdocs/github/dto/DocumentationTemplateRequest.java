@@ -9,3 +9,4 @@ import java.util.List;
 public record DocumentationTemplateRequest(
         String name, String description, String instructions, List<String> sections) {
 }
+

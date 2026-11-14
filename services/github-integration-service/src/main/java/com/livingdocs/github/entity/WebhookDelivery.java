@@ -40,3 +40,4 @@ public class WebhookDelivery {
     public Long getGithubRepoId() { return githubRepoId; }
     public Instant getReceivedAt() { return receivedAt; }
 }
+

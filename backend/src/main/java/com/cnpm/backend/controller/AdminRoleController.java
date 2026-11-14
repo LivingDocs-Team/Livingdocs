@@ -26,7 +26,7 @@ import com.cnpm.backend.repository.RoleRepository;
 @RequestMapping("/api/admin")
 public class AdminRoleController {
     private static final Set<String> FIXED_ROLES = Set.of("DEVELOPER", "STAFF", "MANAGER", "TECHNICAL_LEAD", "ADMINISTRATOR", "ADMIN");
-    private static final Set<String> ADMIN_PERMISSIONS = Set.of("USER_VIEW", "USER_UPDATE", "USER_DISABLE", "USER_ASSIGN_ROLE", "ROLE_VIEW", "PERMISSION_VIEW", "ROLE_ASSIGN_PERMISSION", "DOCUMENT_REASSIGN");
+    private static final Set<String> ADMIN_PERMISSIONS = Set.of("USER_VIEW", "USER_UPDATE", "USER_DISABLE", "USER_ASSIGN_ROLE", "ROLE_VIEW", "PERMISSION_VIEW", "ROLE_ASSIGN_PERMISSION", "DOCUMENT_REASSIGN", "SYSTEM_CONFIG_VIEW", "SYSTEM_CONFIG_UPDATE");
     private final RoleRepository roles;
     private final PermissionRepository permissions;
 
@@ -113,3 +113,4 @@ public class AdminRoleController {
     public record RoleResponse(String name, String description, List<String> permissions) { }
     public record PermissionResponse(String code, String description) { }
 }
+

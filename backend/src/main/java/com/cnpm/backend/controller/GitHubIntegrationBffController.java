@@ -366,3 +366,4 @@ public class GitHubIntegrationBffController {
         throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
     }
 }
+

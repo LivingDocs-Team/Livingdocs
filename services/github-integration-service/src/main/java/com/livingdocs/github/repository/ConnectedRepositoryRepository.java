@@ -32,3 +32,4 @@ public interface ConnectedRepositoryRepository extends JpaRepository<ConnectedRe
     boolean existsByWorkspaceIdAndGithubRepoIdAndIdNot(
             String workspaceId, Long githubRepoId, UUID id);
 }
+

@@ -44,3 +44,4 @@ CREATE TABLE github_pull_requests (
 );
 
 CREATE INDEX idx_github_repositories_github_repo_id ON repositories (github_repo_id);
+

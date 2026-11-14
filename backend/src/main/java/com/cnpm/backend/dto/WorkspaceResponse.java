@@ -24,3 +24,4 @@ public record WorkspaceResponse(
                 workspace.getCreatedAt(), workspace.getUpdatedAt(), owner ? "OWNER" : "MEMBER");
     }
 }
+

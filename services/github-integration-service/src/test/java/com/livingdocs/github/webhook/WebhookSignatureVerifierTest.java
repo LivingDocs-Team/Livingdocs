@@ -35,3 +35,4 @@ class WebhookSignatureVerifierTest {
         assertThat(WebhookSignatureVerifier.isValid(" ", BODY, SIGNATURE)).isFalse();
     }
 }
+

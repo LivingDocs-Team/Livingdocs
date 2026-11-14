@@ -332,3 +332,4 @@ def collect_docs(store, document_ids: Optional[List[str]], repo_docs) -> Tuple[L
     for rd in repo_docs:
         out.append(DocText(DocSource.repository, rd.path, rd.content, title=rd.title))
     return out, warnings
+

@@ -69,3 +69,4 @@ Ngữ cảnh dùng trường `context` của `POST /generate` (FR-AI-01). Xem tr
 ## 8. Kiểm thử
 
 `ai-service/tests/test_evidence_confidence.py` (tách từ, tách đoạn và số dòng, truy xuất code và tài liệu, không có nhiễu khi không có ngữ cảnh), `tests/integration/test_ai_service_integration.py` (prompt của `routes.py` có code liên quan và README), `ai-service/tests/test_indexing.py` (LD-335: endpoint và trường lớp được đưa vào chỉ mục, khối code, đường dẫn tiêu đề, thống kê chỉ mục, điểm và tính tất định, `POST /retrieval/preview`).
+

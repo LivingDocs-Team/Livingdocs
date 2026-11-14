@@ -67,7 +67,7 @@ class RoleCatalogInitializerTest {
         );
         assertThat(permissionCodes(roles.get("TECHNICAL_LEAD"))).contains("DOCUMENT_TECHNICAL_REVIEW");
         assertThat(permissionCodes(roles.get("ADMINISTRATOR")))
-        .contains("DOCUMENT_REASSIGN")
+        .contains("DOCUMENT_REASSIGN", "SYSTEM_CONFIG_VIEW", "SYSTEM_CONFIG_UPDATE")
         .doesNotContain(
                 "DOCUMENT_APPROVE",
                 "DOCUMENT_REJECT",
@@ -96,3 +96,4 @@ class RoleCatalogInitializerTest {
         return role.getPermissions().stream().map(Permission::getCode).toList();
     }
 }
+

@@ -76,3 +76,4 @@ class RepoAnalysisResponse(BaseModel):
     target: str
     files: List[FileAnalysis] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+

@@ -117,3 +117,4 @@ public class GitHubApiException extends RuntimeException {
         return epoch == null ? null : Instant.ofEpochSecond(epoch);
     }
 }
+

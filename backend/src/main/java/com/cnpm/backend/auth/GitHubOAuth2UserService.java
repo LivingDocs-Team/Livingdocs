@@ -157,3 +157,4 @@ User newUser = new User(
         return value == null ? null : value.toString().trim();
     }
 }
+

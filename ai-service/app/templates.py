@@ -144,3 +144,4 @@ class TemplateStore:
 
 
 templates = TemplateStore(os.getenv("TEMPLATES_FILE", DEFAULT_FILE) or None)
+

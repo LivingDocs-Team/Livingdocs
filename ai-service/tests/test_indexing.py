@@ -147,3 +147,4 @@ def test_preview_endpoint():
 def test_preview_validates_input():
     assert client.post("/retrieval/preview", json={"scope": "repository", "target": "x",
                                                    "files": []}).status_code == 422
+

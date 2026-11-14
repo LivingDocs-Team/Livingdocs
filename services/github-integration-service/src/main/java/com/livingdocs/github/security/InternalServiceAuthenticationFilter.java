@@ -67,3 +67,4 @@ public class InternalServiceAuthenticationFilter extends OncePerRequestFilter {
         return authorization.substring("Bearer ".length());
     }
 }
+

@@ -22,3 +22,4 @@ public record GitHubPullRequestFile(
         String patch,
         @JsonProperty("previous_filename") String previousFilename) {
 }
+

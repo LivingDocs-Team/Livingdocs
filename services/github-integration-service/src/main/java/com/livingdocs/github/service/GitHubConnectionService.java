@@ -281,3 +281,4 @@ public class GitHubConnectionService {
                 : null);
     }
 }
+
