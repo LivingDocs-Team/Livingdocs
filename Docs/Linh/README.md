@@ -6,7 +6,7 @@ Các chức năng do Nguyễn Thị Phương Linh thực hiện, mỗi chức n�
 |---|---|---|
 | [FR-AI-01](FR1.md) | Tạo và theo dõi job sinh tài liệu | LD-90 (LD-91 – LD-95) |
 | [FR-AI-02](FR2.md) | Sinh tài liệu từ kết quả phân tích code | LD-340 |
-| [FR-AI-03](FR3.md) | Truy xuất mã liên quan và tài liệu có sẵn làm ngữ cảnh | LD-340 |
+| [FR-AI-03](FR3.md) | Truy xuất mã liên quan và tài liệu có sẵn làm ngữ cảnh | LD-340, LD-335 |
 | [FR-AI-04](FR4.md) | Bằng chứng xác thực và điểm độ tin cậy | LD-340 |
 | [FR-AI-05](FR5.md) | Mẫu tài liệu (documentation templates) | LD-96 (LD-97 – LD-100) |
 | [FR-AI-06](FR6.md) | Quản lý phiên bản tài liệu (lưu tài liệu, phiên bản, lịch sử) | LD-195 |
