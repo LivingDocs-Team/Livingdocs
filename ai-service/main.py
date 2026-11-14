@@ -18,9 +18,12 @@ from app.drift_models import (DriftAnalyzeRequest, DriftReport, DriftReportSumma
 from app.drift_severity import CAPS, SCORE_BANDS, SEVERITY_LEVELS, rules_table
 from app.generator import get_generator
 from app.jobs import jobs, run_job
-from app.models import (SECTION_KINDS, SECTION_NAMES, GenerateRequest, Job, JobReport,
+from app.models import (SECTION_KINDS, SECTION_NAMES, FileRetrieval, GenerateRequest, IndexSummary,
+                        Job, JobReport, RetrievalHit, RetrievalPreview,
                         JobStatus, ReviewEvidenceResponse, Template, TemplateIn,
                         TemplateSections)
+from app.normalize import normalize
+from app.retrieval import build_index, retrieve
 from app.templates import TemplateNameTaken, templates
 from app.version_models import (Document, DocumentContentEdit, DocumentCreate, DocumentVersion,
                                 HistoryEvent, InternalDocumentCreate, InternalVersionDecision,
@@ -49,6 +52,34 @@ def generate(req: GenerateRequest, background: BackgroundTasks):
     # the job keeps the template as it was now: editing or deleting it later does not change this job
     background.add_task(run_job, job.id, req, None, tpl)
     return job
+
+
+@app.post("/retrieval/preview", response_model=RetrievalPreview)
+def retrieval_preview(req: GenerateRequest):
+    """LD-335: show what the retrieval index holds and which related code (C) and documentation
+    passages (D) each file would receive in its prompt. Nothing is generated or stored."""
+    files = [f.model_copy(deep=True) for f in req.files]
+    for f in files:
+        normalize(f)
+    req = req.model_copy(update={"files": files})
+    index = build_index(req)
+    st = index.stats()
+
+    def hit(c) -> RetrievalHit:
+        return RetrievalHit(ref=c.ref, kind=c.kind, entity=c.entity, path=c.path, name=c.name,
+                            section=c.section or None, line_start=c.line_start, line_end=c.line_end,
+                            score=c.score, excerpt=c.excerpt)
+
+    out = []
+    for f in files:
+        if f.status.value != "ok":
+            continue
+        got = retrieve(index, f)
+        out.append(FileRetrieval(path=f.path, code=[hit(c) for c in got.code],
+                                 docs=[hit(c) for c in got.docs]))
+    return RetrievalPreview(index=IndexSummary(files=st.files, documents=st.documents,
+                                               chunks=st.chunks, vocabulary=st.vocabulary),
+                            files=out)
 
 
 @app.get("/jobs", response_model=List[Job])

@@ -2,9 +2,9 @@
 
 | Mục | Nội dung |
 |---|---|
-| Story / task Jira | LD-340 Document Generation From Analysis |
+| Story / task Jira | LD-340 Document Generation From Analysis; LD-335 Hoàn thiện Document & Code Indexing |
 | Người thực hiện | Nguyễn Thị Phương Linh |
-| Thành phần | AI Service: `app/retrieval.py` |
+| Thành phần | AI Service: `app/retrieval.py`, `POST /retrieval/preview` (`main.py`) |
 | Tác nhân | Job sinh tài liệu (FR-AI-01), AI (nhận ngữ cảnh trong prompt) |
 
 ## 1. Mô tả
@@ -16,18 +16,21 @@ Khi viết tài liệu cho một file, AI cần biết file đó dùng lớp/hà
 | ID | Yêu cầu |
 |---|---|
 | FR-AI-03.1 | Yêu cầu sinh tài liệu có thể kèm `context`: danh sách tài liệu `{path (bắt buộc), title, content (Markdown, tối đa 200.000 ký tự)}`. |
-| FR-AI-03.2 | Chỉ mục được dựng **một lần mỗi job** từ: mọi lớp (tên, lớp cha, docstring, tên các phương thức), mọi phương thức (`Lớp.phương_thức`), mọi hàm của các file có `status = ok`, và các đoạn của tài liệu `context`. Mỗi mục giữ đường dẫn, tên, số dòng và đoạn trích. |
-| FR-AI-03.3 | Tách tài liệu thành đoạn tại mỗi tiêu đề `#`; ngoài ra cắt khi đoạn dài hơn 1.200 ký tự và gặp dòng trống, hoặc dài hơn 2.400 ký tự. Mỗi đoạn mang tên tiêu đề gần nhất (không có thì `title` hoặc `path`) và số dòng bắt đầu/kết thúc trong tài liệu. |
+| FR-AI-03.2 | Chỉ mục được dựng **một lần mỗi job** từ các file có `status = ok`: mọi lớp (tên, loại, lớp cha, docstring, **trường** `tên: kiểu`, tên các phương thức), mọi phương thức (`Lớp.phương_thức`), mọi hàm, mọi **endpoint** (`GET /path` kèm handler, tham số, request body, response — LD-335), và các đoạn của tài liệu `context`. Mỗi mục giữ đường dẫn, tên, loại (`class`/`method`/`function`/`endpoint`/`section`), số dòng và đoạn trích. |
+| FR-AI-03.3 | Tách tài liệu thành đoạn tại mỗi tiêu đề Markdown `#`…`######`; dòng bắt đầu bằng `#` **nằm trong khối code** ```` ``` ```` hoặc `~~~` không phải tiêu đề (LD-335). Ngoài ra cắt khi đoạn dài hơn 1.200 ký tự và gặp dòng trống (ngoài khối code), hoặc dài hơn 2.400 ký tự. Mỗi đoạn mang tên tiêu đề gần nhất (không có thì `title` hoặc `path`), **đường dẫn tiêu đề** `section` (ví dụ `Shop > Cart > VAT`, cũng được đưa vào chỉ mục) và số dòng bắt đầu/kết thúc trong tài liệu. |
 | FR-AI-03.4 | Tách từ theo kiểu định danh: `getCartTotal` → `get cart total`, `cart_id` → `cart id`; chữ thường; giữ chữ có dấu tiếng Việt; bỏ từ dưới 2 ký tự, số thuần, và từ dừng tiếng Anh/tiếng Việt/từ khoá lập trình (the, and, def, self, return, class, str, int, của, các, được…). |
 | FR-AI-03.5 | Xếp hạng bằng độ tương đồng cosine TF-IDF: idf = ln((n + 1) / (df + 0,5)) + 1; trọng số từ = (1 + ln(tần suất)) × idf. Câu truy vấn của một file gồm đường dẫn, module, tên/lớp cha/docstring của lớp, nội dung các phương thức và hàm (tên, chữ ký, tham số, kiểu, docstring, source), đường dẫn/handler/request/response của endpoint. |
 | FR-AI-03.6 | Với mỗi file lấy tối đa **4 đoạn code** từ các file **khác** và tối đa **3 đoạn tài liệu**, chỉ giữ đoạn có điểm ≥ 0,05; cùng điểm thì xếp theo đường dẫn rồi tên. Đánh mã theo thứ tự điểm: `C1…C4`, `D1…D3` (đánh lại riêng cho từng file). |
-| FR-AI-03.7 | Đoạn trích tối đa 600 ký tự: code = chữ ký (có tiền tố `Lớp.` với phương thức) + docstring; lớp = `class Tên(Cha)` + docstring + `methods: ...`; tài liệu = nội dung đoạn. |
+| FR-AI-03.7 | Đoạn trích tối đa 600 ký tự: code = chữ ký (có tiền tố `Lớp.` với phương thức) + docstring; lớp = `class Tên(Cha)` + docstring + `fields: ...` + `methods: ...`; endpoint = `GET /path -> handler` + tham số, request, response; tài liệu = nội dung đoạn. |
 | FR-AI-03.8 | Đưa vào prompt dưới mục "Related code from other files" và "Existing documentation": `- C1: Tên (path:dòng-dòng)` và đoạn trích thụt lề. Không có đoạn nào đạt ngưỡng thì không có mục đó. |
 | FR-AI-03.9 | Các đoạn C/D mà AI thực sự trích dẫn được liệt kê ở cuối tài liệu file trong mục "Nguồn tham chiếu" (mỗi dòng: **C1** Tên — `path:dòng-dòng`; C trước D, theo số) và trong `context_used` của báo cáo (FR-AI-04). |
+| FR-AI-03.10 | (LD-335) Mỗi kết quả truy xuất mang `score` (độ tương đồng, 0–1, 4 chữ số) và là bản sao: chỉ mục không bị đổi giữa các file. |
+| FR-AI-03.11 | (LD-335) Thống kê chỉ mục: số file đã phân tích, số tài liệu, số mục theo loại, số từ vựng. |
+| FR-AI-03.12 | (LD-335) `POST /retrieval/preview` nhận cùng body với `POST /generate` (kiểm tra hợp lệ giống hệt, `422` khi sai), trả thống kê chỉ mục và, cho từng file `ok`, danh sách C/D mà prompt của file đó sẽ nhận (`ref`, `kind`, `entity`, `path`, `name`, `section`, `line_start`, `line_end`, `score`, `excerpt`). Không tạo job, không gọi AI. Dùng để kiểm tra và giải thích kết quả truy xuất. |
 
 ## 3. API
 
-Không có endpoint riêng. Dùng trường `context` của `POST /generate` (FR-AI-01).
+Ngữ cảnh dùng trường `context` của `POST /generate` (FR-AI-01). Xem trước kết quả truy xuất: `POST /retrieval/preview` (cùng body, FR-AI-03.12).
 
 ```json
 {"context": [{"path": "README.md", "title": "Shop",
@@ -60,7 +63,9 @@ Không có endpoint riêng. Dùng trường `context` của `POST /generate` (FR
 - **AC-AI-03.2:** README có mục "Cart" (nói về VAT) và mục "Deployment" (docker) → `D1` của `routes.py` là đoạn "Cart", không có đoạn "Deployment".
 - **AC-AI-03.3:** Chỉ 1 file, không `context` → không có mục ngữ cảnh trong prompt.
 - **AC-AI-03.4:** `tokenize("getCartTotal cart_id")` = `["get", "cart", "total", "cart", "id"]`.
+- **AC-AI-03.5 (LD-335):** `cart_service.py` không gọi route nào nhưng endpoint `POST /carts/{cart_id}/discount` ở `routes.py` dùng `apply_discount` → C của `cart_service.py` có endpoint đó.
+- **AC-AI-03.6 (LD-335):** Tài liệu có khối ```` ```bash ```` chứa dòng `# install the service` → không tạo đoạn mới tên "install the service"; khối code nằm trong đoạn "Cart" với số dòng đúng.
 
 ## 8. Kiểm thử
 
-`ai-service/tests/test_evidence_confidence.py` (tách từ, tách đoạn và số dòng, truy xuất code và tài liệu, không có nhiễu khi không có ngữ cảnh), `tests/integration/test_ai_service_integration.py` (prompt của `routes.py` có code liên quan và README).
+`ai-service/tests/test_evidence_confidence.py` (tách từ, tách đoạn và số dòng, truy xuất code và tài liệu, không có nhiễu khi không có ngữ cảnh), `tests/integration/test_ai_service_integration.py` (prompt của `routes.py` có code liên quan và README), `ai-service/tests/test_indexing.py` (LD-335: endpoint và trường lớp được đưa vào chỉ mục, khối code, đường dẫn tiêu đề, thống kê chỉ mục, điểm và tính tất định, `POST /retrieval/preview`).
