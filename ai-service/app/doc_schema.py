@@ -11,6 +11,31 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+_CITE = re.compile(r"(?<![A-Za-z0-9])([ECD])0*(\d+)(?![A-Za-z0-9])", re.IGNORECASE)
+
+
+def citation_ids(v) -> List[str]:
+    """Normalize what the AI put in an evidence field into a list of ids (LD-355).
+
+    Models do not always return a clean list: "E1, C2", ["[E1]", "e2:"], "E01", or
+    ["E1 (own code)"]. Every E/C/D id found is kept (upper case, no leading zeros, first
+    occurrence only); an item with no id-like text is kept as-is, so it is still reported
+    as an invalid citation instead of being silently dropped.
+    """
+    if v is None:
+        return []
+    items = v if isinstance(v, (list, tuple)) else [v]
+    out: List[str] = []
+    for item in items:
+        if isinstance(item, (list, tuple, dict)) or item is None:
+            continue
+        text = str(item).strip()
+        found = [f"{k.upper()}{int(n)}" for k, n in _CITE.findall(text)]
+        for i in found or ([text] if text else []):
+            if i not in out:
+                out.append(i)
+    return out
+
 
 class _Cited(BaseModel):
     """Fields every described item carries: cited evidence ids + the AI's self-assessment."""
@@ -20,11 +45,7 @@ class _Cited(BaseModel):
     @field_validator("evidence", mode="before")
     @classmethod
     def _ids(cls, v):
-        if v is None:
-            return []
-        if isinstance(v, str):
-            v = [v]
-        return [str(x) for x in v if str(x).strip()] if isinstance(v, list) else []
+        return citation_ids(v)
 
     @field_validator("confidence", mode="before")
     @classmethod
@@ -66,6 +87,12 @@ class FileDoc(BaseModel):
     classes: List[ClassDoc] = Field(default_factory=list)
     functions: List[FunctionDoc] = Field(default_factory=list)
     endpoints: List[EndpointDoc] = Field(default_factory=list)
+
+    @field_validator("overview_evidence", mode="before")
+    @classmethod
+    def _ids(cls, v):
+        # "E1, D1" used to fail validation of the whole answer and cost a retry (LD-355)
+        return citation_ids(v)
 
 
 class InvalidAIOutput(ValueError):

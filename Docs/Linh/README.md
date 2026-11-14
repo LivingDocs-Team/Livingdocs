@@ -35,3 +35,4 @@ Kiểm thử và CI không phải chức năng của sản phẩm nên không c�
 
 - LD-390: kiểm thử tích hợp AI Service (`ai-service/tests/integration/`, job CI `ai-service-integration`), danh sách test case ở `ai-service/tests/integration/README.md`.
 - Job CI `ai-service-test` chạy toàn bộ `pytest` của `ai-service/`.
+- LD-355: kiểm thử và hoàn thiện grounding evidence của FR-AI-04 (`ai-service/tests/test_grounding_evidence.py`), báo cáo ở [LD-355-Grounding-Evidence.md](LD-355-Grounding-Evidence.md).
