@@ -9,6 +9,7 @@ from typing import List, Optional
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 
+from app.change_context import ChangeContextReport, ChangeContextRequest, change_context
 from app.drift import analyze as analyze_drift
 from app.drift import drift_reports
 from app.drift_changes import analyze_pull_request
@@ -382,6 +383,15 @@ def drift_changes(req: DriftAnalyzeRequest):
     """LD-146: changed code entities of a Pull Request (no documentation is checked, nothing
     is stored). Same body as /drift/analyze; `docs` and `document_ids` are ignored."""
     return analyze_pull_request(req.pull_request, req.files, req.repository)
+
+
+@app.post("/drift/context", response_model=ChangeContextReport)
+def drift_context(req: ChangeContextRequest):
+    """LD-338: for every code entity the Pull Request changes, the context needed to update its
+    documentation: the diff (X1), related code at the head commit (C: callers, callees, similar)
+    and documentation (D: passages naming the entity first, then related ones), plus a prompt
+    text citing them. Nothing is stored and no AI is called."""
+    return change_context(req, documents)
 
 
 @app.post("/drift/analyze", response_model=DriftReport, status_code=201)
