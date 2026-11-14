@@ -76,3 +76,6 @@ def normalize(f: FileAnalysis) -> FileAnalysis:
     for fn, name in zip(f.functions, _dedupe([fn.name for fn in f.functions])):
         fn.name = name
     return f
+
+
+

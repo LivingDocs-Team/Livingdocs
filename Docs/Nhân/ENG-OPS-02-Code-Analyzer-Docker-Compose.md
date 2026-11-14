@@ -70,3 +70,6 @@ Không dùng `docker compose down -v` trong quy trình kiểm tra thông thườ
 - **AC-OPS-02.4:** Request analyzer tuân thủ đúng schema `scope/target/files`; không đổi `target` thành `repo_name`.
 - **AC-OPS-02.5:** Lỗi build, health check hoặc kết nối analyzer làm validation thất bại rõ ràng.
 - **AC-OPS-02.6:** Kiểm tra không xóa database volumes hoặc dữ liệu local.
+
+
+

@@ -23,3 +23,6 @@ All endpoints require the authenticated `X-User-Id` forwarded by the backend-for
 | `GET` | `/api/documentation/code-entities/{entityId}/documents` | Read documents linked to a code entity. |
 
 Document and entity ownership is checked against the connected repository. Link updates reject missing, inactive, or cross-repository entity IDs and deduplicate repeated IDs.
+
+
+

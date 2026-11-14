@@ -68,3 +68,6 @@ Frontend gọi AI Service để yêu cầu sinh tài liệu và lấy trạng th
 ## 8. Kiểm thử
 
 Kiểm thử theo các tiêu chí chấp nhận ở mục 7 trên giao diện web. LD-305 và LD-307 hoàn thành ngày 20/10/2026, task cha LD-304 hoàn thành trong Sprint 3 (21/10/2026), có 1 pull request đã merge trên GitHub và 1 build thành công.
+
+
+

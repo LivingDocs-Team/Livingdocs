@@ -39,3 +39,6 @@ CREATE TABLE document_workflow_audit (
 
 CREATE INDEX idx_document_workflow_audit_history
     ON document_workflow_audit (workflow_id, created_at);
+
+
+

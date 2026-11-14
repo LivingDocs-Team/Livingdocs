@@ -88,3 +88,6 @@ Ví dụ body `/generate` (rút gọn):
 ## 8. Kiểm thử
 
 `ai-service/tests/test_api.py`, `ai-service/tests/integration/test_ai_service_integration.py` (luồng job với kết quả thật của analyzer), `test_live_pipeline.py -m live` (2 service thật, job CI `ai-service-integration`).
+
+
+

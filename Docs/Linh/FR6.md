@@ -64,3 +64,6 @@ Kết quả của một job sinh tài liệu (FR-AI-01) được lưu thành **t
 ## 8. Kiểm thử
 
 `ai-service/tests/test_versions.py`: `test_save_job_as_version_1`, `test_create_document_errors`, `test_documents_survive_restart`.
+
+
+

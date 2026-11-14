@@ -181,3 +181,6 @@ này**, tài liệu của repo khác bị từ chối kèm cảnh báo), `includ
 - Thông báo cho người dùng khi token hỏng (hiện tại mới đánh dấu trạng thái `INVALID`)
 - Duy trì credential service-to-service trong secret manager phù hợp với môi trường triển khai
 - Lưu kết quả đồng bộ vào database (hiện chỉ giữ lần gần nhất trong bộ nhớ) và chạy đồng bộ ở nền cho repo lớn
+
+
+

@@ -73,3 +73,6 @@ Với mỗi file đã phân tích, hệ thống nhờ AI viết **mô tả** cho
 ## 8. Kiểm thử
 
 `ai-service/tests/test_generator.py` (prompt, parse, thử lại, dự phòng, bố cục), `tests/integration/test_ai_service_integration.py` (model giả theo prompt: AI đúng, timeout, trả rác), `test_live_pipeline.py -m llm` (Claude thật, chạy tay).
+
+
+

@@ -39,3 +39,6 @@ report = jobs.get_report(job.id)
 if report:
     Path("report.json").write_text(report.model_dump_json(indent=2), encoding="utf-8")
     print("Evidence/confidence report written to report.json")
+
+
+

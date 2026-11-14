@@ -94,3 +94,6 @@ curl.exe -fsS http://localhost:8001/health
 Then connect GitHub, add a repository to the workspace, synchronize it, and start generation
 through `POST /api/repositories/{repositoryId}/documentation/generate`. A successful health check
 proves service availability only; it does not prove the GitHub-to-documentation workflow.
+
+
+

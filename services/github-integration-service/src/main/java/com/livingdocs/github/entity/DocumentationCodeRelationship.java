@@ -34,3 +34,6 @@ public class DocumentationCodeRelationship {
     public void setCodeEntityId(UUID codeEntityId) { this.codeEntityId = codeEntityId; }
     public Instant getCreatedAt() { return createdAt; }
 }
+
+
+

@@ -56,3 +56,6 @@ curl -fsS http://localhost:8080/actuator/health >/dev/null && pass "backend /act
 curl -fsS -o /dev/null http://localhost:3000/ && pass "frontend serves /"
 
 echo; echo "All checks passed."
+
+
+

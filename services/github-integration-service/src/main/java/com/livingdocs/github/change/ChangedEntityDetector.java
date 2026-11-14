@@ -50,3 +50,6 @@ public final class ChangedEntityDetector {
         return new ChangedEntity(entity.kind(), entity.name(), change, entity.startLine(), entity.endLine());
     }
 }
+
+
+

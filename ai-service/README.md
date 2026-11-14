@@ -246,3 +246,6 @@ Environment variables: `TEMPLATES_FILE` (default `data/templates.json`), `ANTHRO
 - Jobs and drift reports are stored in memory and reset on restart. Custom templates are saved to
   `TEMPLATES_FILE`; templates are shared by all users (the AI service has no user accounts).
 - The `files` input format should match what the LivingDocs code analyzer outputs.
+
+
+

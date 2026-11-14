@@ -14,3 +14,6 @@ public interface RepositoryPullRequestRepository extends JpaRepository<Repositor
 
     List<RepositoryPullRequest> findByRepositoryIdOrderByUpdatedAtDesc(UUID repositoryId, Pageable pageable);
 }
+
+
+

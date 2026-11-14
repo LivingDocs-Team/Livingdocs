@@ -146,7 +146,7 @@ jobs:
           echo "Frontend did not start"; cat "$RUNNER_TEMP/frontend.log"; exit 1
 
       - name: Run documentation preview, editing (LD-105) and template (LD-96) UI tests
-        run: python -m pytest -v tests/test_documentation_preview_editing.py tests/test_frontend_templates.py tests/test_repository_activity.py
+        run: python -m pytest -v tests/test_documentation_preview_editing.py tests/test_frontend_templates.py tests/test_repository_activity.py tests/test_frontend_admin.py
 
       - name: Upload test report
         if: always()
@@ -290,3 +290,5 @@ jobs:
 
       - name: Build application images
         run: docker compose -f compose.yaml build backend ai-service code-analyzer github-integration frontend
+
+

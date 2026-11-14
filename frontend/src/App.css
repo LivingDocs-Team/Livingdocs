@@ -4246,3 +4246,305 @@ button:disabled {
   font-family: ui-monospace, Menlo, Consolas, monospace;
   font-size: 0.82rem;
 }
+
+/* Administration & dashboard interface (LD-316) */
+.admin-dashboard {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 32px 20px 48px;
+  color: #172033;
+}
+
+.admin-dashboard h1 {
+  margin: 0 0 4px;
+  font-size: 1.8rem;
+  text-align: left;
+}
+
+.admin-subtitle {
+  margin-bottom: 20px;
+  color: #64748b;
+}
+
+.admin-dashboard input,
+.admin-dashboard select {
+  width: auto;
+  margin: 0;
+  padding: 8px 10px;
+  color: #172033;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+}
+
+.admin-dashboard button {
+  margin: 0;
+  padding: 8px 14px;
+  color: #ffffff;
+  background: #1d4ed8;
+  border: 1px solid #1d4ed8;
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+.admin-dashboard button:hover:not(:disabled) {
+  background: #1e40af;
+}
+
+.admin-dashboard button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.admin-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.admin-dashboard .admin-tabs button {
+  color: #334155;
+  background: #ffffff;
+  border-color: #e0e7f0;
+}
+
+.admin-dashboard .admin-tabs button[aria-selected='true'] {
+  color: #ffffff;
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.admin-section {
+  margin-bottom: 24px;
+  padding: 24px;
+  background: #ffffff;
+  border: 1px solid #e0e7f0;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+}
+
+.admin-section h2 {
+  margin-bottom: 12px;
+  font-size: 1.25rem;
+}
+
+.admin-section h3 {
+  margin: 18px 0 8px;
+  font-size: 1rem;
+}
+
+.admin-note {
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.admin-toolbar {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.admin-toolbar input {
+  flex: 1 1 240px;
+}
+
+.admin-table-wrap {
+  overflow-x: auto;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.admin-table th {
+  color: #475569;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-table small,
+.admin-list small {
+  display: block;
+  color: #64748b;
+}
+
+.admin-pill {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.admin-pill.up {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.admin-pill.down {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.admin-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  color: #475569;
+  font-size: 0.9rem;
+}
+
+.admin-role {
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
+.admin-role summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.admin-count {
+  margin-left: auto;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.admin-permissions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 6px 16px;
+  margin: 14px 0;
+  font-size: 0.88rem;
+}
+
+.admin-permissions label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.admin-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
+.admin-stat span {
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
+.admin-stat strong {
+  font-size: 1.6rem;
+}
+
+.admin-list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.admin-list li {
+  margin-bottom: 8px;
+}
+
+.admin-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 18px;
+  margin: 0;
+}
+
+.admin-facts dt {
+  color: #64748b;
+}
+
+.admin-facts dd {
+  margin: 0;
+}
+
+.admin-json {
+  max-height: 360px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  background: #f3f6fb;
+  border-radius: 8px;
+  font-size: 0.82rem;
+}
+
+.admin-history {
+  margin-top: 18px;
+  padding-top: 6px;
+  border-top: 1px solid #e2e8f0;
+}
+
+/* The embedded notification form keeps its own card but not the full-page layout. */
+.admin-dashboard .page {
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  justify-content: flex-start;
+}
+
+.admin-dashboard .login-card {
+  max-width: none;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+}
+
+.admin-dashboard .login-card h1 {
+  font-size: 1.1rem;
+}
+
+.admin-dashboard .login-card .subtitle {
+  margin: 4px 0 16px;
+  text-align: left;
+}
+
+@media (max-width: 600px) {
+  .admin-section {
+    padding: 16px 14px;
+  }
+
+  .admin-pager {
+    flex-wrap: wrap;
+  }
+}
+
+
+

@@ -213,3 +213,6 @@ client = TestClient(app)
 ])
 def test_invalid_input_returns_422(payload):
     assert client.post("/generate", json=payload).status_code == 422
+
+
+

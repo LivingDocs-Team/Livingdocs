@@ -228,3 +228,6 @@ def test_job_run_directly_with_ai_uses_retrieved_context():
     run_job(job.id, r, generator=g)
     prompt_routes = c.calls[1][0]["content"]
     assert "Related code from other files" in prompt_routes and "Existing documentation" in prompt_routes
+
+
+

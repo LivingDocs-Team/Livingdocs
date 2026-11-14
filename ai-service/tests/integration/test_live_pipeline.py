@@ -136,3 +136,6 @@ def test_real_claude_output_is_valid_and_grounded(analysis, shop_readme, monkeyp
     assert ents and all(e["factors"].get("ai_described") == 1.0 for e in ents)
     assert sum(e["factors"]["grounding"] > 0 for e in ents) >= len(ents) * 0.8
     assert job["confidence"] >= 0.5
+
+
+

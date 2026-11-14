@@ -661,3 +661,5 @@ def test_rollback_retry_returns_existing_matching_proposal():
     assert retry.number == first.number
     assert store.get(doc.id).versions_total == 2
     assert len(store.history(doc.id)) == 3
+
+

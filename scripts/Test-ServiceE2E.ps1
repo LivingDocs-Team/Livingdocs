@@ -169,3 +169,5 @@ if ($testResults.Status -contains "FAILED") {
     Write-TestLog "Ket qua kiem thu: PASSED - Tat ca dich vu hoat dong tot." "SUCCESS"
     exit 0  # Báo cho CI/CD tiến trình thành công
 }
+
+

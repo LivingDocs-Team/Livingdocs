@@ -324,3 +324,6 @@ def test_every_finding_has_a_known_kind_rules_and_summary():
 @pytest.mark.parametrize("kind_list", list(DRIFT_KINDS.values()))
 def test_kind_lists_have_no_duplicates(kind_list):
     assert len(kind_list) == len(set(kind_list))
+
+
+

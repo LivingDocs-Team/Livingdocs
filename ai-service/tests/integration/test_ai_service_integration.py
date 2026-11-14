@@ -226,3 +226,6 @@ def test_jobs_are_isolated_and_listed(analysis):
 
 def test_health_reports_generator_mode():
     assert client.get("/health").json() == {"status": "ok", "generator": "offline"}
+
+
+

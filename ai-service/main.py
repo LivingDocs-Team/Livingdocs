@@ -400,3 +400,6 @@ def drift_severity_rules():
                        for level in reversed(list(SCORE_BANDS))],
             "rules": rules_table(),
             "caps": {t: level.value for t, level in CAPS.items()}}
+
+
+

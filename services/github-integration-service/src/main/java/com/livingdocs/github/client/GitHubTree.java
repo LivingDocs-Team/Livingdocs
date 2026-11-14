@@ -16,3 +16,6 @@ public record GitHubTree(String sha, boolean truncated, List<Entry> tree) {
     public record Entry(String path, String mode, String type, String sha, Long size) {
     }
 }
+
+
+

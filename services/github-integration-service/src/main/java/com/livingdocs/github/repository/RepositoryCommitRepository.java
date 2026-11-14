@@ -14,3 +14,6 @@ public interface RepositoryCommitRepository extends JpaRepository<RepositoryComm
 
     List<RepositoryCommit> findByRepositoryIdOrderByCommittedAtDesc(UUID repositoryId, Pageable pageable);
 }
+
+
+
