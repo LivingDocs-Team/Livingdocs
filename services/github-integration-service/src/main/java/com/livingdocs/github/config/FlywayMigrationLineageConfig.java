@@ -12,6 +12,7 @@ public class FlywayMigrationLineageConfig {
     @Bean
     FlywayConfigurationCustomizer flywayMigrationLineageCustomizer(
             DataSource dataSource, FlywayMigrationLineageSelector selector) {
-        return configuration -> configuration.locations(selector.select(dataSource).location());
+        return configuration -> configuration.locations(
+                selector.select(dataSource).location(), "classpath:db/migration-common");
     }
 }
