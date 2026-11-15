@@ -968,6 +968,75 @@ button:disabled {
   line-height: 1.5;
 }
 
+/* LD-68: PR & Commit List */
+.repository-activity {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.repository-activity h3 {
+  margin: 12px 0 6px;
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.activity-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.activity-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.activity-list a {
+  color: #1d4ed8;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.activity-meta,
+.activity-empty {
+  color: #64748b;
+  font-size: 12px;
+}
+
+/* LD-122 / LD-126: affected documentation and evidence under one source change */
+.affected-docs,
+.impact-evidence {
+  display: grid;
+  flex-basis: 100%;
+  gap: 4px;
+  margin: 2px 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.affected-docs > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.impact-evidence li {
+  color: #475569;
+  font-size: 12px;
+}
+
+.impact-evidence code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .sync-error {
   margin: 10px 0 0;
   padding: 10px 12px;
@@ -3889,6 +3958,102 @@ button:disabled {
     font-size: 20px;
   }
 }
+.documentation-relationships {
+  margin: 1.5rem 0;
+  padding: 1rem;
+  border: 1px solid #dce4ec;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.documentation-related-code-list {
+  display: grid;
+  gap: 0.65rem;
+  margin: 1rem 0;
+}
+
+.documentation-related-code-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid #e1e7ee;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.documentation-related-code-label {
+  display: flex;
+  flex: 1 1 280px;
+  align-items: center;
+  gap: 0.65rem;
+  cursor: pointer;
+}
+
+.documentation-related-code-label small {
+  display: block;
+  color: #5d6b7a;
+  overflow-wrap: anywhere;
+}
+
+.documentation-related-documents {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #dce4ec;
+}
+
+.documentation-link-button {
+  display: block;
+  margin: 0.4rem 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #175cd3;
+  text-decoration: underline;
+}
+
+.documentation-library {
+  margin: 1.5rem 0;
+  padding: 1rem;
+  border: 1px solid #dce4ec;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.documentation-library-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.documentation-library-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem;
+  border: 1px solid #e1e7ee;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.documentation-library-item h3,
+.documentation-library-item p {
+  margin: 0.25rem 0;
+}
+
+.documentation-library-item p {
+  color: #5d6b7a;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 600px) {
+  .documentation-library-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 .documentation-search-page {
   width: min(960px, calc(100% - 32px));
   margin: 24px auto;

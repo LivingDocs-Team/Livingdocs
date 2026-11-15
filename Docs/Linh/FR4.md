@@ -2,7 +2,7 @@
 
 | Mục | Nội dung |
 |---|---|
-| Story / task Jira | LD-340 Document Generation From Analysis |
+| Story / task Jira | LD-340 Document Generation From Analysis; LD-355 Kiểm thử và hoàn thiện AI Grounding Evidence |
 | Người thực hiện | Nguyễn Thị Phương Linh |
 | Thành phần | AI Service: `app/evidence.py`, `app/confidence.py`, `GET /jobs/{id}/report`; frontend hiển thị danh sách bằng chứng |
 | Tác nhân | Người đọc/duyệt tài liệu, frontend trang Documentation |
@@ -15,10 +15,10 @@ Mỗi mô tả trong tài liệu đi kèm **bằng chứng** chỉ tới đúng 
 
 | ID | Yêu cầu |
 |---|---|
-| FR-AI-04.1 | Mỗi file có một evidence catalog. Mỗi thực thể của file (theo thứ tự: lớp, các phương thức của lớp đó, …, hàm, endpoint) có mã `E1, E2, …` trỏ tới code của chính nó: `path`, `name` (khoá `Lớp`, `Lớp.phương_thức`, `hàm` hoặc `GET /path`), `line_start`, `line_end`, đoạn trích tối đa 300 ký tự. Catalog có thêm các mục C/D truy xuất được (FR-AI-03). |
+| FR-AI-04.1 | Mỗi file có một evidence catalog. Mỗi thực thể của file (theo thứ tự: lớp, các phương thức của lớp đó, …, hàm, endpoint) có mã `E1, E2, …` trỏ tới code của chính nó: `path`, `name` (khoá `Lớp`, `Lớp.phương_thức`, `hàm` hoặc `GET /path`), `line_start`, `line_end`, đoạn trích tối đa 300 ký tự. Catalog có thêm các mục C/D truy xuất được (FR-AI-03). Endpoint không có số dòng thì lấy số dòng của hàm/phương thức handler trong cùng file, và đoạn trích có thêm source/chữ ký của handler (LD-355). Các overload cùng khoá (`Calc.add`) có mã E riêng; mã đầu tiên là mã chính (LD-355). |
 | FR-AI-04.2 | Prompt liệt kê catalog dưới "Evidence catalog": "Own code (cite the item's own id):" rồi `- E1: Tên (path:dòng-dòng)`, sau đó các mục C và D. Vị trí in là `path:đầu-cuối`, `path:đầu` khi chỉ một dòng, hoặc `path` khi không có số dòng. |
-| FR-AI-04.3 | AI phải ghi `evidence` (danh sách mã) và `confidence` (0–1) cho mỗi mục, `overview_evidence` cho phần tổng quan. Mã được chuẩn hoá chữ hoa, bỏ trùng; mã không có trong catalog bị bỏ và cảnh báo `ignored citations not in the evidence catalog: X9, D7.`. |
-| FR-AI-04.4 | Điểm mỗi thực thể khi có mô tả của AI: `0,30 × chất lượng đầu vào + 0,30 × mức dẫn chứng + 0,20 × đã mô tả + 0,20 × AI tự chấm − 0,10 (nếu có mã trích không tồn tại)`, kẹp về [0, 1], làm tròn 2 chữ số. Mức dẫn chứng = 1 nếu trích mã E của chính thực thể, 0,5 nếu chỉ trích mã khác, 0 nếu không trích. Đã mô tả = 1 nếu có `summary` không rỗng. AI tự chấm thiếu hoặc sai kiểu → 0,5. |
+| FR-AI-04.3 | AI phải ghi `evidence` (danh sách mã) và `confidence` (0–1) cho mỗi mục, `overview_evidence` cho phần tổng quan. Mã được chuẩn hoá (LD-355): nhận cả chuỗi `"E1, C2"` thay cho danh sách, `[E1]`, `e2:`, `E01`, `E1 (own code)`; mỗi mã E/C/D tìm thấy được viết hoa, bỏ số 0 đầu, bỏ trùng; phần tử không chứa mã nào (`"source code"`) giữ nguyên để bị tính là mã sai; mã không có trong catalog bị bỏ và cảnh báo `ignored citations not in the evidence catalog: X9, D7.`. |
+| FR-AI-04.4 | Điểm mỗi thực thể khi có mô tả của AI: `0,30 × chất lượng đầu vào + 0,30 × mức dẫn chứng + 0,20 × đã mô tả + 0,20 × AI tự chấm − 0,10 (nếu có mã trích không tồn tại)`, kẹp về [0, 1], làm tròn 2 chữ số. Mức dẫn chứng = 1 nếu trích mã E của chính thực thể (bất kỳ overload nào cùng khoá, LD-355), 0,5 nếu chỉ trích mã khác, 0 nếu không trích. Đã mô tả = 1 nếu có `summary` không rỗng. AI tự chấm thiếu hoặc sai kiểu → 0,5. |
 | FR-AI-04.5 | Không có mô tả của AI (offline hoặc dự phòng): điểm = `0,60 × chất lượng đầu vào`. |
 | FR-AI-04.6 | Chất lượng đầu vào (0–1) là trung bình các tín hiệu: **hàm/phương thức**: có `source`, có docstring, tỉ lệ có kiểu (số tham số có kiểu + 1 nếu có kiểu trả về) / (số tham số + 1); **lớp**: có docstring, tỉ lệ phương thức có `source` (0 khi không có phương thức); **endpoint**: có handler, có response, tỉ lệ tham số có kiểu (1 khi không có tham số). |
 | FR-AI-04.7 | Mức: `high` khi ≥ 0,75, `medium` khi ≥ 0,50, còn lại `low`. Nhãn tiếng Việt: cao / trung bình / thấp. |
@@ -57,7 +57,8 @@ Ví dụ một thực thể trong báo cáo:
 |---|---|
 | AI trích mã không có trong catalog | Bỏ mã, cảnh báo, trừ 0,10 điểm thực thể đó |
 | AI ghi `confidence` không phải số | Dùng 0,5 |
-| Analyzer không gửi số dòng | Bằng chứng chỉ ghi `path` |
+| Analyzer không gửi số dòng | Bằng chứng chỉ ghi `path` (endpoint: lấy dòng của handler nếu tìm thấy trong file) |
+| AI ghi `overview_evidence` / `evidence` là một chuỗi `"E1, D1"` | Tách thành danh sách mã, không tính là lỗi định dạng, không gọi lại AI |
 | Xem báo cáo khi job chưa xong | `409`; job không tồn tại `404` |
 
 ## 6. Quy tắc nghiệp vụ
@@ -72,8 +73,10 @@ Ví dụ một thực thể trong báo cáo:
 - **AC-AI-04.2:** Như trên nhưng có thêm 2 mã sai (`X9`, `D7`) → điểm `0,86`, `invalid_citations = 2`, cảnh báo nêu cả `X9` và `D7`.
 - **AC-AI-04.3:** AI không trích mã nào → `grounding = 0`, điểm thấp hơn khi có trích.
 - **AC-AI-04.4:** Offline, hàm có chất lượng đầu vào 1,0 → điểm `0,60`, mức `medium`.
+- **AC-AI-04.6 (LD-355):** AI trả `"evidence": ["[E1]"]` → `grounding = 1`, `invalid_citations = 0`; `"overview_evidence": "E1, E2"` → kết quả hợp lệ ngay lần gọi đầu.
+- **AC-AI-04.7 (LD-355):** Endpoint `GET /carts/{cart_id}/total` không có số dòng, handler `get_cart_total` ở dòng 5–7 → bằng chứng `shop/routes.py:5-7`.
 - **AC-AI-04.5:** Analyzer gửi `lineno = 27`, `end_lineno = 30` → bằng chứng `line_start = 27`, `line_end = 30`, Markdown có `` `shop/cart_service.py:27-30` ``.
 
 ## 8. Kiểm thử
 
-`ai-service/tests/test_evidence_confidence.py` (16 test: công thức điểm, mã sai, offline/dự phòng, báo cáo qua API, số dòng), `tests/integration/test_ai_service_integration.py` (số dòng từ analyzer thật, báo cáo đủ thực thể, điểm offline ≤ 0,60).
+`ai-service/tests/test_evidence_confidence.py` (16 test: công thức điểm, mã sai, offline/dự phòng, báo cáo qua API, số dòng), `tests/test_grounding_evidence.py` (LD-355, 21 test GE-01..GE-12, xem [LD-355-Grounding-Evidence.md](LD-355-Grounding-Evidence.md)), `tests/integration/test_ai_service_integration.py` (số dòng từ analyzer thật, báo cáo đủ thực thể, điểm offline ≤ 0,60).
