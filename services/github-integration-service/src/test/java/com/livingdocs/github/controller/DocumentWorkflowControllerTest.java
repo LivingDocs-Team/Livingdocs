@@ -232,7 +232,7 @@ class DocumentWorkflowControllerTest {
         when(workflowService.reviewComparison(STAFF_ID, STAFF_AUTHORITIES, WORKFLOW_ID))
                 .thenReturn(mapper.readTree("{\"pending_version\":{\"number\":2}}"));
         when(workflowService.history(MANAGER_ID, MANAGER_AUTHORITIES, WORKFLOW_ID)).thenReturn(List.of(
-                new AuditResponse(UUID.randomUUID(), MANAGER_ID, "MANAGER", "REJECTED",
+                new AuditResponse(UUID.randomUUID(), WORKFLOW_ID, MANAGER_ID, "MANAGER", "REJECTED",
                         "PENDING_MANAGER_APPROVAL", "REJECTED", null, null, "Needs fixes", Instant.now())));
 
         mockMvc.perform(get("/api/document-workflows/{id}/evidence", WORKFLOW_ID)
@@ -251,6 +251,7 @@ class DocumentWorkflowControllerTest {
                         .header("X-User-Id", MANAGER_ID)
                         .header("X-User-Authorities", "ROLE_MANAGER,DOCUMENT_APPROVAL_QUEUE_VIEW,DOCUMENT_APPROVE,DOCUMENT_REJECT"))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].workflowId").value(WORKFLOW_ID.toString()))
                 .andExpect(jsonPath("$[0].action").value("REJECTED"))
                 .andExpect(jsonPath("$[0].comment").value("Needs fixes"));
 

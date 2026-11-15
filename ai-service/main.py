@@ -8,6 +8,7 @@ from typing import List, Optional
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import PlainTextResponse
+from pydantic import AwareDatetime
 
 from app.drift import analyze as analyze_drift
 from app.drift import drift_reports
@@ -40,6 +41,25 @@ app = FastAPI(title="LivingDocs AI Service", version="0.1.0")
 @app.get("/health")
 def health():
     return {"status": "ok", "generator": get_generator().mode}
+
+
+@app.get("/internal/system-analytics", dependencies=[Depends(require_internal_service)])
+def system_analytics(start: AwareDatetime = Query(alias="from"),
+                     end: AwareDatetime = Query(alias="to")):
+    if start >= end:
+        raise HTTPException(400, "from must be earlier than to")
+    created, audit = documents.count_activity(start, end)
+    completed, failed = jobs.count_outcomes(start, end)
+    return {
+        "documentsCreated": created,
+        "documentVersionAuditEvents": audit,
+        "aiJobs": {
+            "completed": completed,
+            "failed": failed,
+            "observedSince": jobs.observed_since,
+            "scope": "CURRENT_AI_PROCESS",
+        },
+    }
 
 
 # ---------- Documentation generation ----------

@@ -8,6 +8,8 @@ import com.livingdocs.github.service.IngestionService;
 import com.livingdocs.github.webhook.WebhookSignatureVerifier;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -27,6 +29,7 @@ import java.util.Map;
 @Tag(name = "GitHub Webhook", description = "LD-68 - nhận event push và pull_request từ GitHub App")
 public class GitHubWebhookController {
 
+    private static final Logger log = LoggerFactory.getLogger(GitHubWebhookController.class);
     static final String PATH = "/api/github/webhook";
 
     private final IngestionService ingestionService;
@@ -69,8 +72,17 @@ public class GitHubWebhookController {
         } catch (JsonProcessingException e) {
             throw ApiException.badRequest("The webhook payload is not valid JSON.");
         }
-        IngestionService.Result result = ingestionService.handleWebhook(deliveryId, event, payload);
-        return ResponseEntity.accepted().body(Map.of("status", result.name()));
+        // Only log a bounded delivery identifier. The payload and signature can contain sensitive data.
+        String logId = deliveryId.matches("[a-zA-Z0-9-]{1,64}") ? deliveryId : "(invalid format)";
+        try {
+            IngestionService.Result result = ingestionService.handleWebhook(deliveryId, event, payload);
+            log.info("GitHub webhook delivery={} outcome={}", logId, result);
+            return ResponseEntity.accepted().body(Map.of("status", result.name()));
+        } catch (RuntimeException exception) {
+            log.warn("GitHub webhook delivery={} outcome=FAILED errorType={}", logId,
+                    exception.getClass().getSimpleName());
+            throw exception;
+        }
     }
 }
 

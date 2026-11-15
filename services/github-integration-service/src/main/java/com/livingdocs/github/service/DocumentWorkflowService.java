@@ -211,7 +211,7 @@ public class DocumentWorkflowService {
         DocumentWorkflow workflow = find(workflowId);
         requireReadable(workflow, actor, authorities);
         return audit.findByWorkflowIdOrderByCreatedAtAsc(workflowId).stream()
-                .map(e -> new AuditResponse(e.getId(), e.getActorUserId(), e.getActorRole(), e.getAction(),
+                .map(e -> new AuditResponse(e.getId(), e.getWorkflowId(), e.getActorUserId(), e.getActorRole(), e.getAction(),
                         e.getPreviousStatus(), e.getNewStatus(), e.getPreviousReviewerUserId(),
                         e.getNewReviewerUserId(), e.getComment(), e.getCreatedAt()))
                 .toList();
