@@ -5,6 +5,7 @@ test_frontend_templates.py. The drift report below has the shape the AI service 
 GitHub Integration (findings with severity, severity_assessment and evidence).
 """
 import json
+import time
 
 from playwright.sync_api import Page, expect
 
@@ -81,6 +82,11 @@ def install_api(page: Page, state: dict):
     state.setdefault("analyze_bodies", [])
     state.setdefault("markdown_queries", [])
     state.setdefault("reports", [])
+    state.setdefault("repository_failures", 0)
+    state.setdefault("history_failures", 0)
+    state.setdefault("analyze_failures", 0)
+    state.setdefault("analyze_delay_seconds", 0)
+    state.setdefault("repositories_empty", False)
 
     def handle(route):
         request = route.request
@@ -100,6 +106,11 @@ def install_api(page: Page, state: dict):
         if path == "/api/github/connection":
             return route.fulfill(status=200, json={"connected": True, "githubLogin": "test-user", "status": "ACTIVE"})
         if path == f"/api/workspaces/{WORKSPACE_ID}/repositories":
+            if state["repository_failures"] > 0:
+                state["repository_failures"] -= 1
+                return route.fulfill(status=503, json={"message": "Repository service unavailable."})
+            if state["repositories_empty"]:
+                return route.fulfill(status=200, json=[])
             return route.fulfill(status=200, json=[{
                 "id": REPOSITORY_ID, "githubRepoId": 4242, "workspaceId": WORKSPACE_ID, "fullName": "acme/shop",
                 "defaultBranch": "main", "privateRepo": False, "status": "CONNECTED"}])
@@ -107,6 +118,13 @@ def install_api(page: Page, state: dict):
             return route.fulfill(status=200, json=LEVELS)
         if path == f"{BASE}/analyze" and method == "POST":
             state["analyze_bodies"].append(body)
+            if state["analyze_delay_seconds"]:
+                time.sleep(state["analyze_delay_seconds"])
+            if state["analyze_failures"] > 0:
+                state["analyze_failures"] -= 1
+                return route.fulfill(status=503, json={"message": "Drift service unavailable."})
+            if "analyze_response" in state:
+                return route.fulfill(status=201, json=state["analyze_response"])
             if body["pullRequestNumber"] == 404:
                 return route.fulfill(status=404, json={"code": "PULL_REQUEST_NOT_FOUND",
                                                        "message": "Pull request #404 was not found."})
@@ -119,6 +137,9 @@ def install_api(page: Page, state: dict):
             state["reports"].append(REPORT)
             return route.fulfill(status=201, json=REPORT)
         if path == f"{BASE}/reports":
+            if state["history_failures"] > 0:
+                state["history_failures"] -= 1
+                return route.fulfill(status=503, json={"message": "History service unavailable."})
             return route.fulfill(status=200, json=[{
                 "id": r["id"], "status": r["status"], "repository": "acme/shop",
                 "pull_request_number": r["pull_request"]["number"], "pull_request_title": r["pull_request"]["title"],
@@ -142,6 +163,21 @@ def open_drift(page: Page):
     page.get_by_role("button", name="Documentation Drift").first.click()
     expect(page.get_by_role("heading", name="Documentation Drift")).to_be_visible()
     expect(page.get_by_label("Repository", exact=True)).to_have_value(REPOSITORY_ID)
+
+
+def test_back_to_login_navigates_without_logging_out(page: Page):
+    install_api(page, {})
+    logout_requests = []
+    page.on("request", lambda request: logout_requests.append(request.url)
+            if request.method == "POST" and request.url.endswith("/api/auth/logout") else None)
+    open_drift(page)
+
+    page.get_by_role("button", name="Back to Login").click()
+
+    expect(page.get_by_role("heading", name="LivingDocs")).to_be_visible()
+    expect(page.get_by_role("heading", name="Documentation Drift")).to_have_count(0)
+    assert logout_requests == []
+    assert page.evaluate("sessionStorage.getItem('livingdocs.userId')") == "42"
 
 
 def run_check(page: Page, number="42"):
@@ -217,7 +253,7 @@ def test_filter_by_severity_and_copy_markdown(page: Page):
     filters.get_by_role("button", name="Copy as PR comment").click()
     expect(page.get_by_role("status").filter(has_text="Markdown copied")).to_be_visible()
     assert state["markdown_queries"] == ["minSeverity=critical"]
-    assert page.evaluate("navigator.clipboard.readText()") == MARKDOWN
+    assert page.evaluate("navigator.clipboard.readText()").replace("\r\n", "\n") == MARKDOWN
 
 
 def test_previous_checks_can_be_reopened(page: Page):
@@ -226,12 +262,12 @@ def test_previous_checks_can_be_reopened(page: Page):
     open_drift(page)
     run_check(page)
     history = page.locator(".drift-history")
-    expect(history).to_contain_text("PR #42 · LD-146 Cart currency")
+    expect(history).to_contain_text("PR #42 - LD-146 Cart currency")
     expect(history.locator(".severity-badge")).to_have_attribute("data-severity", "critical")
 
     run_check(page, "7")
     expect(page.get_by_text("No documentation drift: the checked documentation matches the code.")).to_be_visible()
-    history.get_by_role("button", name="PR #42 · LD-146 Cart currency").click()
+    history.get_by_role("button", name="PR #42 - LD-146 Cart currency").click()
     expect(page.locator(".drift-finding")).to_have_count(3)
 
 
@@ -248,3 +284,80 @@ def test_invalid_number_and_unknown_pull_request(page: Page):
     expect(page.get_by_role("alert")).to_have_text(
         "The pull request was not found in this repository. Check the number and try again.")
     assert state["analyze_bodies"] == [{"pullRequestNumber": 404, "includeRepositoryDocs": False}]
+
+
+
+def test_history_empty_state_is_displayed(page: Page):
+    install_api(page, {})
+    open_drift(page)
+    expect(page.get_by_role("heading", name="Previous checks")).to_be_visible()
+    expect(page.get_by_role("status").filter(has_text="No previous drift checks for this repository.")).to_be_visible()
+
+
+def test_repository_and_history_errors_can_be_retried(page: Page):
+    state = {"repository_failures": 1, "history_failures": 1}
+    install_api(page, state)
+    page.goto("http://localhost:3000/")
+    page.get_by_label("Email").fill("user@example.test")
+    page.get_by_label("Password").fill("test-only-password")
+    page.get_by_role("button", name="Sign in").click()
+    page.get_by_role("button", name="Documentation Drift").first.click()
+    expect(page.get_by_role("alert").filter(has_text="Repository service unavailable")).to_be_visible()
+    page.get_by_role("button", name="Retry loading repositories").click()
+    expect(page.get_by_label("Repository", exact=True)).to_have_value(REPOSITORY_ID)
+    expect(page.get_by_role("alert").filter(has_text="History service unavailable")).to_be_visible()
+    page.get_by_role("button", name="Retry loading history").click()
+    expect(page.get_by_role("status").filter(has_text="No previous drift checks for this repository.")).to_be_visible()
+
+
+def test_drift_analysis_error_has_retry_action(page: Page):
+    state = {"analyze_failures": 1}
+    install_api(page, state)
+    open_drift(page)
+    run_check(page)
+    expect(page.get_by_role("alert").filter(has_text="Drift service unavailable")).to_be_visible()
+    page.get_by_role("button", name="Retry drift analysis").click()
+    expect(page.get_by_label("Analysis details")).to_contain_text("Drift detected")
+    assert len(state["analyze_bodies"]) == 2
+
+
+def test_repository_empty_state_is_displayed(page: Page):
+    install_api(page, {"repositories_empty": True})
+    page.goto("http://localhost:3000/")
+    page.get_by_label("Email").fill("user@example.test")
+    page.get_by_label("Password").fill("test-only-password")
+    page.get_by_role("button", name="Sign in").click()
+    page.get_by_role("button", name="Documentation Drift").first.click()
+    expect(page.get_by_role("heading", name="No repositories available")).to_be_visible()
+    expect(page.get_by_role("button", name="Check drift")).to_be_disabled()
+
+
+
+def test_analysis_loading_state_is_visible(page: Page):
+    install_api(page, {"analyze_delay_seconds": 0.6})
+    open_drift(page)
+    page.get_by_label("Pull request number").fill("42")
+    page.get_by_role("button", name="Check drift").click()
+    expect(page.get_by_role("status").filter(has_text="Analyzing Pull Request drift")).to_be_visible()
+    expect(page.get_by_role("button", name="Checking...")).to_be_disabled()
+    expect(page.get_by_label("Analysis details")).to_contain_text("Drift detected", timeout=5000)
+
+
+def test_report_without_required_fields_is_reported_as_invalid(page: Page):
+    state = {"analyze_response": {"status": "drift_detected", "summary": {}, "findings": [None], "pull_request": {}}}
+    install_api(page, state)
+    open_drift(page)
+    run_check(page)
+
+    expect(page.get_by_role("alert")).to_contain_text("drift analysis response was invalid")
+    expect(page.locator(".drift-overall")).to_have_count(0)
+
+
+def test_detected_drift_without_severity_is_not_reported_as_no_drift(page: Page):
+    report = {**REPORT, "summary": {**REPORT["summary"], "highest_severity": None}}
+    install_api(page, {"analyze_response": report})
+    open_drift(page)
+    run_check(page)
+
+    expect(page.locator(".drift-overall")).to_contain_text("Drift was detected, but severity details are unavailable")
+    expect(page.locator(".drift-overall")).not_to_contain_text("No documentation drift")
