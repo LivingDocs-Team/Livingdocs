@@ -68,7 +68,8 @@ class FlywayMigrationLineageSelectorTest {
         assertThat(tableNames(dataSource)).contains("documentation_artifacts", "code_entities",
                 "documentation_code_relationships", "github_commits", "github_pull_requests",
                 "document_workflows", "document_workflow_audit", "source_changes",
-                "source_change_files", "source_change_entities");
+                "source_change_files", "source_change_entities", "source_change_documents",
+                "source_change_document_evidence");
     }
 
     @Test
@@ -267,6 +268,19 @@ class FlywayMigrationLineageSelectorTest {
         assertThat(resourceBytes(
                 "db/migration-current-pull-requests-v5-source-changes-v6/V7__documentation_code_relationships.sql"))
                 .isEqualTo(resourceBytes("db/migration-current-pull-requests-v5/V6__documentation_code_relationships.sql"));
+
+        // LD-122: the affected-documents migration must exist, unchanged, in every lineage (next free version)
+        for (String resource : new String[] {
+                "db/migration-legacy/V7__affected_documents.sql",
+                "db/migration-current/V7__affected_documents.sql",
+                "db/migration-current-documents-v5/V8__affected_documents.sql",
+                "db/migration-current-pull-requests-v5/V8__affected_documents.sql",
+                "db/migration-current-documents-v5-source-changes-v6/V8__affected_documents.sql",
+                "db/migration-current-pull-requests-v5-source-changes-v6/V8__affected_documents.sql"}) {
+            assertThat(resourceBytes(resource))
+                    .as("preserve the affected documents migration byte-for-byte at %s", resource)
+                    .isEqualTo(resourceBytes("db/migration/V8__affected_documents.sql"));
+        }
     }
 
     private DataSource dataSource() {

@@ -38,6 +38,3 @@ CREATE TABLE source_change_entities (
 );
 
 CREATE INDEX idx_source_change_entities_file ON source_change_entities (file_id);
-
-
-

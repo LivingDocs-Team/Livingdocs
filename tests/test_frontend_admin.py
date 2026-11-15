@@ -27,7 +27,9 @@ def user_row(account, active=True):
 
 def install_api(page: Page, account=ADMIN, **options):
     state = {"calls": [], "users": [user_row(ADMIN), user_row(DEVELOPER)],
-             "github_status": 200, "workflows_status": 200, "signed_in": False, **options}
+             "github_status": 200, "workflows_status": 200, "signed_in": False,
+             "preferences": {"emailUpdates": True, "documentChanges": True, "reviewRequests": False,
+                             "systemNotifications": True}, **options}
     roles = {"DEVELOPER": ["DOCUMENT_VIEW"], "ADMINISTRATOR": ["USER_VIEW"]}
 
     def handle(route):
@@ -101,6 +103,10 @@ def install_api(page: Page, account=ADMIN, **options):
                 "id": "a1", "actorUserId": "3", "actorRole": "STAFF", "action": "STAFF_REVIEW",
                 "previousStatus": "STAFF_REVIEWING", "newStatus": "PENDING_MANAGER_APPROVAL",
                 "comment": "Looks good", "createdAt": "2026-11-13T10:00:00Z"}])
+        if path == "/api/profile/notification-preferences":       # LD-51: Notifications tab (LD-321)
+            if method == "PUT":
+                state["preferences"] = body
+            return route.fulfill(status=200, json=state["preferences"])
         return route.fulfill(status=404, json={"message": f"Unexpected API request: {method} {path}"})
 
     page.route("**/api/**", handle)
@@ -209,6 +215,8 @@ def test_admin_sees_configuration_health_analytics_audit_and_notifications(page:
 
     page.get_by_role("tab", name="Notifications").click()
     expect(page.get_by_label("Email updates")).to_be_checked()
+    expect(page.get_by_label("Document changes")).to_be_checked()
+    expect(page.get_by_label("Review requests")).not_to_be_checked()
 
 
 

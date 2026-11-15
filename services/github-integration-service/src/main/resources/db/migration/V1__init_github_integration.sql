@@ -30,6 +30,3 @@ CREATE TABLE repositories (
 
 CREATE INDEX idx_repositories_workspace ON repositories (workspace_id);
 CREATE INDEX idx_repositories_connection ON repositories (connection_id);
-
-
-
