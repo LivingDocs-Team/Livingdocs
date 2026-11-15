@@ -338,7 +338,8 @@ class DriftAnalysisServiceTest {
         when(gitHubClient.getPullRequest(TOKEN, "acme", "shop", 7)).thenReturn(new GitHubPullRequest(
                 7, "LD-146 Cart currency", "Adds currency.", "open", "https://github.com/acme/shop/pull/7",
                 new GitHubPullRequest.Account("dev1"),
-                new GitHubPullRequest.Ref("ld-146-currency", HEAD), new GitHubPullRequest.Ref("main", BASE)));
+                new GitHubPullRequest.Ref("ld-146-currency", HEAD), new GitHubPullRequest.Ref("main", BASE),
+                null, null, null, null));
         when(gitHubClient.listPullRequestFiles(TOKEN, "acme", "shop", 7)).thenReturn(List.of(
                 new GitHubPullRequestFile("py-head", "shop/cart.py", "modified", 1, 1, 2, PATCH, null),
                 new GitHubPullRequestFile("js-head", "web/app.js", "modified", 1, 1, 2, "@@ -1 +1 @@\n-a\n+b", null)));
