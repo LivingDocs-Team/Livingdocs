@@ -4,6 +4,7 @@ import com.cnpm.backend.entity.User;
 import com.cnpm.backend.repository.UserRepository;
 import com.cnpm.backend.repository.RoleRepository;
 import com.cnpm.backend.repository.PermissionRepository;
+import com.cnpm.backend.repository.AdminUserAuditRepository;
 import com.cnpm.backend.auth.CustomUserDetailsService;
 import com.cnpm.backend.auth.GitHubOAuth2UserService;
 import com.cnpm.backend.service.WorkspaceService;
@@ -16,6 +17,8 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
@@ -42,6 +45,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.core.userdetails.User.withUsername;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -67,7 +71,8 @@ import java.nio.charset.StandardCharsets;
         com.cnpm.backend.auth.OAuth2SuccessController.class,
         com.cnpm.backend.auth.UserLoginController.class,
         com.cnpm.backend.controller.AdminUserController.class,
-        com.cnpm.backend.controller.AdminRoleController.class
+        com.cnpm.backend.controller.AdminRoleController.class,
+        com.cnpm.backend.controller.ProfileController.class
 }, properties = {
         "services.github-integration.base-url=http://127.0.0.1:1",
         "services.github-integration.internal-secret=filter-chain-test-credential",
@@ -95,6 +100,9 @@ class BackendSecurityFilterChainTest {
 
     @Autowired
     private RoleRepository roleRepository;
+
+    @Autowired
+    private AdminUserAuditRepository auditRepository;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -209,6 +217,32 @@ class BackendSecurityFilterChainTest {
     }
 
     @Test
+    void profileNeedsASessionAndCsrf_andCannotChangeEmailOrRole() throws Exception {  // LD-52
+        mvc.perform(get("/api/profile")).andExpect(status().isUnauthorized());
+
+        Csrf csrf = fetchCsrf();
+        MockHttpSession session = login(csrf);
+        mvc.perform(get("/api/profile").session(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.email").value(EMAIL))
+                .andExpect(jsonPath("$.password").doesNotExist());
+        mvc.perform(patch("/api/profile").session(session)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"firstName\":\"New\"}"))
+                .andExpect(status().isForbidden());
+
+        when(userRepository.save(testUser)).thenReturn(testUser);
+        mvc.perform(patch("/api/profile").session(session)
+                        .cookie(csrf.cookie())
+                        .header("X-XSRF-TOKEN", csrf.token())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"firstName\":\"New\",\"email\":\"other@example.test\",\"role\":\"ADMINISTRATOR\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.firstName").value("New"))
+                .andExpect(jsonPath("$.email").value(EMAIL))
+                .andExpect(jsonPath("$.role").value("DEVELOPER"));
+    }
+
+    @Test
     void missingAndWrongCsrfAreRejectedButValidCsrfReachesAuthenticatedBff() throws Exception {
         Csrf csrf = fetchCsrf();
         MockHttpSession session = login(csrf);
@@ -296,6 +330,26 @@ class BackendSecurityFilterChainTest {
                 .andExpect(status().isUnauthorized());
 
         assertThat(session.isInvalid()).isTrue();
+    }
+
+    @Test
+    void userAuditRequiresAdminRoleAndAuditPermission() throws Exception {
+        Csrf csrf = fetchCsrf();
+        when(auditRepository.findAll(any(Pageable.class)))
+                .thenAnswer(request -> Page.empty(request.getArgument(0)));
+
+        mvc.perform(get("/api/admin/users/audit")).andExpect(status().isUnauthorized());
+        MockHttpSession administrator = loginWithAuthorities(csrf, "ROLE_ADMINISTRATOR", "USER_VIEW");
+        mvc.perform(get("/api/admin/users/audit").session(administrator)).andExpect(status().isForbidden());
+        MockHttpSession developer = loginWithAuthorities(csrf, "ROLE_DEVELOPER", "USER_AUDIT_VIEW");
+        mvc.perform(get("/api/admin/users/audit").session(developer)).andExpect(status().isForbidden());
+        MockHttpSession auditor = loginWithAuthorities(csrf, "ROLE_ADMINISTRATOR", "USER_AUDIT_VIEW");
+        mvc.perform(get("/api/admin/users/audit").session(auditor))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0))
+                .andExpect(jsonPath("$.size").value(20));
+        mvc.perform(get("/api/admin/users/audit").session(auditor).param("size", "101"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -388,6 +442,11 @@ class BackendSecurityFilterChainTest {
         @Primary
         PermissionRepository testPermissionRepository() {
             return mock(PermissionRepository.class);
+        }
+
+        @Bean
+        AdminUserAuditRepository testAdminUserAuditRepository() {
+            return mock(AdminUserAuditRepository.class);
         }
 
         @Bean

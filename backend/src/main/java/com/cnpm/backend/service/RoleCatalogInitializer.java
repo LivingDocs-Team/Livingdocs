@@ -28,6 +28,7 @@ public class RoleCatalogInitializer implements ApplicationRunner {
             Map.entry("USER_UPDATE", "Update user profile fields"),
             Map.entry("USER_DISABLE", "Enable or disable user accounts"),
             Map.entry("USER_ASSIGN_ROLE", "Assign a primary role to a user"),
+            Map.entry("USER_AUDIT_VIEW", "View administrative user audit records"),
             Map.entry("ROLE_VIEW", "View system roles"),
             Map.entry("PERMISSION_VIEW", "View system permissions"),
             Map.entry("ROLE_ASSIGN_PERMISSION", "Assign permissions to a role"),
