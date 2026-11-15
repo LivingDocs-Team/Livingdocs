@@ -1009,6 +1009,34 @@ button:disabled {
   font-size: 12px;
 }
 
+/* LD-122 / LD-126: affected documentation and evidence under one source change */
+.affected-docs,
+.impact-evidence {
+  display: grid;
+  flex-basis: 100%;
+  gap: 4px;
+  margin: 2px 0 0 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.affected-docs > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.impact-evidence li {
+  color: #475569;
+  font-size: 12px;
+}
+
+.impact-evidence code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .sync-error {
   margin: 10px 0 0;
   padding: 10px 12px;
