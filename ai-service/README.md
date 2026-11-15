@@ -65,6 +65,7 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | GET | `/drift/reports/{id}?min_severity=high` | One drift report (optionally only findings at or above a level) |
 | GET | `/drift/reports/{id}/markdown?min_severity=` | The report as Markdown grouped by severity (PR comment) |
 | GET | `/drift/severity-rules` | Severity levels (score bands, meaning, action) and every severity rule |
+| POST | `/internal/affected-documents` | Internal (`INTERNAL_API_SECRET`). Parts of the given saved documents a source change (LD-116) may have made outdated, each `direct` or `dependent` (LD-122) |
 
 Built-in templates: `default`, `api-reference`, `brief`.
 
@@ -248,8 +249,22 @@ python scripts/run_sample.py path/to/real_analysis.json
 Environment variables: `TEMPLATES_FILE` (default `data/templates.json`), `ANTHROPIC_API_KEY`, `LLM_MODEL` (default `claude-sonnet-5-5`),
 `LLM_MAX_TOKENS` (4096), `LLM_TIMEOUT` seconds (60), `LLM_MAX_ATTEMPTS` (3).
 
+## Job monitoring and restarts (LD-281)
+
+- The job owner can poll `GET /api/documentation/jobs/{jobId}` through the application to see
+  the state, progress and any failure message. The AI service logs the job ID and state changes.
+- To reproduce restart behavior, generate documentation, record the job ID, and confirm that the
+  owner can poll it. Restart either `ai-service` or `github-integration` and poll the same ID.
+  Both cases return HTTP 404. The AI service holds job status and results in memory, and GitHub
+  Integration holds job ownership in memory. Start a new job to continue after either restart.
+  Documents already saved to the configured document volume remain available.
+
+GitHub Integration logs signed webhook deliveries with the delivery ID and ingestion outcome
+(`PROCESSED`, `DUPLICATE`, `IGNORED` or `FAILED`). For downstream source-change progress and errors, use
+the existing workspace-scoped `GET /api/repositories/{id}/source-changes` endpoint.
+
 ## Notes / next steps
 
-- Jobs and drift reports are stored in memory and reset on restart. Custom templates are saved to
+- Drift reports are stored in memory and reset on restart. Custom templates are saved to
   `TEMPLATES_FILE`; templates are shared by all users (the AI service has no user accounts).
 - The `files` input format should match what the LivingDocs code analyzer outputs.
