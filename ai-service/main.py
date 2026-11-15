@@ -10,12 +10,14 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Qu
 from fastapi.responses import PlainTextResponse
 from pydantic import AwareDatetime
 
+from app.change_context import ChangeContextReport, ChangeContextRequest, change_context
 from app.drift import analyze as analyze_drift
 from app.drift import drift_reports
 from app.drift_changes import analyze_pull_request
 from app.drift_markdown import at_least, render as render_drift_markdown
 from app.drift_models import (DriftAnalyzeRequest, DriftReport, DriftReportSummary,
                               PullRequestAnalysis, Severity)
+from app.suggestion_api import router as suggestion_router
 from app.drift_severity import CAPS, SCORE_BANDS, SEVERITY_LEVELS, rules_table
 from app.generator import get_generator
 from app.jobs import jobs, run_job
@@ -404,6 +406,18 @@ def drift_changes(req: DriftAnalyzeRequest):
     """LD-146: changed code entities of a Pull Request (no documentation is checked, nothing
     is stored). Same body as /drift/analyze; `docs` and `document_ids` are ignored."""
     return analyze_pull_request(req.pull_request, req.files, req.repository)
+
+
+@app.post("/drift/context", response_model=ChangeContextReport)
+def drift_context(req: ChangeContextRequest):
+    """LD-338: for every code entity the Pull Request changes, the context needed to update its
+    documentation: the diff (X1), related code at the head commit (C: callers, callees, similar)
+    and documentation (D: passages naming the entity first, then related ones), plus a prompt
+    text citing them. Nothing is stored and no AI is called."""
+    return change_context(req, documents)
+
+
+app.include_router(suggestion_router)   # LD-353 documentation update suggestions
 
 
 @app.post("/drift/analyze", response_model=DriftReport, status_code=201)
