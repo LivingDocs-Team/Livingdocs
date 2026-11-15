@@ -111,6 +111,35 @@ class DocumentationGenerationServiceTest {
     }
 
     @Test
+    void ownerCanInspectFailedJobAndIntegrationRestartForgetsOwnership() {
+        analyzerServer.expect(requestTo("http://analyzer.test/api/v1/analyze-repo"))
+                .andRespond(withSuccess(ANALYSIS, MediaType.APPLICATION_JSON));
+        aiServiceServer.expect(requestTo("http://ai.test/generate"))
+                .andRespond(withStatus(HttpStatus.ACCEPTED).contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {"id":"job-failed","status":"pending"}
+                                """));
+        aiServiceServer.expect(requestTo("http://ai.test/jobs/job-failed"))
+                .andRespond(withSuccess("""
+                        {"id":"job-failed","status":"failed","error":"No documentation generated"}
+                        """, MediaType.APPLICATION_JSON));
+
+        generationService.generate(USER_ID, REPOSITORY_ID, new DocumentationGenerationRequest("default", "en"));
+        assertEquals(403, assertThrows(ApiException.class,
+                () -> generationService.getJob("another-owner", "job-failed")).getStatus().value());
+        JsonNode job = generationService.getJob(USER_ID, "job-failed");
+        assertEquals("failed", job.path("status").asText());
+        assertEquals("No documentation generated", job.path("error").asText());
+
+        RestClient unusedClient = RestClient.builder().build();
+        var restarted = new DocumentationGenerationService(repositorySyncService, unusedClient, unusedClient, relationshipService);
+        assertEquals(404, assertThrows(ApiException.class,
+                () -> restarted.getJob(USER_ID, "job-failed")).getStatus().value());
+        analyzerServer.verify();
+        aiServiceServer.verify();
+    }
+
+    @Test
     void analyzesLatestAuthorizedSnapshotAndStartsAiJob() throws Exception {
         analyzerServer.expect(requestTo("http://analyzer.test/api/v1/analyze-repo"))
                 .andExpect(method(POST))

@@ -1,7 +1,9 @@
 """Generation jobs: run in the background, expose status, progress, warnings and result."""
+import logging
 import threading
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 from .confidence import METHOD, level_of
@@ -24,6 +26,8 @@ from .renderer import render_overview
 from .retrieval import build_index, retrieve
 from .templates import templates
 
+logger = logging.getLogger("uvicorn.error.jobs")
+
 
 @dataclass
 class JobOutput:
@@ -45,6 +49,7 @@ class JobOutput:
 class JobStore:
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self.observed_since = now()
         self._jobs: Dict[str, Job] = {}
         self._reports: Dict[str, JobReport] = {}
         self._outputs: Dict[str, JobOutput] = {}
@@ -56,6 +61,7 @@ class JobStore:
                   template_sections=list(tpl.sections) if tpl else [])
         with self._lock:
             self._jobs[job.id] = job
+        logger.info("Documentation job %s: %s", job.id, JobStatus.pending.value)
         return job
 
     def get(self, job_id: str) -> Optional[Job]:
@@ -78,12 +84,24 @@ class JobStore:
     def list(self) -> List[Job]:
         return sorted(self._jobs.values(), key=lambda j: j.created_at, reverse=True)
 
+    def count_outcomes(self, start: datetime, end: datetime) -> tuple[int, int]:
+        counts = {JobStatus.completed: 0, JobStatus.failed: 0}
+        with self._lock:
+            for job in self._jobs.values():
+                if job.status in counts and start <= job.updated_at < end:
+                    counts[job.status] += 1
+        return counts[JobStatus.completed], counts[JobStatus.failed]
+
     def update(self, job_id: str, **changes) -> None:
         with self._lock:
             job = self._jobs[job_id]
+            previous_status = job.status
             for k, v in changes.items():
                 setattr(job, k, v)
             job.updated_at = now()
+            if job.status != previous_status:
+                log = logger.warning if job.status == JobStatus.failed else logger.info
+                log("Documentation job %s: %s", job_id, job.status.value)
 
 
 jobs = JobStore()
