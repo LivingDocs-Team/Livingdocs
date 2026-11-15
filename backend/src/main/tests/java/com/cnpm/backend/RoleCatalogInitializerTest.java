@@ -67,14 +67,14 @@ class RoleCatalogInitializerTest {
         );
         assertThat(permissionCodes(roles.get("TECHNICAL_LEAD"))).contains("DOCUMENT_TECHNICAL_REVIEW");
         assertThat(permissionCodes(roles.get("ADMINISTRATOR")))
-        .contains("DOCUMENT_REASSIGN", "SYSTEM_CONFIG_VIEW", "SYSTEM_CONFIG_UPDATE")
+        .contains("DOCUMENT_REASSIGN", "USER_AUDIT_VIEW")
         .doesNotContain(
                 "DOCUMENT_APPROVE",
                 "DOCUMENT_REJECT",
                 "DOCUMENT_ROLLBACK"
         );
         assertThat(permissionCodes(roles.get("ADMIN")))
-        .contains("DOCUMENT_REASSIGN")
+        .contains("DOCUMENT_REASSIGN", "USER_AUDIT_VIEW")
         .doesNotContain(
                 "DOCUMENT_APPROVE",
                 "DOCUMENT_REJECT",

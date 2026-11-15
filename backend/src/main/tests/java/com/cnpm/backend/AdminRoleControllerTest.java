@@ -10,6 +10,10 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.authentication.TestingAuthenticationToken;
+import com.cnpm.backend.entity.User;
+import com.cnpm.backend.repository.UserRepository;
+import com.cnpm.backend.repository.AdminUserAuditRepository;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.cnpm.backend.controller.AdminRoleController;
@@ -19,6 +23,16 @@ import com.cnpm.backend.repository.PermissionRepository;
 import com.cnpm.backend.repository.RoleRepository;
 
 class AdminRoleControllerTest {
+    private final TestingAuthenticationToken actor = new TestingAuthenticationToken("actor@example.test", null, "ROLE_ASSIGN_PERMISSION");
+
+    private AdminRoleController controller(RoleRepository roles, PermissionRepository permissions) {
+        var users = mock(UserRepository.class);
+        var user = mock(User.class);
+        when(user.getId()).thenReturn(1L);
+        when(users.findByEmail(actor.getName())).thenReturn(Optional.of(user));
+        return new AdminRoleController(roles, permissions, users, mock(AdminUserAuditRepository.class));
+    }
+
     @Test
     void rolePermissionAssignmentReplacesTheSetAndRejectsUnknownPermissions() {
         RoleRepository roles = mock(RoleRepository.class);
@@ -26,22 +40,21 @@ class AdminRoleControllerTest {
         Role role = new Role("STAFF", "Staff member");
         role.getPermissions().add(new Permission("USER_VIEW", "View users"));
         Permission update = new Permission("USER_UPDATE", "Update users");
-        when(roles.findById("STAFF")).thenReturn(Optional.of(role));
+        when(roles.findForUpdateByName("STAFF")).thenReturn(Optional.of(role));
         when(permissions.findAllById(org.mockito.ArgumentMatchers.<Iterable<String>>any()))
                 .thenAnswer(invocation -> {
                     Iterable<String> ids = invocation.getArgument(0);
                     for (String id : ids) if (id.equals("USER_UPDATE")) return List.of(update);
                     return List.of();
                 });
-        when(roles.save(role)).thenReturn(role);
 
-        var response = new AdminRoleController(roles, permissions).replacePermissions("staff",
-                new AdminRoleController.PermissionAssignment(List.of("user_update")));
+        var response = controller(roles, permissions).replacePermissions("staff",
+                new AdminRoleController.PermissionAssignment(List.of("user_update")), actor);
 
         assertThat(response.permissions()).containsExactly("USER_UPDATE");
 
-        assertThatThrownBy(() -> new AdminRoleController(roles, permissions).replacePermissions("STAFF",
-                new AdminRoleController.PermissionAssignment(List.of("MISSING"))))
+        assertThatThrownBy(() -> controller(roles, permissions).replacePermissions("STAFF",
+                new AdminRoleController.PermissionAssignment(List.of("MISSING")), actor))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(error -> assertThat(((ResponseStatusException) error).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
     }
@@ -49,7 +62,7 @@ class AdminRoleControllerTest {
     @Test
     void roleCatalogDoesNotAllowArbitraryOrDynamicRoles() {
         RoleRepository roles = mock(RoleRepository.class);
-        assertThatThrownBy(() -> new AdminRoleController(roles, mock(PermissionRepository.class)).getRole("CUSTOM"))
+        assertThatThrownBy(() -> controller(roles, mock(PermissionRepository.class)).getRole("CUSTOM"))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(error -> assertThat(((ResponseStatusException) error).getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
     }
@@ -58,14 +71,14 @@ class AdminRoleControllerTest {
     void administratorCannotRemoveItsManagementPermissions() {
         RoleRepository roles = mock(RoleRepository.class);
         PermissionRepository permissions = mock(PermissionRepository.class);
-        when(roles.findById("ADMINISTRATOR")).thenReturn(Optional.of(new Role("ADMINISTRATOR", "System administrator")));
+        when(roles.findForUpdateByName("ADMINISTRATOR")).thenReturn(Optional.of(new Role("ADMINISTRATOR", "System administrator")));
         List<String> retainedPermissions = List.of("USER_VIEW", "USER_UPDATE", "USER_DISABLE",
                 "USER_ASSIGN_ROLE", "ROLE_VIEW", "PERMISSION_VIEW", "ROLE_ASSIGN_PERMISSION");
         when(permissions.findAllById(org.mockito.ArgumentMatchers.<Iterable<String>>any()))
                 .thenReturn(retainedPermissions.stream().map(code -> new Permission(code, code)).toList());
 
-        assertThatThrownBy(() -> new AdminRoleController(roles, permissions).replacePermissions("ADMINISTRATOR",
-                new AdminRoleController.PermissionAssignment(retainedPermissions)))
+        assertThatThrownBy(() -> controller(roles, permissions).replacePermissions("ADMINISTRATOR",
+                new AdminRoleController.PermissionAssignment(retainedPermissions), actor))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(error -> assertThat(((ResponseStatusException) error).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
     }

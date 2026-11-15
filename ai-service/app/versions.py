@@ -11,6 +11,7 @@ import os
 import pathlib
 import threading
 import uuid
+from datetime import datetime
 from typing import Dict, List, Optional
 
 from .generator import DocGenerator
@@ -109,6 +110,12 @@ class DocumentStore:
         os.replace(tmp, self.path)  # atomic: a crash never leaves a half-written file
 
     # ---------- queries (LD-195) ----------
+
+    def count_activity(self, start: datetime, end: datetime) -> tuple[int, int]:
+        with self._lock:
+            created = sum(start <= doc.created_at < end for doc in self._docs.values())
+            audit = sum(start <= event.at < end for events in self._events.values() for event in events)
+        return created, audit
 
     def list(self) -> List[Document]:
         return sorted(self._docs.values(), key=lambda d: d.updated_at, reverse=True)

@@ -37,6 +37,8 @@ import com.livingdocs.github.entity.StaffReviewResult;
 import com.livingdocs.github.repository.DocumentWorkflowAuditRepository;
 import com.livingdocs.github.repository.DocumentWorkflowRepository;
 import com.livingdocs.github.security.TokenEncryptor;
+import com.livingdocs.github.config.FlywayMigrationLineageConfig;
+import com.livingdocs.github.config.FlywayMigrationLineageSelector;
 import com.livingdocs.github.service.DocumentWorkflowService;
 import com.livingdocs.github.service.DocumentationGenerationService;
 
@@ -45,7 +47,8 @@ import jakarta.persistence.EntityManager;
 @DataJpaTest(properties = "spring.flyway.enabled=true")
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import(DocumentWorkflowAuditRepositoryTest.TestTokenEncryptorConfiguration.class)
+@Import({DocumentWorkflowAuditRepositoryTest.TestTokenEncryptorConfiguration.class,
+        FlywayMigrationLineageConfig.class, FlywayMigrationLineageSelector.class})
 class DocumentWorkflowAuditRepositoryTest {
 
     @TestConfiguration(proxyBeanMethods = false)
@@ -128,7 +131,7 @@ class DocumentWorkflowAuditRepositoryTest {
                 + ";MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1";
         Flyway v3 = Flyway.configure()
                 .dataSource(url, "sa", "")
-                .locations("classpath:db/migration")
+                .locations("classpath:db/migration-current")
                 .target(MigrationVersion.fromVersion("3"))
                 .load();
         v3.migrate();
@@ -157,7 +160,7 @@ class DocumentWorkflowAuditRepositoryTest {
         }
 
         Flyway v4 = Flyway.configure().dataSource(url, "sa", "")
-                .locations("classpath:db/migration").load();
+                .locations("classpath:db/migration-current").load();
         v4.migrate();
 
         try (Connection connection = DriverManager.getConnection(url, "sa", "");

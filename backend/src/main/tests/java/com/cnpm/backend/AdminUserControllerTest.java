@@ -2,6 +2,9 @@ package com.cnpm.backend;
 
 import com.cnpm.backend.controller.AdminUserController;
 import com.cnpm.backend.entity.User;
+import com.cnpm.backend.entity.AdminUserAudit;
+import com.cnpm.backend.repository.AdminUserAuditRepository;
+import org.mockito.ArgumentCaptor;
 import com.cnpm.backend.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.PageImpl;
@@ -20,10 +23,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.never;
 import static org.springframework.security.core.userdetails.User.withUsername;
 
 class AdminUserControllerTest {
+    private final AdminUserAuditRepository audit = mock(AdminUserAuditRepository.class);
 
     @Test
     void administratorCannotLockTheirOwnAccount() {
@@ -32,7 +37,7 @@ class AdminUserControllerTest {
         when(repository.findByEmail("admin@example.test")).thenReturn(Optional.of(admin));
         Authentication authentication = authentication("admin@example.test");
 
-        AdminUserController controller = new AdminUserController(repository);
+        AdminUserController controller = new AdminUserController(repository, audit);
 
         assertThatThrownBy(() -> controller.updateStatus(
                 10L, new AdminUserController.UpdateUserStatusRequest(false), authentication))
@@ -41,6 +46,7 @@ class AdminUserControllerTest {
                         ((ResponseStatusException) error).getStatusCode())
                         .isEqualTo(HttpStatus.FORBIDDEN));
         verify(repository, never()).save(admin);
+        verifyNoInteractions(audit);
     }
 
     @Test
@@ -49,33 +55,40 @@ class AdminUserControllerTest {
         User admin = user(10L, "admin@example.test", "ADMIN");
         User target = user(11L, "developer@example.test", "DEVELOPER");
         when(repository.findByEmail("admin@example.test")).thenReturn(Optional.of(admin));
-        when(repository.findById(11L)).thenReturn(Optional.of(target));
+        when(repository.findByIdForUpdate(11L)).thenReturn(Optional.of(target));
         when(repository.save(target)).thenReturn(target);
 
-        var response = new AdminUserController(repository).updateStatus(
+        var controller = new AdminUserController(repository, audit);
+        var response = controller.updateStatus(
                 11L, new AdminUserController.UpdateUserStatusRequest(false),
                 authentication("admin@example.test"));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(target.isActive()).isFalse();
+        controller.updateStatus(11L, new AdminUserController.UpdateUserStatusRequest(false),
+                authentication("admin@example.test"));
+        assertAudit("USER_STATUS_CHANGED", "true", "false");
     }
 
     @Test
-    void profileUpdateDoesNotChangeTheUsersRoleOrExposePassword() {
+    void profileUpdateAuditsChangedFieldsWithoutExposingProfileValues() {
         UserRepository repository = mock(UserRepository.class);
+        when(repository.findByEmail("admin@example.test"))
+                .thenReturn(Optional.of(user(10L, "admin@example.test", "ADMIN")));
         User target = user(11L, "developer@example.test", "DEVELOPER");
-        when(repository.findById(11L)).thenReturn(Optional.of(target));
+        when(repository.findByIdForUpdate(11L)).thenReturn(Optional.of(target));
         when(repository.save(target)).thenReturn(target);
 
-        var response = new AdminUserController(repository).updateUser(
+        var response = new AdminUserController(repository, audit).updateUser(
                 11L, new AdminUserController.UpdateUserRequest(
-                        "new-name", null, "New", "Name"));
+                        "new-name", null, "New", "Name"), authentication("admin@example.test"));
 
         assertThat(response.role()).isEqualTo("DEVELOPER");
         assertThat(response.username()).isEqualTo("new-name");
         assertThat(java.util.Arrays.stream(response.getClass().getRecordComponents())
                 .map(java.lang.reflect.RecordComponent::getName).toList())
                 .doesNotContain("password");
+        assertAudit("USER_PROFILE_CHANGED", "", "username,firstName,lastName");
     }
 
     @Test
@@ -87,7 +100,7 @@ class AdminUserControllerTest {
         when(repository.searchForAdministration("dev", "DEVELOPER", false, pageable))
                 .thenReturn(new PageImpl<>(List.of(target), pageable, 11));
 
-        var response = new AdminUserController(repository)
+        var response = new AdminUserController(repository, audit)
                 .listUsers(1, 10, " dev ", "developer", false);
 
         assertThat(response.content()).hasSize(1);
@@ -109,7 +122,7 @@ class AdminUserControllerTest {
                 .thenReturn(new PageImpl<>(List.of(staff), pageable, 1));
         when(repository.searchForAdministration(null, "ADMIN", null, pageable))
                 .thenReturn(new PageImpl<>(List.of(legacyAdmin), pageable, 1));
-        var controller = new AdminUserController(repository);
+        var controller = new AdminUserController(repository, audit);
 
         var staffPage = controller.listUsers(0, 20, null, "staff", null);
         var legacyAdminPage = controller.listUsers(0, 20, null, "admin", null);
@@ -126,7 +139,7 @@ class AdminUserControllerTest {
     void listUsersRejectsInvalidPagination() {
         UserRepository repository = mock(UserRepository.class);
 
-        assertThatThrownBy(() -> new AdminUserController(repository)
+        assertThatThrownBy(() -> new AdminUserController(repository, audit)
                 .listUsers(0, 101, null, null, null))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(error -> assertThat(
@@ -145,7 +158,7 @@ class AdminUserControllerTest {
         User target = user(11L, "developer@example.test", "DEVELOPER");
         when(repository.findById(11L)).thenReturn(Optional.of(target));
 
-        var response = new AdminUserController(repository).getUser(11L);
+        var response = new AdminUserController(repository, audit).getUser(11L);
 
         assertThat(response.id()).isEqualTo(11L);
         assertThat(response.username()).isEqualTo("developer");
@@ -158,14 +171,16 @@ class AdminUserControllerTest {
     @Test
     void profileUpdateRejectsDuplicateEmail() {
         UserRepository repository = mock(UserRepository.class);
+        when(repository.findByEmail("admin@example.test"))
+                .thenReturn(Optional.of(user(10L, "admin@example.test", "ADMIN")));
         User target = user(11L, "developer@example.test", "DEVELOPER");
-        when(repository.findById(11L)).thenReturn(Optional.of(target));
+        when(repository.findByIdForUpdate(11L)).thenReturn(Optional.of(target));
         when(repository.existsByEmailIgnoreCaseAndIdNot("other@example.test", 11L))
                 .thenReturn(true);
 
-        assertThatThrownBy(() -> new AdminUserController(repository).updateUser(
+        assertThatThrownBy(() -> new AdminUserController(repository, audit).updateUser(
                 11L, new AdminUserController.UpdateUserRequest(
-                        null, "other@example.test", null, null)))
+                        null, "other@example.test", null, null), authentication("admin@example.test")))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(error -> assertThat(
                         ((ResponseStatusException) error).getStatusCode())
@@ -178,13 +193,14 @@ class AdminUserControllerTest {
         User admin = user(10L, "admin@example.test", "ADMIN");
         User target = user(11L, "developer@example.test", "DEVELOPER");
         when(repository.findByEmail("admin@example.test")).thenReturn(Optional.of(admin));
-        when(repository.findById(11L)).thenReturn(Optional.of(target));
+        when(repository.findByIdForUpdate(11L)).thenReturn(Optional.of(target));
         when(repository.save(target)).thenReturn(target);
 
-        var response = new AdminUserController(repository).updatePrimaryRole(11L,
+        var response = new AdminUserController(repository, audit).updatePrimaryRole(11L,
                 new AdminUserController.UpdateUserRoleRequest("staff"), authentication("admin@example.test"));
 
         assertThat(response.role()).isEqualTo("STAFF");
+        assertAudit("USER_ROLE_CHANGED", "DEVELOPER", "STAFF");
     }
 
     @Test
@@ -192,7 +208,7 @@ class AdminUserControllerTest {
         UserRepository repository = mock(UserRepository.class);
         User admin = user(10L, "admin@example.test", "ADMIN");
         when(repository.findByEmail("admin@example.test")).thenReturn(Optional.of(admin));
-        var controller = new AdminUserController(repository);
+        var controller = new AdminUserController(repository, audit);
 
         assertThatThrownBy(() -> controller.updatePrimaryRole(10L,
                 new AdminUserController.UpdateUserRoleRequest("ADMINISTRATOR"), authentication("admin@example.test")))
@@ -202,6 +218,15 @@ class AdminUserControllerTest {
                 new AdminUserController.UpdateUserRoleRequest("UNKNOWN"), authentication("admin@example.test")))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(error -> assertThat(((ResponseStatusException) error).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
+        verifyNoInteractions(audit);
+    }
+
+    private void assertAudit(String action, String previousValue, String newValue) {
+        var entry = ArgumentCaptor.forClass(AdminUserAudit.class);
+        verify(audit).save(entry.capture());
+        assertThat(entry.getValue()).extracting("actorId", "targetId", "action", "previousValue", "newValue")
+                .containsExactly(10L, 11L, action, previousValue, newValue);
+        assertThat(entry.getValue()).extracting("occurredAt").isNotNull();
     }
 
     private static Authentication authentication(String email) {
