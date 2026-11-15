@@ -44,6 +44,7 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | GET | `/jobs/{id}` | Status, progress, message, error, result |
 | GET | `/jobs/{id}/result` | Generated Markdown |
 | GET | `/jobs/{id}/report` | Evidence and confidence per file and entity |
+| POST | `/retrieval/preview` | Index summary and the related code (C) / docs (D) each file would get (LD-335) |
 | GET/POST | `/templates` | List (built-in first, then custom by name) / create templates |
 | GET | `/templates/sections` | Sections a template may contain |
 | GET/PUT/DELETE | `/templates/{id}` | Read / update / delete (built-ins are read-only) |
@@ -58,6 +59,7 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | GET | `/drift/reports/{id}?min_severity=high` | One drift report (optionally only findings at or above a level) |
 | GET | `/drift/reports/{id}/markdown?min_severity=` | The report as Markdown grouped by severity (PR comment) |
 | GET | `/drift/severity-rules` | Severity levels (score bands, meaning, action) and every severity rule |
+| POST | `/internal/affected-documents` | Internal (`INTERNAL_API_SECRET`). Parts of the given saved documents a source change (LD-116) may have made outdated, each `direct` or `dependent` (LD-122) |
 
 Built-in templates: `default`, `api-reference`, `brief`.
 

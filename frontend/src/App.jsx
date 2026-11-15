@@ -45,6 +45,7 @@ function App() {
         sessionStorage.removeItem('livingdocs.userId');
         if (!cancelled) {
           setUserId(null);
+          setUserRole('');
           setPage('login');
         }
         return;
@@ -65,6 +66,7 @@ function App() {
     } catch {
       if (!cancelled) {
         setUserId(null);
+        setUserRole('');
         setPage('login');
       }
     } finally {
@@ -240,7 +242,7 @@ function App() {
       case 'documentation':
         return (
           <>
-            <DocumentationManagement userId={userId} />
+            <DocumentationManagement userId={userId} userRole={userRole} />
             <p className="switch-page">
               <button type="button" onClick={() => setPage('login')}>
                 Back to login
@@ -266,8 +268,8 @@ function App() {
           <>
             <DocumentationDrift userId={userId} />
             <p className="switch-page">
-              <button type="button" onClick={() => setPage('documentation')}>
-                Back to Documentation Management
+              <button type="button" onClick={() => setPage('login')}>
+                Back to Login
               </button>
             </p>
           </>
@@ -348,7 +350,7 @@ function App() {
                   type="button"
                   onClick={() => setPage('profile')}
                 >
-                  View demo profile
+                  View profile
                 </button>
               </p>
 
