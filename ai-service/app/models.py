@@ -111,6 +111,7 @@ class Scope(str, Enum):
     module = "module"
     repository = "repository"
 
+
 class SourceSnapshot(BaseModel):
     """Repository state used to generate a documentation version."""
     repository_id: str
@@ -118,6 +119,8 @@ class SourceSnapshot(BaseModel):
     branch: str
     commit_sha: str
     fetched_at: Optional[datetime] = None
+
+
 class GenerateRequest(BaseModel):
     scope: Scope
     target: str = Field(min_length=1)          # file path, module name or repository name
@@ -283,6 +286,42 @@ class JobReport(BaseModel):
 class ReviewEvidenceResponse(JobReport):
     """Evidence report and source snapshot for a document version under review."""
     source_snapshot: Optional[SourceSnapshot] = None
+
+
+# ---------- Retrieval preview (LD-335) ----------
+
+class IndexSummary(BaseModel):
+    """Statistics of the retrieval index built for a request (see app/retrieval.py IndexStats)."""
+    files: int                                # analysed files that were indexed (status ok)
+    documents: int                            # context documents that were indexed
+    chunks: Dict[str, int] = Field(default_factory=dict)   # entity kind -> number of indexed items
+    vocabulary: int = 0                       # number of distinct indexed terms
+
+
+class RetrievalHit(BaseModel):
+    """One related code item (C) or documentation passage (D) a file would receive in its prompt."""
+    ref: str                                  # C1, D1 ... as cited by the AI
+    kind: str                                 # code | doc
+    entity: str = ""                          # class | method | function | endpoint | section
+    path: str
+    name: Optional[str] = None
+    section: Optional[str] = None             # doc passages: heading path, e.g. "Shop > Cart"
+    line_start: Optional[int] = None
+    line_end: Optional[int] = None
+    score: float = 0.0                        # similarity to the file's query, 0 -> 1
+    excerpt: Optional[str] = None
+
+
+class FileRetrieval(BaseModel):
+    """What the prompt of one analysed file would receive."""
+    path: str
+    code: List[RetrievalHit] = Field(default_factory=list)
+    docs: List[RetrievalHit] = Field(default_factory=list)
+
+
+class RetrievalPreview(BaseModel):
+    index: IndexSummary
+    files: List[FileRetrieval] = Field(default_factory=list)
 
 class Job(BaseModel):
     id: str
