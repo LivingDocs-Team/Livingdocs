@@ -8,6 +8,7 @@ from typing import List, Optional
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import PlainTextResponse
+from pydantic import AwareDatetime
 
 from app.change_context import ChangeContextReport, ChangeContextRequest, change_context
 from app.drift import analyze as analyze_drift
@@ -33,6 +34,8 @@ from app.version_models import (Document, DocumentContentEdit, DocumentCreate, D
                                 VersionSummary)
 from app.versions import VersionError, documents
 from app.internal_auth import require_internal_service
+from app.source_change_impact import (AffectedDocumentsRequest, AffectedDocumentsResult,
+                                      find_for_source_change)
 
 app = FastAPI(title="LivingDocs AI Service", version="0.1.0")
 
@@ -40,6 +43,25 @@ app = FastAPI(title="LivingDocs AI Service", version="0.1.0")
 @app.get("/health")
 def health():
     return {"status": "ok", "generator": get_generator().mode}
+
+
+@app.get("/internal/system-analytics", dependencies=[Depends(require_internal_service)])
+def system_analytics(start: AwareDatetime = Query(alias="from"),
+                     end: AwareDatetime = Query(alias="to")):
+    if start >= end:
+        raise HTTPException(400, "from must be earlier than to")
+    created, audit = documents.count_activity(start, end)
+    completed, failed = jobs.count_outcomes(start, end)
+    return {
+        "documentsCreated": created,
+        "documentVersionAuditEvents": audit,
+        "aiJobs": {
+            "completed": completed,
+            "failed": failed,
+            "observedSince": jobs.observed_since,
+            "scope": "CURRENT_AI_PROCESS",
+        },
+    }
 
 
 # ---------- Documentation generation ----------
@@ -435,6 +457,14 @@ def get_drift_report_markdown(report_id: str, min_severity: Optional[Severity] =
     """LD-159: the report as Markdown grouped by severity, e.g. for a Pull Request comment."""
     return PlainTextResponse(render_drift_markdown(_drift_report(report_id), min_severity),
                              media_type="text/markdown")
+
+
+@app.post("/internal/affected-documents", response_model=AffectedDocumentsResult,
+          dependencies=[Depends(require_internal_service)])
+def affected_documents(req: AffectedDocumentsRequest):
+    """LD-122: parts of the given saved documents that a source change (LD-116) may have made
+    outdated, each `direct` (documents a changed file) or `dependent` (refers to changed code)."""
+    return find_for_source_change(req, documents)
 
 
 @app.get("/drift/severity-rules")
