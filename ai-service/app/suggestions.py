@@ -351,6 +351,12 @@ def new_section(c: EntityChange, level: int, lang: str, pr: Optional[PullRequest
     return "\n".join(out)
 
 
+def append_section(text: str, section: str) -> str:
+    """`text` + a blank line + `section`, keeping the blank lines that ended `text`."""
+    body = text.rstrip("\n")
+    return body + "\n\n" + section + text[len(body):]
+
+
 def insert_anchor(doc: DocText, c: EntityChange) -> Tuple[Optional[Chunk], int]:
     """Passage after which the new entity's section goes, and its heading level."""
     chunks = [ch for ch in split_document(ContextDocument(path=doc.path, content=doc.text))
@@ -538,7 +544,7 @@ def change_passages(analysis, hits: List[Hit], contexts: Dict[int, str], lang_of
                 continue
             p = out.at(hit.doc, anchor.line_start)
             section = new_section(c, level, lang_of(hit.doc), pr)
-            edit = Edit(f"`{c.name}` was added: describe it", lambda t, s=section: t.rstrip("\n") + "\n\n" + s,
+            edit = Edit(f"`{c.name}` was added: describe it", lambda t, s=section: append_section(t, s),
                         0.6, SuggestionOperation.insert)
             p.add(c.name, c.change.value, [edit], evidence=_evidence(f, c))
             if ctx and ctx not in p.context:
@@ -717,7 +723,7 @@ def drift_passages(report: DriftReport, store, files: Dict[str, str], lang_of,
             p = out.at(doc, anchor.line_start)
             section = new_section(c, level, lang_of(doc), report.pull_request)
             p.add(c.name, f.kind, [Edit(f"`{c.name}` was added: describe it",
-                                        lambda t, s=section: t.rstrip("\n") + "\n\n" + s, 0.6,
+                                        lambda t, s=section: append_section(t, s), 0.6,
                                         SuggestionOperation.insert)], [why])
             p.finding_ids.append(f.id)
             continue
