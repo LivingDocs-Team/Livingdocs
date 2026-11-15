@@ -53,10 +53,11 @@ def frontend_is_running():
 class FakeApi:
     """Backend giả cho trang Repository Management; activity_error = (HTTP status, JSON body)."""
 
-    def __init__(self, pull_requests=PULL_REQUESTS, commits=COMMITS, activity_error=None):
+    def __init__(self, pull_requests=PULL_REQUESTS, commits=COMMITS, activity_error=None, source_changes=()):
         self.pull_requests = pull_requests
         self.commits = commits
         self.activity_error = activity_error
+        self.source_changes = list(source_changes)
         self.requests = []
 
     def handle(self, route):
@@ -87,6 +88,8 @@ class FakeApi:
                 return route.fulfill(status=status, json=body)
             data = self.pull_requests if path.endswith("/pull-requests") else self.commits
             return route.fulfill(status=200, json=data)
+        if (request.method, path) == ("GET", f"/api/repositories/{REPOSITORY_ID}/source-changes"):
+            return route.fulfill(status=200, json=self.source_changes)
         return route.fulfill(status=404, json={"message": f"Unexpected API request: {request.method} {path}"})
 
 

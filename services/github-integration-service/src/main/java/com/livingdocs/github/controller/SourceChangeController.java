@@ -41,8 +41,8 @@ public class SourceChangeController {
     }
 
     @PostMapping("/api/repositories/{id}/source-changes/{changeId}/retry")
-    @Operation(summary = "Chạy lại một source change FAILED",
-            description = "409 SOURCE_CHANGE_NOT_FAILED nếu source change không ở trạng thái FAILED. "
+    @Operation(summary = "Chạy lại một source change FAILED, hoặc bước tìm tài liệu bị ảnh hưởng (LD-122) khi bước đó FAILED",
+            description = "409 SOURCE_CHANGE_NOT_FAILED nếu cả status lẫn documentsStatus đều không FAILED. "
                     + "204 nếu lần chạy lại không còn file mã nguồn nào thay đổi.")
     public ResponseEntity<SourceChangeResponse> retry(@RequestHeader(USER_HEADER) String userId,
                                                       @PathVariable UUID id, @PathVariable UUID changeId) {
