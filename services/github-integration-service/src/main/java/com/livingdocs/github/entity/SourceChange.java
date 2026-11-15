@@ -24,6 +24,8 @@ import java.util.UUID;
 /**
  * LD-116: thay đổi mã nguồn của một commit (trên nhánh mặc định) hoặc của một Pull Request.
  * PENDING nghĩa là đã phát hiện xong và đang chờ bước cập nhật tài liệu (LD-128) đọc.
+ * documentsStatus (LD-122): PENDING đang tìm tài liệu bị ảnh hưởng, FOUND đã tìm xong
+ * (xem affectedDocuments, có thể rỗng), FAILED ai-service lỗi (gọi retry); null khi status là FAILED.
  */
 @Entity
 @Table(name = "source_changes")
@@ -32,6 +34,8 @@ public class SourceChange {
     public enum Trigger { COMMIT, PULL_REQUEST }
 
     public enum Status { PENDING, FAILED }
+
+    public enum DocumentsStatus { PENDING, FOUND, FAILED }
 
     private static final int MAX_ERROR_LENGTH = 500;
 
@@ -74,6 +78,22 @@ public class SourceChange {
     @OrderBy("path")
     private List<SourceChangeFile> files = new ArrayList<>();
 
+    @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
+    @Column(name = "documents_status", length = 20)
+    private DocumentsStatus documentsStatus;
+
+    @Column(name = "documents_error_code", length = 50)
+    private String documentsErrorCode;
+
+    @Column(name = "documents_error_message", length = MAX_ERROR_LENGTH)
+    private String documentsErrorMessage;
+
+    // DESC: DIRECT trước DEPENDENT
+    @OneToMany(mappedBy = "sourceChange", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("dependency DESC, title, sectionPath")
+    private List<AffectedDocument> affectedDocuments = new ArrayList<>();
+
     @PrePersist
     void onCreate() {
         createdAt = Instant.now();
@@ -95,14 +115,39 @@ public class SourceChange {
             file.setSourceChange(this);
             files.add(file);
         }
+        setDocuments(DocumentsStatus.PENDING, null, null, List.of()); // file đổi thì tìm lại tài liệu
     }
 
     public void markFailed(String code, String message) {
         status = Status.FAILED;
         errorCode = code;
-        errorMessage = message != null && message.length() > MAX_ERROR_LENGTH
-                ? message.substring(0, MAX_ERROR_LENGTH) : message;
+        errorMessage = cut(message);
         files.clear();
+        setDocuments(null, null, null, List.of());
+    }
+
+    /** LD-122: kết quả tìm tài liệu bị ảnh hưởng, thay toàn bộ danh sách cũ. */
+    public void markDocumentsFound(List<AffectedDocument> documents) {
+        setDocuments(DocumentsStatus.FOUND, null, null, documents);
+    }
+
+    public void markDocumentsFailed(String code, String message) {
+        setDocuments(DocumentsStatus.FAILED, code, cut(message), List.of());
+    }
+
+    private void setDocuments(DocumentsStatus newStatus, String code, String message, List<AffectedDocument> documents) {
+        documentsStatus = newStatus;
+        documentsErrorCode = code;
+        documentsErrorMessage = message;
+        affectedDocuments.clear();
+        for (AffectedDocument document : documents) {
+            document.setSourceChange(this);
+            affectedDocuments.add(document);
+        }
+    }
+
+    private static String cut(String message) {
+        return message != null && message.length() > MAX_ERROR_LENGTH ? message.substring(0, MAX_ERROR_LENGTH) : message;
     }
 
     public UUID getId() { return id; }
@@ -130,4 +175,12 @@ public class SourceChange {
     public Instant getUpdatedAt() { return updatedAt; }
 
     public List<SourceChangeFile> getFiles() { return files; }
+
+    public DocumentsStatus getDocumentsStatus() { return documentsStatus; }
+
+    public String getDocumentsErrorCode() { return documentsErrorCode; }
+
+    public String getDocumentsErrorMessage() { return documentsErrorMessage; }
+
+    public List<AffectedDocument> getAffectedDocuments() { return affectedDocuments; }
 }
