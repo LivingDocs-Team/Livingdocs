@@ -4,6 +4,7 @@ import com.cnpm.backend.entity.User;
 import com.cnpm.backend.repository.UserRepository;
 import com.cnpm.backend.repository.RoleRepository;
 import com.cnpm.backend.repository.PermissionRepository;
+import com.cnpm.backend.repository.AdminUserAuditRepository;
 import com.cnpm.backend.auth.CustomUserDetailsService;
 import com.cnpm.backend.auth.GitHubOAuth2UserService;
 import jakarta.servlet.http.Cookie;
@@ -15,6 +16,8 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
@@ -94,6 +97,9 @@ class BackendSecurityFilterChainTest {
 
     @Autowired
     private RoleRepository roleRepository;
+
+    @Autowired
+    private AdminUserAuditRepository auditRepository;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -306,6 +312,26 @@ class BackendSecurityFilterChainTest {
     }
 
     @Test
+    void userAuditRequiresAdminRoleAndAuditPermission() throws Exception {
+        Csrf csrf = fetchCsrf();
+        when(auditRepository.findAll(any(Pageable.class)))
+                .thenAnswer(request -> Page.empty(request.getArgument(0)));
+
+        mvc.perform(get("/api/admin/users/audit")).andExpect(status().isUnauthorized());
+        MockHttpSession administrator = loginWithAuthorities(csrf, "ROLE_ADMINISTRATOR", "USER_VIEW");
+        mvc.perform(get("/api/admin/users/audit").session(administrator)).andExpect(status().isForbidden());
+        MockHttpSession developer = loginWithAuthorities(csrf, "ROLE_DEVELOPER", "USER_AUDIT_VIEW");
+        mvc.perform(get("/api/admin/users/audit").session(developer)).andExpect(status().isForbidden());
+        MockHttpSession auditor = loginWithAuthorities(csrf, "ROLE_ADMINISTRATOR", "USER_AUDIT_VIEW");
+        mvc.perform(get("/api/admin/users/audit").session(auditor))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0))
+                .andExpect(jsonPath("$.size").value(20));
+        mvc.perform(get("/api/admin/users/audit").session(auditor).param("size", "101"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void csrfCookieUsesLocalHttpCompatibleFlags() throws Exception {
         Csrf csrf = fetchCsrf();
         assertThat(csrf.cookie()).isNotNull();
@@ -395,6 +421,11 @@ class BackendSecurityFilterChainTest {
         @Primary
         PermissionRepository testPermissionRepository() {
             return mock(PermissionRepository.class);
+        }
+
+        @Bean
+        AdminUserAuditRepository testAdminUserAuditRepository() {
+            return mock(AdminUserAuditRepository.class);
         }
 
         @Bean
