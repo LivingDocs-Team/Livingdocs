@@ -1,7 +1,10 @@
 package com.cnpm.backend.controller;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
-import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -21,7 +24,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.cnpm.backend.entity.AdminUserAudit;
 import com.cnpm.backend.entity.User;
+import com.cnpm.backend.repository.AdminUserAuditRepository;
 import com.cnpm.backend.repository.UserRepository;
 
 @RestController
@@ -29,9 +34,11 @@ import com.cnpm.backend.repository.UserRepository;
 public class AdminUserController {
 
     private final UserRepository userRepository;
+    private final AdminUserAuditRepository auditRepository;
 
-    public AdminUserController(UserRepository userRepository) {
+    public AdminUserController(UserRepository userRepository, AdminUserAuditRepository auditRepository) {
         this.userRepository = userRepository;
+        this.auditRepository = auditRepository;
     }
 
     @GetMapping
@@ -67,16 +74,37 @@ public class AdminUserController {
         return toResponse(findUser(id));
     }
 
+    @GetMapping("/audit")
+    @PreAuthorize("hasAuthority('USER_AUDIT_VIEW')")
+    @Transactional(readOnly = true)
+    public AuditPageResponse listAudit(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        if (page < 0 || size < 1 || size > 100) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Page must be non-negative and size must be between 1 and 100");
+        }
+        var entries = auditRepository.findAll(PageRequest.of(page, size,
+                Sort.by(Sort.Direction.DESC, "occurredAt", "id"))).map(entry ->
+                new AuditResponse(entry.getId(), entry.getActorId(), entry.getTargetId(), entry.getAction(),
+                        entry.getPreviousValue(), entry.getNewValue(), entry.getOccurredAt(), entry.getTargetRole(), entry.getTargetEvent()));
+        return new AuditPageResponse(entries.getContent(), entries.getNumber(), entries.getSize(),
+                entries.getTotalElements(), entries.getTotalPages());
+    }
+
     @PatchMapping("/{id}")
     @PreAuthorize("hasAuthority('USER_UPDATE')")
     @Transactional
     public UserResponse updateUser(
             @PathVariable Long id,
-            @RequestBody UpdateUserRequest request) {
+            @RequestBody UpdateUserRequest request,
+            Authentication authentication) {
         if (request == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Request body is required");
         }
-        User user = findUser(id);
+        Long actorId = findAuthenticatedUser(authentication, userRepository).getId();
+        User user = findUserForUpdate(id);
+        UserResponse before = toResponse(user);
 
         if (request.username() != null) {
             String username = request.username().trim();
@@ -111,7 +139,16 @@ public class AdminUserController {
             user.setLastName(validateName(request.lastName(), "Last name"));
         }
 
-        return toResponse(userRepository.save(user));
+        UserResponse after = toResponse(userRepository.save(user));
+        List<String> changedFields = new ArrayList<>();
+        if (!Objects.equals(before.username(), after.username())) changedFields.add("username");
+        if (!Objects.equals(before.email(), after.email())) changedFields.add("email");
+        if (!Objects.equals(before.firstName(), after.firstName())) changedFields.add("firstName");
+        if (!Objects.equals(before.lastName(), after.lastName())) changedFields.add("lastName");
+        if (!changedFields.isEmpty()) {
+            auditRepository.save(AdminUserAudit.profileChanged(actorId, id, String.join(",", changedFields)));
+        }
+        return after;
     }
 
     @PatchMapping("/{id}/status")
@@ -126,15 +163,20 @@ public class AdminUserController {
                     "The active field is required");
         }
 
-        User actor = findAuthenticatedUser(authentication);
+        User actor = findAuthenticatedUser(authentication, userRepository);
         if (actor.getId().equals(id)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "Administrators cannot change their own account status");
         }
 
-        User target = findUser(id);
+        User target = findUserForUpdate(id);
+        boolean previousStatus = target.isActive();
         target.setActive(request.active());
-        return ResponseEntity.ok(toResponse(userRepository.save(target)));
+        User saved = userRepository.save(target);
+        if (previousStatus != saved.isActive()) {
+            auditRepository.save(AdminUserAudit.statusChanged(actor.getId(), id, previousStatus, saved.isActive()));
+        }
+        return ResponseEntity.ok(toResponse(saved));
     }
 
     @PatchMapping("/{id}/role")
@@ -147,7 +189,7 @@ public class AdminUserController {
         if (request == null || request.role() == null || request.role().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The role field is required");
         }
-        User actor = findAuthenticatedUser(authentication);
+        User actor = findAuthenticatedUser(authentication, userRepository);
         if (actor.getId().equals(id)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Administrators cannot change their own role");
         }
@@ -155,9 +197,14 @@ public class AdminUserController {
         if (!java.util.Set.of("DEVELOPER", "STAFF", "MANAGER", "TECHNICAL_LEAD", "ADMINISTRATOR").contains(role)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown system role");
         }
-        User target = findUser(id);
+        User target = findUserForUpdate(id);
+        String previousRole = target.getRole();
         target.setRole(role);
-        return toResponse(userRepository.save(target));
+        User saved = userRepository.save(target);
+        if (!role.equals(previousRole)) {
+            auditRepository.save(AdminUserAudit.roleChanged(actor.getId(), id, previousRole, role));
+        }
+        return toResponse(saved);
     }
 
     private User findUser(Long id) {
@@ -166,7 +213,12 @@ public class AdminUserController {
                         HttpStatus.NOT_FOUND, "User not found"));
     }
 
-    private User findAuthenticatedUser(Authentication authentication) {
+    private User findUserForUpdate(Long id) {
+        return userRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+    }
+
+    static User findAuthenticatedUser(Authentication authentication, UserRepository userRepository) {
         if (authentication == null || !authentication.isAuthenticated()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
         }
@@ -213,6 +265,12 @@ public class AdminUserController {
     }
 
     public record UpdateUserRoleRequest(String role) { }
+
+    public record AuditResponse(Long id, Long actorId, Long targetId, String action,
+            String previousValue, String newValue, Instant occurredAt, String targetRole, String targetEvent) { }
+
+    public record AuditPageResponse(List<AuditResponse> content, int page, int size,
+            long totalElements, int totalPages) { }
 
     public record UserResponse(
             Long id,
