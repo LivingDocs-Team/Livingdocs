@@ -27,12 +27,12 @@ public class AdminSystemAnalyticsController {
     private final String secret;
 
     public AdminSystemAnalyticsController(JdbcTemplate jdbc, RestClient.Builder builder,
-            @Value("${services.github-integration.base-url}") String baseUrl,
-            @Value("${services.github-integration.internal-secret}") String secret,
-            @Value("${services.github-integration.connect-timeout}") Duration connectTimeout,
-            @Value("${services.github-integration.read-timeout}") Duration readTimeout) {
+            @Value("${services.github-integration.base-url:http://localhost:8082}") String baseUrl,
+            @Value("${services.github-integration.internal-secret:}") String secret,
+            @Value("${services.github-integration.connect-timeout:5s}") Duration connectTimeout,
+            @Value("${services.github-integration.read-timeout:150s}") Duration readTimeout) {
         this.jdbc = jdbc;
-        this.secret = secret;
+        this.secret = secret == null ? "" : secret;
         var factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(connectTimeout);
         factory.setReadTimeout(readTimeout);
