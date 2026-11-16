@@ -1,30 +1,53 @@
+import { useEffect, useState } from 'react';
+import { githubApi } from './githubApi';
 
-import { useState } from 'react';
+// LD-51: notification preferences of the signed-in user (Backend GET / PUT /api/profile/notification-preferences).
+const PREFERENCES = [
+  ['emailUpdates', 'Email updates'],
+  ['documentChanges', 'Document changes'],
+  ['reviewRequests', 'Review requests'],
+  ['systemNotifications', 'System notifications'],
+];
 
 function NotificationPreferences() {
-  const [preferences, setPreferences] = useState({
-    emailUpdates: true,
-    documentChanges: true,
-    reviewRequests: true,
-    systemNotifications: true,
-  });
-
+  const [preferences, setPreferences] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    githubApi('/api/profile/notification-preferences')
+      .then((data) => {
+        if (!cancelled) setPreferences(data);
+      })
+      .catch((requestError) => {
+        if (!cancelled) setError(requestError.message || 'Could not load your notification preferences.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function handleChange(event) {
     const { name, checked } = event.target;
-
-    setPreferences((previous) => ({
-      ...previous,
-      [name]: checked,
-    }));
-
+    setPreferences((previous) => ({ ...previous, [name]: checked }));
     setMessage('');
   }
 
-  function handleSave(event) {
+  async function handleSave(event) {
     event.preventDefault();
-    setMessage('Preferences saved successfully! (Demo only)');
+    setIsSaving(true);
+    setMessage('');
+    setError('');
+    try {
+      setPreferences(await githubApi('/api/profile/notification-preferences', { method: 'PUT', body: preferences }));
+      setMessage('Preferences saved.');
+    } catch (requestError) {
+      setError(requestError.message || 'Could not save your notification preferences.');
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -35,51 +58,22 @@ function NotificationPreferences() {
           Choose which notifications you want to receive.
         </p>
 
-        <form onSubmit={handleSave}>
-          <label className="preference">
-            <input
-              type="checkbox"
-              name="emailUpdates"
-              checked={preferences.emailUpdates}
-              onChange={handleChange}
-            />
-            Email updates
-          </label>
+        {!preferences && !error && <p role="status">Loading your preferences…</p>}
+        {preferences && (
+          <form onSubmit={handleSave}>
+            {PREFERENCES.map(([name, label]) => (
+              <label className="preference" key={name}>
+                <input type="checkbox" name={name} checked={Boolean(preferences[name])} onChange={handleChange} />
+                {label}
+              </label>
+            ))}
 
-          <label className="preference">
-            <input
-              type="checkbox"
-              name="documentChanges"
-              checked={preferences.documentChanges}
-              onChange={handleChange}
-            />
-            Document changes
-          </label>
-
-          <label className="preference">
-            <input
-              type="checkbox"
-              name="reviewRequests"
-              checked={preferences.reviewRequests}
-              onChange={handleChange}
-            />
-            Review requests
-          </label>
-
-          <label className="preference">
-            <input
-              type="checkbox"
-              name="systemNotifications"
-              checked={preferences.systemNotifications}
-              onChange={handleChange}
-            />
-            System notifications
-          </label>
-
-          <button type="submit">Save preferences</button>
-        </form>
+            <button type="submit" disabled={isSaving}>{isSaving ? 'Saving…' : 'Save preferences'}</button>
+          </form>
+        )}
 
         {message && <p role="status">{message}</p>}
+        {error && <p className="sync-error" role="alert">{error}</p>}
       </section>
     </main>
   );

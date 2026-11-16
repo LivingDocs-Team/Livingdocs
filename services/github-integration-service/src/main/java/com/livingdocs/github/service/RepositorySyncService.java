@@ -172,4 +172,9 @@ public class RepositorySyncService {
         }
         return repo;
     }
+
+    /** Verifies repository access without requiring an in-memory sync snapshot. */
+    public ConnectedRepository requireOwnedRepository(String userId, UUID repositoryId) {
+        return findOwned(userId, repositoryId);
+    }
 }
