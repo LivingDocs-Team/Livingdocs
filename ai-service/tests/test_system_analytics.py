@@ -17,18 +17,19 @@ def test_internal_analytics_counts_real_outcomes_and_saved_document_history(monk
     # The generation worker also refers to its module-level store.
     monkeypatch.setattr("app.jobs.jobs", jobs)
 
+    service_auth = {"Authorization": "Bearer analytics-test-secret"}   # every AI endpoint needs it once the secret is set
     sample = {"path": "example.py", "language": "python",
               "functions": [{"name": "hello", "signature": "def hello()"}]}
     completed = client.post("/generate", json={
         "scope": "file", "target": "example.py", "files": [sample],
-    }).json()["id"]
+    }, headers=service_auth).json()["id"]
     failed = client.post("/generate", json={
         "scope": "file", "target": "example.py",
         "files": [{**sample, "status": "invalid", "error": "Parser failed"}],
-    }).json()["id"]
+    }, headers=service_auth).json()["id"]
     assert jobs.get(completed).status.value == "completed"
     assert jobs.get(failed).status.value == "failed"
-    assert client.post("/documents", json={"job_id": completed}).status_code == 201
+    assert client.post("/documents", json={"job_id": completed}, headers=service_auth).status_code == 201
     end = main.documents.list()[0].created_at + timedelta(seconds=1)
     endpoint = "/internal/system-analytics"
     headers = {"Authorization": "Bearer analytics-test-secret"}

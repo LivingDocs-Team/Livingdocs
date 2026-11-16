@@ -513,9 +513,12 @@ public class DocumentWorkflowService {
             }
             return pending;
         }
+        // A document saved from a generation job has current_version 0 (nothing approved yet) and
+        // pending_version 1: that pending version is exactly what the owner submits for review.
+        if (pending > 0) return pending;
         int current = document.path("current_version").asInt(0);
         if (current < 1) throw conflict("The document has no readable version.");
-        return pending > 0 ? pending : current;
+        return current;
     }
 
     private int visibleDocumentVersion(DocumentWorkflow workflow, JsonNode document) {
