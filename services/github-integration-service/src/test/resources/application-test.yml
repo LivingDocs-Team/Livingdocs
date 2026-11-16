@@ -12,6 +12,7 @@ github:
   client-id: test-client-id
   client-secret: test-client-secret
   app-slug: livingdocs-test
+  webhook-secret: test-only-webhook-secret
 
 security:
   internal-api-secret: test-only-internal-credential

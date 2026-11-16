@@ -1,7 +1,6 @@
 import ast
-import javalang
 
-from app.models import ClassInfo, Function, Parameter, Endpoint
+from app.models import ClassField, ClassInfo, Function, Parameter, Endpoint
 
 FUNC_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
 MAX_SOURCE_CHARS = 1500
@@ -83,9 +82,37 @@ def _literal_string(node):
     return None
 
 
-def _route_endpoints(node):
+ROUTER_FACTORIES = {"APIRouter": "prefix", "Blueprint": "url_prefix"}
+
+
+def _router_prefixes(tree):
+    """Module-level `router = APIRouter(prefix="/api")` / `bp = Blueprint(..., url_prefix="/x")`."""
+    prefixes = {}
+    for node in tree.body:
+        if not (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)):
+            continue
+        func = node.value.func
+        fname = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        key = ROUTER_FACTORIES.get(fname)
+        if key is None:
+            continue
+        prefix = next((_literal_string(k.value) for k in node.value.keywords if k.arg == key), None)
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                prefixes[target.id] = prefix or ""
+    return prefixes
+
+
+def _join_path(prefix, path):
+    if not prefix:
+        return path
+    return prefix.rstrip("/") + "/" + path.lstrip("/") if path.strip("/") else prefix
+
+
+def _route_endpoints(node, prefixes=None):
     """Extract common FastAPI/Flask-style route decorators."""
     endpoints = []
+    prefixes = prefixes or {}
 
     for decorator in node.decorator_list:
         if not isinstance(decorator, ast.Call):
@@ -96,29 +123,37 @@ def _route_endpoints(node):
             continue
 
         route_name = func.attr.lower()
+        owner = func.value.id if isinstance(func.value, ast.Name) else None
         path = None
         methods = []
 
+        if decorator.args:
+            path = _literal_string(decorator.args[0])
+        if path is None:
+            path = next((_literal_string(k.value) for k in decorator.keywords
+                         if k.arg in ("path", "rule")), None)
+
         if route_name in HTTP_METHODS:
             methods = [route_name.upper()]
-            if decorator.args:
-                path = _literal_string(decorator.args[0])
 
         elif route_name in ("api_route", "route"):
-            if decorator.args:
-                path = _literal_string(decorator.args[0])
-
             for keyword in decorator.keywords:
-                if keyword.arg == "methods" and isinstance(keyword.value, (ast.List, ast.Tuple)):
+                if keyword.arg == "methods" and isinstance(keyword.value, (ast.List, ast.Tuple, ast.Set)):
                     methods = [
                         item.value.upper()
                         for item in keyword.value.elts
                         if isinstance(item, ast.Constant)
                         and isinstance(item.value, str)
                     ]
+            if not methods:
+                methods = ["GET"]  # Flask route() and FastAPI api_route() default
 
-        if not path:
+        else:
             continue
+
+        if path is None:
+            continue
+        path = _join_path(prefixes.get(owner, ""), path) or "/"
 
         for method in methods:
             endpoints.append(Endpoint(
@@ -126,91 +161,34 @@ def _route_endpoints(node):
                 path=path,
                 handler=node.name,
                 parameters=_python_parameters(node),
+                response=_ann(node.returns),
+                lineno=getattr(node, "lineno", None),
+                end_lineno=getattr(node, "end_lineno", None),
             ))
 
     return endpoints
 
 
-def _java_source_range(code, start_line):
-    """Approximate a Java declaration's end line by matching braces."""
-    lines = code.splitlines()
-    if not start_line or start_line > len(lines):
-        return start_line, start_line, None
-
-    start_offset = sum(len(line) + 1 for line in lines[:start_line - 1])
-    opening = code.find("{", start_offset)
-
-    # Abstract/interface methods may end with a semicolon.
-    semicolon = code.find(";", start_offset)
-    if opening < 0 or (semicolon >= 0 and semicolon < opening):
-        end_line = code.count("\n", 0, semicolon) + 1 if semicolon >= 0 else start_line
-        source = "\n".join(lines[start_line - 1:end_line])[:MAX_SOURCE_CHARS]
-        return start_line, end_line, source
-
-    depth = 0
-    i = opening
-    state = "code"
-
-    while i < len(code):
-        char = code[i]
-        nxt = code[i + 1] if i + 1 < len(code) else ""
-
-        if state == "code":
-            if char == "/" and nxt == "/":
-                state = "line_comment"
-                i += 1
-            elif char == "/" and nxt == "*":
-                state = "block_comment"
-                i += 1
-            elif char == '"':
-                state = "string"
-            elif char == "'":
-                state = "char"
-            elif char == "{":
-                depth += 1
-            elif char == "}":
-                depth -= 1
-                if depth == 0:
-                    end_line = code.count("\n", 0, i) + 1
-                    source = "\n".join(lines[start_line - 1:end_line])[:MAX_SOURCE_CHARS]
-                    return start_line, end_line, source
-
-        elif state == "line_comment":
-            if char == "\n":
-                state = "code"
-        elif state == "block_comment":
-            if char == "*" and nxt == "/":
-                state = "code"
-                i += 1
-        elif state in ("string", "char"):
-            if char == "\\":
-                i += 1
-            elif (state == "string" and char == '"') or (state == "char" and char == "'"):
-                state = "code"
-
-        i += 1
-
-    end_line = len(lines)
-    source = "\n".join(lines[start_line - 1:end_line])[:MAX_SOURCE_CHARS]
-    return start_line, end_line, source
-
-
-def _java_type(type_node):
-    if type_node is None:
-        return "void"
-
-    name = getattr(type_node, "name", str(type_node))
-    args = getattr(type_node, "arguments", None) or []
-    if args:
-        rendered = []
-        for arg in args:
-            arg_type = getattr(arg, "type", None)
-            rendered.append(_java_type(arg_type) if arg_type else "?")
-        name += "<" + ", ".join(rendered) + ">"
-
-    dimensions = getattr(type_node, "dimensions", None) or []
-    name += "[]" * len(dimensions)
-    return name
+def _class_fields(node):
+    """Annotated attributes (pydantic, dataclass) and plain class constants."""
+    fields = []
+    for item in node.body:
+        if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+            fields.append(ClassField(
+                name=item.target.id,
+                type=_ann(item.annotation),
+                default=ast.unparse(item.value)[:200] if item.value is not None else None,
+                lineno=item.lineno,
+            ))
+        elif isinstance(item, ast.Assign):
+            for target in item.targets:
+                if isinstance(target, ast.Name):
+                    fields.append(ClassField(
+                        name=target.id,
+                        default=ast.unparse(item.value)[:200],
+                        lineno=item.lineno,
+                    ))
+    return fields
 
 
 class EntityExtractor:
@@ -220,84 +198,40 @@ class EntityExtractor:
         functions = []
         endpoints = []
         lines = full_code.splitlines()
+        prefixes = _router_prefixes(tree)
 
         for node in ast.iter_child_nodes(tree):
             if isinstance(node, FUNC_TYPES):
                 functions.append(parse_py_func(node, lines))
-                endpoints.extend(_route_endpoints(node))
+                endpoints.extend(_route_endpoints(node, prefixes))
 
             elif isinstance(node, ast.ClassDef):
                 methods = []
                 for item in node.body:
                     if isinstance(item, FUNC_TYPES):
                         methods.append(parse_py_func(item, lines, is_method=True))
-                        endpoints.extend(_route_endpoints(item))
+                        endpoints.extend(_route_endpoints(item, prefixes))
 
-                bases = [
-                    base.id for base in node.bases
-                    if isinstance(base, ast.Name)
-                ]
                 classes.append(ClassInfo(
                     name=node.name,
-                    bases=bases,
+                    bases=[ast.unparse(base) for base in node.bases],
                     docstring=ast.get_docstring(node),
                     methods=methods,
+                    fields=_class_fields(node),
+                    lineno=node.lineno,
+                    end_lineno=node.end_lineno,
                 ))
 
         return classes, functions, endpoints
 
     @staticmethod
     def extract_java_entities(tree, full_code: str = ""):
-        classes = []
-        functions = []
-        endpoints = []
+        """`tree` is the tree-sitter tree from ASTAnalyzer.parse_code (re-parsed if missing)."""
+        from app.java_extractor import extract_java, parse_java
 
-        for _, node in tree.filter(javalang.tree.ClassDeclaration):
-            methods = []
-
-            for method in node.methods:
-                params = [
-                    Parameter(
-                        name=param.name,
-                        type=_java_type(param.type),
-                    )
-                    for param in method.parameters
-                ]
-
-                start_line = (
-                    method.position.line
-                    if method.position is not None
-                    else None
-                )
-                start_line, end_line, source = _java_source_range(
-                    full_code, start_line
-                )
-
-                signature = (
-                    f"{_java_type(method.return_type)} "
-                    f"{method.name}("
-                    + ", ".join(
-                        f"{param.type or 'Object'} {param.name}"
-                        for param in params
-                    )
-                    + ")"
-                )
-
-                methods.append(Function(
-                    name=method.name,
-                    signature=signature,
-                    parameters=params,
-                    return_type=_java_type(method.return_type),
-                    source=source,
-                    lineno=start_line,
-                    end_lineno=end_line,
-                ))
-
-            bases = [node.extends.name] if node.extends else []
-            classes.append(ClassInfo(
-                name=node.name,
-                bases=bases,
-                methods=methods,
-            ))
-
+        if tree is None or not hasattr(tree, "root_node"):
+            tree, error = parse_java(full_code)
+            if error:
+                raise ValueError(error)
+        classes, functions, endpoints, _ = extract_java(tree, full_code)
         return classes, functions, endpoints

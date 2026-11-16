@@ -1,6 +1,7 @@
 
 import ast
-import javalang
+
+from app.java_extractor import parse_java
 
 
 class ASTAnalyzer:
@@ -46,10 +47,8 @@ class ASTAnalyzer:
 
     @staticmethod
     def parse_java_ast(code: str):
-        """Parse Java source code into an AST."""
+        """Parse Java source code (Java 17 syntax) with tree-sitter."""
         try:
-            return javalang.parse.parse(code), None
-        except javalang.parser.JavaSyntaxError as e:
-            return None, f"JavaSyntaxError: {str(e)}"
+            return parse_java(code)
         except Exception as e:
             return None, f"Java AST Parse Error: {str(e)}"

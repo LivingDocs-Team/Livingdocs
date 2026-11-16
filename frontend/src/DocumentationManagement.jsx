@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import './App.css';
 import { githubApi, githubApiText } from './githubApi';
 import { TemplateManager, TemplatePicker } from './DocumentationTemplates';
 import { useTemplates } from './templateApi';
+import DocumentationSuggestionReview from './DocumentationSuggestionReview';
+import StaffReviewQueue from './StaffReviewQueue';
+import ManagerApprovalQueue from './ManagerApprovalQueue';
 
 
 function escapeHtml(value) {
@@ -140,7 +143,29 @@ function renderMarkdown(markdown) {
   return output.join('\n');
 }
 
-export default function DocumentationManagement({ userId }) {
+function formatAuditTimestamp(value) {
+  if (!value) return 'Timestamp unavailable';
+  const timestamp = new Date(value);
+  return Number.isNaN(timestamp.getTime()) ? value : timestamp.toLocaleString();
+}
+
+function workflowRequestError(error, resource) {
+  if (error?.status === 401) return 'Your session has expired. Sign in again to view approval history.';
+  if (error?.status === 403) return `You do not have permission to view ${resource}.`;
+  if (error?.status === 404) return 'The requested workflow could not be found.';
+  return error?.message || `Could not load ${resource}. Please try again.`;
+}
+
+function submitErrorMessage(error, step) {
+  if (error?.status === 401) return 'Your session has expired. Sign in again to submit this document.';
+  if (error?.status === 403) return `You are not allowed to ${step}. Your role may not be permitted to submit documents.`;
+  if (error?.status === 404) {
+    return `Could not ${step}: the generation job was not found. It may have expired after a service restart, so generate the documentation again.`;
+  }
+  return error?.message || `Could not ${step}. Please try again.`;
+}
+
+export default function DocumentationManagement({ userId, userRole }) {
 
   const workspaceId = userId ? `ws-${userId}` : '';
 
@@ -153,8 +178,8 @@ export default function DocumentationManagement({ userId }) {
   const templateList = useTemplates(userId);
   const [status, setStatus] = useState('idle');
 
-  const [document, setDocument] = useState('');
-
+  const [markdown, setMarkdown] = useState('');
+  const [originalDocument, setOriginalDocument] = useState('');
   const [evidence, setEvidence] = useState([]);
 
   const [error, setError] = useState('');
@@ -174,6 +199,268 @@ export default function DocumentationManagement({ userId }) {
   const [isLoadingRepositories, setIsLoadingRepositories] = useState(Boolean(userId));
 
   const [jobId, setJobId] = useState('');
+  const [submittedDocumentId, setSubmittedDocumentId] = useState('');
+  const [createdWorkflowId, setCreatedWorkflowId] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const [submitNotice, setSubmitNotice] = useState('');
+  const [workflowsRefresh, setWorkflowsRefresh] = useState(0);
+  // Bumped by every new generation, by Reset and on unmount: a generation whose number is outdated stops
+  // instead of writing its late result over the screen.
+  const generationRun = useRef(0);
+  useEffect(() => () => { generationRun.current += 1; }, []);
+  const [job, setJob] = useState(null);
+
+  const [documentId, setDocumentId] = useState('');
+  const [documents, setDocuments] = useState([]);
+  const [isLoadingDocuments, setIsLoadingDocuments] = useState(false);
+  const [documentsError, setDocumentsError] = useState('');
+  const [codeEntities, setCodeEntities] = useState([]);
+  const [linkedCodeEntityIds, setLinkedCodeEntityIds] = useState([]);
+  const [isLoadingRelationships, setIsLoadingRelationships] = useState(false);
+  const [relationshipError, setRelationshipError] = useState('');
+  const [selectedCodeEntityId, setSelectedCodeEntityId] = useState('');
+  const [relatedDocuments, setRelatedDocuments] = useState([]);
+  const [isLoadingRelatedDocuments, setIsLoadingRelatedDocuments] = useState(false);
+  const [isSavingRelationships, setIsSavingRelationships] = useState(false);
+
+  async function loadRelationshipData(activeDocumentId, activeRepositoryId) {
+    if (!activeDocumentId || !activeRepositoryId) return;
+    setIsLoadingRelationships(true);
+    setRelationshipError('');
+    try {
+      const [entities, linked] = await Promise.all([
+        githubApi(`/api/repositories/${encodeURIComponent(activeRepositoryId)}/code-entities`, { userId }),
+        githubApi(`/api/documentation/${encodeURIComponent(activeDocumentId)}/code-entities`, { userId }),
+      ]);
+      setCodeEntities(entities || []);
+      setLinkedCodeEntityIds((linked || []).map((item) => item.id));
+      setSelectedCodeEntityId('');
+      setRelatedDocuments([]);
+    } catch (requestError) {
+      setRelationshipError(requestError.message || 'Could not load source code relationships.');
+      throw requestError;
+    } finally {
+      setIsLoadingRelationships(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!userId || !repositoryId) return undefined;
+
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => {
+        if (!cancelled) {
+          setIsLoadingDocuments(true);
+          setDocumentsError('');
+        }
+        return githubApi(`/api/repositories/${encodeURIComponent(repositoryId)}/documentation`, { userId });
+      })
+      .then((items) => {
+        if (!cancelled) setDocuments(items || []);
+      })
+      .catch((requestError) => {
+        if (!cancelled) {
+          setDocuments([]);
+          setDocumentsError(requestError.message || 'Could not load repository documentation.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingDocuments(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [repositoryId, userId]);
+
+  async function saveCodeRelationships() {
+    if (!documentId) return;
+    setIsSavingRelationships(true);
+    try {
+      const linked = await githubApi(`/api/documentation/${encodeURIComponent(documentId)}/code-entities`, {
+        method: 'PUT',
+        userId,
+        body: { codeEntityIds: linkedCodeEntityIds },
+      });
+      setLinkedCodeEntityIds((linked || []).map((item) => item.id));
+      setNotice('Related source code saved.');
+      setError('');
+    } catch (requestError) {
+      setError(requestError.message || 'Could not save related source code.');
+    } finally {
+      setIsSavingRelationships(false);
+    }
+  }
+
+  async function showDocumentsForCodeEntity(entityId) {
+    setSelectedCodeEntityId(entityId);
+    setIsLoadingRelatedDocuments(true);
+    try {
+      const docs = await githubApi(`/api/documentation/code-entities/${encodeURIComponent(entityId)}/documents`, { userId });
+      setRelatedDocuments(docs || []);
+      setError('');
+    } catch (requestError) {
+      setRelatedDocuments([]);
+      setError(requestError.message || 'Could not load related documentation.');
+    } finally {
+      setIsLoadingRelatedDocuments(false);
+    }
+  }
+
+  async function openDocumentationArtifact(document) {
+    let detail;
+    try {
+      detail = await githubApi(`/api/documentation/${encodeURIComponent(document.id)}`, { userId });
+    } catch (requestError) {
+      setError(requestError.message || 'Could not open this documentation. It may have been removed.');
+      return;
+    }
+
+    setError('');
+    setNotice('');
+    setDocumentId(detail.id);
+    setRepositoryId(detail.repositoryId);
+    setJobId(detail.generationJobId || '');
+    setMarkdown(detail.markdown || '');
+    setOriginalDocument(detail.markdown || '');
+    setSavedDocument(detail.markdown || '');
+    setJob(detail.generationJobId ? { id: detail.generationJobId, status: 'completed' } : null);
+    setStatus('completed');
+    setActiveTab('preview');
+    setEvidence([]);
+    setVersions([]);
+    setSelectedVersionId('');
+    setCompareVersionId('');
+    setRelatedDocuments([]);
+    try {
+      await loadRelationshipData(detail.id, detail.repositoryId);
+    } catch (requestError) {
+      setError(`Document opened, but its code relationships could not be loaded: ${requestError.message}`);
+    }
+  }
+
+  function openRelatedDocument(document) {
+    openDocumentationArtifact(document);
+  }
+
+
+  const [workflowPageIndex, setWorkflowPageIndex] = useState(0);
+  const [workflowPage, setWorkflowPage] = useState({
+    content: [], page: 0, size: 20, totalElements: 0, totalPages: 0, first: true, last: true,
+  });
+  const [isLoadingWorkflows, setIsLoadingWorkflows] = useState(Boolean(userId));
+  const [workflowsError, setWorkflowsError] = useState('');
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
+  const [history, setHistory] = useState([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+
+  useEffect(() => {
+    if (!userId) {
+      let cancelled = false;
+      Promise.resolve().then(() => {
+        if (cancelled) return;
+        setWorkflowPage({
+          content: [], page: 0, size: 20, totalElements: 0, totalPages: 0, first: true, last: true,
+        });
+        setSelectedWorkflowId('');
+        setIsLoadingWorkflows(false);
+      });
+      return () => { cancelled = true; };
+    }
+
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return undefined;
+      setIsLoadingWorkflows(true);
+      setWorkflowsError('');
+      return githubApi(`/api/document-workflows/history-accessible?page=${workflowPageIndex}&size=20`, { userId });
+    })
+      .then((result) => {
+        if (cancelled) return;
+        if (!Array.isArray(result?.content)) {
+          throw new Error('The workflow list response was invalid.');
+        }
+        const content = result.content;
+        const totalPages = Number.isInteger(result?.totalPages)
+          ? result.totalPages
+          : (content.length ? 1 : 0);
+        if (workflowPageIndex > 0 && workflowPageIndex >= totalPages) {
+          setWorkflowPageIndex(Math.max(0, totalPages - 1));
+          return;
+        }
+        setWorkflowPage({
+          content,
+          page: Number.isInteger(result?.page) ? result.page : workflowPageIndex,
+          size: Number.isInteger(result?.size) ? result.size : 20,
+          totalElements: Number.isFinite(result?.totalElements) ? result.totalElements : content.length,
+          totalPages,
+          first: result?.first ?? workflowPageIndex === 0,
+          last: result?.last ?? true,
+        });
+        setSelectedWorkflowId((current) => (
+          content.some((workflow) => String(workflow.id) === current)
+            ? current
+            : String(content[0]?.id || '')
+        ));
+      })
+      .catch((requestError) => {
+        if (cancelled) return;
+        setWorkflowPage({
+          content: [], page: workflowPageIndex, size: 20, totalElements: 0,
+          totalPages: 0, first: true, last: true,
+        });
+        setSelectedWorkflowId('');
+        setWorkflowsError(workflowRequestError(requestError, 'your document workflows'));
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingWorkflows(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [userId, workflowPageIndex, workflowsRefresh]);
+
+  useEffect(() => {
+    if (!userId || !selectedWorkflowId) {
+      let cancelled = false;
+      Promise.resolve().then(() => {
+        if (cancelled) return;
+        setHistory([]);
+        setHistoryError('');
+        setIsLoadingHistory(false);
+      });
+      return () => { cancelled = true; };
+    }
+
+    let cancelled = false;
+    Promise.resolve().then(() => {
+      if (cancelled) return undefined;
+      setIsLoadingHistory(true);
+      setHistoryError('');
+      return githubApi(`/api/document-workflows/${encodeURIComponent(selectedWorkflowId)}/history`, { userId });
+    })
+      .then((events) => {
+        if (!cancelled) {
+          if (!Array.isArray(events)) throw new Error('The approval history response was invalid.');
+          setHistory(events);
+        }
+      })
+      .catch((requestError) => {
+        if (cancelled) return;
+        setHistory([]);
+        setHistoryError(workflowRequestError(requestError, 'this approval history'));
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingHistory(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [userId, selectedWorkflowId]);
+
+  const selectedWorkflow = workflowPage.content.find(
+    (workflow) => String(workflow.id) === selectedWorkflowId
+  );
 
   useEffect(() => {
 
@@ -226,7 +513,6 @@ export default function DocumentationManagement({ userId }) {
   }, [userId, workspaceId]);
 
   async function handleGenerate(event) {
-
     event.preventDefault();
 
     if (!userId || !repositoryId) {
@@ -237,17 +523,33 @@ export default function DocumentationManagement({ userId }) {
 
     }
 
+    const runId = ++generationRun.current;
+    const isCurrent = () => runId === generationRun.current;
+
     setStatus('generating');
 
     setError('');
 
     setNotice('');
 
-    setDocument('');
+   setMarkdown('');
 
-    setSavedDocument('');
+   setOriginalDocument('');
 
-    setEvidence([]);
+   setSavedDocument('');
+
+   setJob(null);
+
+   resetSubmission();
+
+      setDocumentId('');
+      setCodeEntities([]);
+      setLinkedCodeEntityIds([]);
+      setRelationshipError('');
+      setSelectedCodeEntityId('');
+      setRelatedDocuments([]);
+
+   setEvidence([]);
 
     setVersions([]);
 
@@ -273,29 +575,38 @@ export default function DocumentationManagement({ userId }) {
 
       if (!createdJob?.id) throw new Error('The documentation service returned an invalid job.');
 
+      if (!isCurrent()) return;
+
       setJobId(createdJob.id);
+      setJob(createdJob);
+      setDocumentId(createdJob.documentId || '');
 
       const deadline = Date.now() + 120_000;
 
-      let job = createdJob;
+      let currentJob = createdJob;
 
-      while (['pending', 'running'].includes(job.status) && Date.now() < deadline) {
+      while (['pending', 'running'].includes(currentJob.status) && Date.now() < deadline) {
 
         await new Promise((resolve) => window.setTimeout(resolve, 750));
 
-        job = await githubApi(`/api/documentation/jobs/${encodeURIComponent(createdJob.id)}`, { userId });
+        if (!isCurrent()) return;
 
+        currentJob = await githubApi(`/api/documentation/jobs/${encodeURIComponent(createdJob.id)}`, { userId });
+
+        if (!isCurrent()) return;
+
+        setJob(currentJob);
       }
 
-      if (['pending', 'running'].includes(job.status)) {
+      if (['pending', 'running'].includes(currentJob.status)) {
 
         throw new Error('Documentation generation timed out. You can retry from this page.');
 
       }
 
-      if (job.status !== 'completed') {
+      if (currentJob.status !== 'completed') {
 
-        throw new Error(job.error || job.message || 'Documentation generation failed.');
+        throw new Error(currentJob.error || currentJob.message || 'Documentation generation failed.');
 
       }
 
@@ -308,6 +619,8 @@ export default function DocumentationManagement({ userId }) {
         githubApi(`${jobPath}/report`, { userId }),
 
       ]);
+
+      if (!isCurrent()) return;
 
       if (!markdown.trim()) throw new Error('The documentation service returned an empty document.');
 
@@ -327,20 +640,47 @@ export default function DocumentationManagement({ userId }) {
 
       ));
 
-      setDocument(markdown);
+       setMarkdown(markdown);
 
-      setSavedDocument(markdown);
+       setOriginalDocument(markdown);
 
-      setEvidence(evidenceItems);
+       setSavedDocument(markdown);
+
+       setEvidence(evidenceItems);
+
+      if (createdJob.documentId) {
+        setDocuments((current) => [
+          {
+            id: createdJob.documentId,
+            repositoryId,
+            generationJobId: createdJob.id,
+            markdown,
+            createdAt: new Date().toISOString(),
+          },
+          ...current.filter((item) => item.id !== createdJob.documentId),
+        ]);
+      }
+
+      let relationshipLoadError = '';
+      if (createdJob.documentId) {
+        try {
+          await loadRelationshipData(createdJob.documentId, repositoryId);
+        } catch (relationshipError) {
+          relationshipLoadError = relationshipError.message || 'Please try loading the relationships again.';
+        }
+      }
 
       setStatus('completed');
 
       const repoName = repositories.find((repo) => String(repo.id) === String(repositoryId))?.fullName;
-      const templateName = job.template_name
+      const templateName = currentJob.template_name
         || templateList.templates.find((item) => item.id === template)?.name;
       setNotice(`Documentation generated from ${repoName || 'the selected repository'}`
-        + (templateName ? ` using the "${templateName}" template.` : '.'));
+        + (templateName ? ` using the "${templateName}" template.` : '.')
+        + (relationshipLoadError ? ` Related source code could not be loaded: ${relationshipLoadError}` : ''));
     } catch (requestError) {
+
+      if (!isCurrent()) return;
 
       setStatus('failed');
       if (requestError.code === 'TEMPLATE_NOT_FOUND') {
@@ -353,13 +693,89 @@ export default function DocumentationManagement({ userId }) {
 
   }
 
+  function resetSubmission() {
+    setSubmittedDocumentId('');
+    setCreatedWorkflowId('');
+    setIsSubmitted(false);
+    setSubmitError('');
+    setSubmitNotice('');
+  }
+
+  // Saves the generated document, opens its review workflow and submits it for Staff review.
+  // Each step is remembered, so a retry after a failure continues from the step that failed.
+  async function handleSubmitForReview() {
+    if (!userId || !jobId || isSubmitting || isSubmitted) return;
+    setIsSubmitting(true);
+    setSubmitError('');
+    setSubmitNotice('');
+    let step = 'save the generated document';
+    try {
+      // The AI service document id used by the review workflow (not the code-relationship `documentId` state).
+      let savedDocumentId = submittedDocumentId;
+      if (!savedDocumentId) {
+        // An empty JSON body is required: a POST without Content-Type reaches GitHub Integration as
+        // form-urlencoded through the Backend and is answered with HTTP 415.
+        const saved = await githubApi(`/api/documentation/jobs/${encodeURIComponent(jobId)}/document`, {
+          method: 'POST', userId, body: {},
+        });
+        if (!saved?.id) throw new Error('The backend did not return the saved document.');
+        savedDocumentId = String(saved.id);
+        setSubmittedDocumentId(savedDocumentId);
+      }
+
+      step = 'create the review workflow';
+      let workflowId = createdWorkflowId;
+      if (!workflowId) {
+        const created = await githubApi('/api/document-workflows', {
+          method: 'POST', userId, body: { documentId: savedDocumentId },
+        });
+        if (!created?.id) throw new Error('The backend did not return the review workflow.');
+        workflowId = String(created.id);
+        setCreatedWorkflowId(workflowId);
+      }
+
+      step = 'submit the workflow for staff review';
+      const submitted = await githubApi(`/api/document-workflows/${encodeURIComponent(workflowId)}/submit`, {
+        method: 'POST', userId,
+      });
+      if (String(submitted?.id) !== workflowId || submitted?.status !== 'PENDING_STAFF_REVIEW') {
+        throw new Error('The backend did not confirm the submission. Refresh Approval History to verify the workflow.');
+      }
+
+      setIsSubmitted(true);
+      setSubmitNotice('Submitted for Staff review. Follow its progress in Approval History.');
+      setSelectedWorkflowId(workflowId);
+      setWorkflowPageIndex(0);
+      setWorkflowsRefresh((value) => value + 1);
+    } catch (requestError) {
+      setSubmitError(submitErrorMessage(requestError, step));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   function handleReset() {
+
+    generationRun.current += 1;
 
     setStatus('idle');
 
-    setDocument('');
+    setMarkdown('');
+
+    setOriginalDocument('');
 
     setSavedDocument('');
+
+    setJob(null);
+
+    resetSubmission();
+
+    setDocumentId('');
+    setCodeEntities([]);
+    setLinkedCodeEntityIds([]);
+    setRelationshipError('');
+    setSelectedCodeEntityId('');
+    setRelatedDocuments([]);
 
     setEvidence([]);
 
@@ -381,7 +797,7 @@ export default function DocumentationManagement({ userId }) {
 
   function handleSaveDraft() {
 
-    if (!document.trim()) {
+    if (!markdown.trim()) {
 
       setError('Document content cannot be empty.');
 
@@ -389,7 +805,7 @@ export default function DocumentationManagement({ userId }) {
 
     }
 
-    setSavedDocument(document);
+    setSavedDocument(markdown);
 
     setError('');
 
@@ -399,7 +815,7 @@ export default function DocumentationManagement({ userId }) {
 
   function handleCreateVersion() {
 
-    if (!document.trim()) {
+    if (!markdown.trim()) {
 
       setError('Generate or enter document content before creating a version.');
 
@@ -413,7 +829,7 @@ export default function DocumentationManagement({ userId }) {
 
       number: versions.length + 1,
 
-      content: document,
+      content: markdown,
 
       createdAt: new Date().toLocaleString(),
 
@@ -451,7 +867,7 @@ export default function DocumentationManagement({ userId }) {
 
     if (!confirmed) return;
 
-    setDocument(version.content);
+    setMarkdown(version.content);
 
     setSavedDocument(version.content);
 
@@ -465,7 +881,7 @@ export default function DocumentationManagement({ userId }) {
 
   function handleExport() {
 
-    const blob = new Blob([document], {
+    const blob = new Blob([markdown], {
 
       type: 'text/markdown;charset=utf-8',
 
@@ -497,7 +913,11 @@ export default function DocumentationManagement({ userId }) {
 
   );
 
-  const currentLines = document.split('\n');
+  const currentLines = markdown.split('\n');
+  const rawProgress = Number(job?.progress ?? 0);
+  const progressFraction = Number.isFinite(rawProgress)
+    ? Math.min(1, Math.max(0, rawProgress > 1 ? rawProgress / 100 : rawProgress))
+    : 0;
 
   const comparisonLines = compareVersion
 
@@ -534,7 +954,17 @@ export default function DocumentationManagement({ userId }) {
           </span>
 
         </div>
-
+        {status === 'generating' && (
+  <div className="documentation-progress" aria-live="polite">
+    <p>{job?.message || 'Generating documentation…'}</p>
+    <progress
+      aria-label="Documentation generation progress"
+      value={progressFraction}
+      max={1}
+    />
+    <span>{Math.round(progressFraction * 100)}%</span>
+  </div>
+)}
         <form className="documentation-form" onSubmit={handleGenerate}>
 
           <label htmlFor="documentation-repository">Repository</label>
@@ -545,7 +975,12 @@ export default function DocumentationManagement({ userId }) {
 
             value={repositoryId}
 
-            onChange={(event) => setRepositoryId(event.target.value)}
+            onChange={(event) => {
+              setDocuments([]);
+              setDocumentsError('');
+              setRepositoryId(event.target.value);
+              handleReset();
+            }}
 
             required
 
@@ -580,29 +1015,198 @@ export default function DocumentationManagement({ userId }) {
           />
 
           <div className="documentation-actions">
-            <button type="submit" disabled={status === 'generating' || isLoadingRepositories || repositories.length === 0
-              || !templateList.templates.some((item) => item.id === template)}>
+            <button
+              type="submit"
+              disabled={
+                status === 'generating'
+                || isLoadingRepositories
+                || repositories.length === 0
+                || !templateList.templates.some((item) => item.id === template)
+              }
+            >
               {status === 'generating' ? 'Generating…' : 'Generate documentation'}
-
             </button>
 
             <button
-
               type="button"
-
               className="documentation-secondary-button"
-
               onClick={handleReset}
-
             >
-
               Reset
-
             </button>
-
           </div>
 
         </form>
+
+
+        <section className="documentation-library" aria-labelledby="documentation-library-heading">
+          <h2 id="documentation-library-heading">Saved documentation</h2>
+          {isLoadingDocuments && <p role="status">Loading saved documentation…</p>}
+          {documentsError && <p className="documentation-error" role="alert">{documentsError}</p>}
+          {!isLoadingDocuments && !documentsError && documents.length === 0 && (
+            <p className="documentation-hint">No saved documentation for this repository yet.</p>
+          )}
+          {documents.length > 0 && (
+            <div className="documentation-library-list">
+              {documents.map((document) => {
+                const title = document.markdown?.split(/\r?\n/).find((line) => line.startsWith('# '))
+                  ?.replace(/^#\s+/, '') || 'Generated documentation';
+                return (
+                  <article className="documentation-library-item" key={document.id}>
+                    <div>
+                      <h3>{title}</h3>
+                      <p>{document.createdAt ? new Date(document.createdAt).toLocaleString() : 'Saved document'}</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="documentation-secondary-button"
+                      aria-current={document.id === documentId ? 'page' : undefined}
+                      onClick={() => openDocumentationArtifact(document)}
+                    >
+                      {document.id === documentId ? 'Open current document' : 'Open document'}
+                    </button>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+                  </section>
+
+        <section className="documentation-panel" aria-labelledby="approval-history-heading">
+          <h3 id="approval-history-heading">Approval History</h3>
+          <p className="documentation-hint">
+            Review audit history for document workflows available to your role.
+          </p>
+
+          {!userId && (
+            <p className="documentation-empty" role="status">
+              Sign in to view your document workflows.
+            </p>
+          )}
+
+          {userId && isLoadingWorkflows && (
+            <p role="status" aria-live="polite">Loading your document workflows…</p>
+          )}
+
+          {userId && !isLoadingWorkflows && workflowsError && (
+            <p className="documentation-error" role="alert">{workflowsError}</p>
+          )}
+
+          {userId && !isLoadingWorkflows && !workflowsError && workflowPage.content.length === 0 && (
+            <div className="documentation-empty">
+              <h3>No accessible document workflows</h3>
+              <p>Approval history appears here for workflows you own or can review.</p>
+            </div>
+          )}
+
+          {userId && !isLoadingWorkflows && !workflowsError && workflowPage.content.length > 0 && (
+            <>
+              <label htmlFor="approval-history-workflow">Select a document workflow</label>
+              <select
+                id="approval-history-workflow"
+                value={selectedWorkflowId}
+                onChange={(event) => {
+                  setHistory([]);
+                  setHistoryError('');
+                  setSelectedWorkflowId(event.target.value);
+                }}
+              >
+                {workflowPage.content.map((workflow) => (
+                  <option key={workflow.id} value={workflow.id}>
+                    {workflow.documentTitle || 'Untitled document'} — document {workflow.documentId}
+                  </option>
+                ))}
+              </select>
+
+              {workflowPage.totalPages > 1 && (
+                <div className="documentation-actions" role="group" aria-label="Workflow list pagination">
+                  <button
+                    type="button"
+                    className="documentation-secondary-button"
+                    disabled={isLoadingWorkflows || workflowPage.first || workflowPageIndex === 0}
+                    onClick={() => {
+                      setHistory([]);
+                      setSelectedWorkflowId('');
+                      setWorkflowPageIndex((page) => Math.max(0, page - 1));
+                    }}
+                  >
+                    Previous workflows
+                  </button>
+                  <span role="status" aria-live="polite">
+                    Page {workflowPage.page + 1} of {workflowPage.totalPages} · {workflowPage.totalElements} workflows
+                  </span>
+                  <button
+                    type="button"
+                    className="documentation-secondary-button"
+                    disabled={isLoadingWorkflows || workflowPage.last
+                      || workflowPageIndex >= workflowPage.totalPages - 1}
+                    onClick={() => {
+                      setHistory([]);
+                      setSelectedWorkflowId('');
+                      setWorkflowPageIndex((page) => Math.min(workflowPage.totalPages - 1, page + 1));
+                    }}
+                  >
+                    Next workflows
+                  </button>
+                </div>
+              )}
+
+              {selectedWorkflow && (
+                <p className="documentation-hint">
+                  Document ID: {selectedWorkflow.documentId} · Workflow ID: {selectedWorkflow.id}
+                </p>
+              )}
+
+              {isLoadingHistory && (
+                <p role="status" aria-live="polite">Loading approval history…</p>
+              )}
+
+              {!isLoadingHistory && historyError && (
+                <p className="documentation-error" role="alert">{historyError}</p>
+              )}
+
+              {!isLoadingHistory && !historyError && selectedWorkflowId && history.length === 0 && (
+                <div className="documentation-empty">
+                  <p>No approval history events are available for this workflow.</p>
+                </div>
+              )}
+
+              {!isLoadingHistory && !historyError && selectedWorkflowId && history.length > 0 && (
+                <ol className="documentation-approval-history">
+                  {history.map((event, index) => (
+                    <li key={event.id || `${event.createdAt}-${index}`}>
+                      <article className="documentation-version-card">
+                        <strong>{event.action || 'Action unavailable'}</strong>
+                        <p>Actor user ID: {event.actorUserId || 'Unavailable'}</p>
+                        <p>Actor role: {event.actorRole || 'Not recorded'}</p>
+                        <p>Timestamp: {formatAuditTimestamp(event.createdAt)}</p>
+                        <p>Previous status: {event.previousStatus || '—'}</p>
+                        <p>New status: {event.newStatus || '—'}</p>
+                        {event.comment && <p>Comment / reason: {event.comment}</p>}
+                      </article>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </>
+          )}
+
+        </section>
+
+        <DocumentationSuggestionReview
+          workflows={workflowPage.content}
+          selectedWorkflowId={selectedWorkflowId}
+          onSelectWorkflow={setSelectedWorkflowId}
+          userId={userId}
+          repositories={repositories}
+          currentRepositoryId={repositoryId}
+          isLoadingWorkflows={isLoadingWorkflows}
+          workflowsError={workflowsError}
+        />
+
+        <StaffReviewQueue userId={userId} />
+
+        <ManagerApprovalQueue userId={userId} userRole={userRole} />
 
         {isManagingTemplates && (
           <TemplateManager
@@ -636,21 +1240,87 @@ export default function DocumentationManagement({ userId }) {
 
         )}
 
-        {status === 'generating' && (
-
-          <p className="documentation-hint">
-
-            Sending synchronized source files through code analysis and documentation generation…
-
-          </p>
-
-        )}
-
         {status === 'completed' && (
 
           <div className="documentation-result">
 
             <h2>Generated Documentation</h2>
+
+            <section className="documentation-panel" aria-labelledby="submit-review-heading">
+              <h3 id="submit-review-heading">Submit for review</h3>
+              <p className="documentation-hint">
+                Saves the generated document and sends it to Staff for review, then to a Manager for approval.
+              </p>
+              {markdown !== originalDocument && (
+                <p className="documentation-hint">
+                  Local edits are not part of the submission. Use Restore original to submit the generated version.
+                </p>
+              )}
+              <div className="documentation-actions">
+                <button
+                  type="button"
+                  onClick={handleSubmitForReview}
+                  disabled={!userId || isSubmitting || isSubmitted || markdown !== originalDocument}
+                >
+                  {isSubmitting ? 'Submitting…' : isSubmitted ? 'Submitted for review' : 'Submit for review'}
+                </button>
+              </div>
+              {submitError && <p className="documentation-error" role="alert">{submitError}</p>}
+              {submitNotice && <p className="documentation-notice" role="status">{submitNotice}</p>}
+            </section>
+
+            {documentId && (
+              <section className="documentation-relationships" aria-labelledby="documentation-relationships-heading">
+                <h3 id="documentation-relationships-heading">Related source code</h3>
+                {isLoadingRelationships ? (
+                  <p role="status">Loading source code relationships…</p>
+                ) : relationshipError ? (
+                  <p className="documentation-error" role="alert">{relationshipError}</p>
+                ) : codeEntities.length === 0 ? (
+                  <p className="documentation-hint">No analyzed code entities are available for this repository yet.</p>
+                ) : (
+                  <div className="documentation-related-code-list">
+                    {codeEntities.map((entity) => (
+                      <div key={entity.id} className="documentation-related-code-item">
+                        <label className="documentation-related-code-label">
+                        <input
+                          type="checkbox"
+                          checked={linkedCodeEntityIds.includes(entity.id)}
+                          onChange={(event) => setLinkedCodeEntityIds((current) => event.target.checked
+                            ? [...new Set([...current, entity.id])]
+                            : current.filter((id) => id !== entity.id))}
+                        />
+                        <span>
+                          <strong>{entity.name}</strong> <small>{entity.entityType} · {entity.path}{entity.lineStart ? `:${entity.lineStart}` : ''}</small>
+                        </span>
+                        </label>
+                        <a href={entity.sourceUrl} target="_blank" rel="noopener noreferrer">Open source</a>
+                        <button type="button" className="documentation-secondary-button"
+                          onClick={() => showDocumentsForCodeEntity(entity.id)}>
+                          Related documents
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button type="button" onClick={saveCodeRelationships} disabled={isSavingRelationships}>
+                  {isSavingRelationships ? 'Saving links…' : 'Save code links'}
+                </button>
+                {selectedCodeEntityId && (
+                  <div className="documentation-related-documents" aria-live="polite">
+                    <h4>Documentation linked to this code entity</h4>
+                    {isLoadingRelatedDocuments ? (
+                      <p role="status">Loading related documentation…</p>
+                    ) : relatedDocuments.length ? relatedDocuments.map((document) => (
+                      <button type="button" key={document.id} className="documentation-link-button"
+                        onClick={() => openRelatedDocument(document)}>
+                        Open generated document ({document.createdAt ? new Date(document.createdAt).toLocaleString() : 'saved'})
+                      </button>
+                    )) : <p className="documentation-hint">No documentation is linked to this code entity.</p>}
+                  </div>
+                )}
+              </section>
+            )}
 
             <div className="documentation-tabs" role="tablist" aria-label="Documentation views">
 
@@ -730,83 +1400,64 @@ export default function DocumentationManagement({ userId }) {
 
             {activeTab === 'edit' && (
 
-              <section className="documentation-panel">
+<section className="documentation-panel">
+  <label htmlFor="documentation-editor">
+    Markdown content
+  </label>
 
-                <label htmlFor="documentation-editor">
+  <textarea
+    id="documentation-editor"
+    className="documentation-editor"
+    value={markdown}
+    onChange={(event) => {
+      setMarkdown(event.target.value);
+      setNotice('');
+    }}
+    rows={18}
+  />
 
-                  Markdown content
+  <div className="documentation-actions">
+    <button type="button" onClick={handleSaveDraft}>
+      Save draft
+    </button>
 
-                </label>
+    <button
+      type="button"
+      className="documentation-secondary-button"
+      onClick={handleCreateVersion}
+    >
+      Create version
+    </button>
 
-                <textarea
+    <button
+      type="button"
+      className="documentation-secondary-button"
+      disabled={!originalDocument}
+      onClick={() => {
+        setMarkdown(originalDocument);
+        setSavedDocument(originalDocument);
+        setError('');
+        setNotice('Restored the original generated document.');
+      }}
+    >
+      Restore original
+    </button>
 
-                  id="documentation-editor"
+    <button
+      type="button"
+      className="documentation-secondary-button"
+      onClick={handleExport}
+    >
+      Export Markdown
+    </button>
+  </div>
 
-                  className="documentation-editor"
-
-                  value={document}
-
-                  onChange={(event) => {
-
-                    setDocument(event.target.value);
-
-                    setNotice('');
-
-                  }}
-
-                  rows={18}
-
-                />
-
-                <div className="documentation-actions">
-
-                  <button type="button" onClick={handleSaveDraft}>
-
-                    Save draft
-
-                  </button>
-
-                  <button
-
-                    type="button"
-
-                    className="documentation-secondary-button"
-
-                    onClick={handleCreateVersion}
-
-                  >
-
-                    Create version
-
-                  </button>
-
-                  <button
-
-                    type="button"
-
-                    className="documentation-secondary-button"
-
-                    onClick={handleExport}
-
-                  >
-
-                    Export Markdown
-
-                  </button>
-
-                </div>
-
-                <p className="documentation-hint">
-
-                  {document === savedDocument
-
-                    ? 'All changes saved in the current page session.'
-
-                    : 'You have unsaved edits.'}
-
-                </p>
-
-              </section>
+  <p className="documentation-hint">
+    {markdown === savedDocument
+      ? 'All changes saved in the current page session.'
+      : 'You have unsaved edits.'}
+  </p>
+</section>
 
             )}
 
@@ -822,7 +1473,7 @@ export default function DocumentationManagement({ userId }) {
 
                 </div>
 
-                {document.trim() ? (
+                {markdown.trim() ? (
 
                   <article
 
@@ -830,7 +1481,7 @@ export default function DocumentationManagement({ userId }) {
 
                     dangerouslySetInnerHTML={{
 
-                      __html: renderMarkdown(document),
+                      __html: renderMarkdown(markdown),
 
                     }}
 

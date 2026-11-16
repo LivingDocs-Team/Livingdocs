@@ -1,4 +1,4 @@
-# LivingDocs AI Service (LD-90, LD-340)
+# LivingDocs AI Service (LD-90, LD-340, LD-195, LD-145, LD-151, LD-156)
 
 AI-assisted documentation generation. Takes source code that has already been analyzed
 (classes, methods, endpoints, parameters, return values) and produces Markdown docs
@@ -15,6 +15,17 @@ uvicorn main:app --reload --port 8001
 ```
 
 Open http://localhost:8001/docs to try the API.
+
+**Dependencies (DOCKER-03).** `requirements.txt` pins every package (direct and indirect) to an
+exact version, so local, CI and Docker builds use the same libraries. Do not edit it by hand: change
+the direct dependencies in `requirements.in`, then regenerate:
+
+```bash
+pip install uv
+uv pip compile requirements.in --python-version 3.12 --python-platform linux -o requirements.txt
+```
+
+`tests/test_requirements_pinned.py` fails if a line in `requirements.txt` is not pinned with `==`.
 
 Without `ANTHROPIC_API_KEY` the service uses a rule-based offline generator (good for
 development and tests). Set the key to use Claude:
@@ -33,9 +44,29 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | GET | `/jobs/{id}` | Status, progress, message, error, result |
 | GET | `/jobs/{id}/result` | Generated Markdown |
 | GET | `/jobs/{id}/report` | Evidence and confidence per file and entity |
+| POST | `/retrieval/preview` | Index summary and the related code (C) / docs (D) each file would get (LD-335) |
 | GET/POST | `/templates` | List (built-in first, then custom by name) / create templates |
 | GET | `/templates/sections` | Sections a template may contain |
 | GET/PUT/DELETE | `/templates/{id}` | Read / update / delete (built-ins are read-only) |
+| POST | `/documents` | Save a completed job as version 1 of a document (LD-195) |
+| GET | `/documents`, `/documents/{id}` | List / read documents |
+| GET | `/documents/{id}/content?version=N` | Markdown of the current (or given) version |
+| GET | `/documents/{id}/versions`, `/versions/{n}` | Version history (newest first) / one version |
+| GET | `/documents/{id}/history` | Audit trail: created, proposed, accepted, edited, dismissed, ... |
+| POST | `/drift/changes` | Changed code entities of a Pull Request (LD-146); nothing is stored |
+| POST | `/suggestions/updates` | Proposed edits (original → proposed text, reason, confidence) to the docs describing code changed by a PR (LD-353); kept for review |
+| POST | `/drift/reports/{id}/suggestions` | Concrete fixes for the findings of a drift report, same format as `/suggestions/updates`; send the repository Markdown again in `docs` (LD-354) |
+| POST | `/suggestions/{id}/review` | Accept (optionally with edited text) or reject a suggestion (LD-357) |
+| POST | `/suggestions/apply` | Apply accepted suggestions: one new version per saved document, new text + diff for repository Markdown; conflicts leave the document unchanged (LD-357) |
+| GET | `/suggestions`, `/suggestions/{id}`, `/suggestions/batches/{id}` | Read kept suggestions; filter by `batch_id`, `status`, `document_id` (LD-353) |
+| POST | `/drift/context` | Context to update the docs of each changed entity: diff (X1), related code (C), docs naming it first (D), prompt text (LD-338); nothing is stored |
+| POST | `/drift/analyze` | Drift report of a Pull Request: findings, affected docs, evidence (LD-147/148/149) |
+| GET | `/drift/reports?repository=&pull_request=` | Drift reports, newest first |
+| GET | `/drift/reports/{id}?min_severity=high` | One drift report (optionally only findings at or above a level) |
+| GET | `/drift/reports/{id}/markdown?min_severity=` | The report as Markdown grouped by severity (PR comment) |
+| GET | `/drift/severity-rules` | Severity levels (score bands, meaning, action) and every severity rule |
+| PUT | `/drift/reports/{id}/findings/{finding}/resolution` | Review / resolve one finding: `open`, `acknowledged`, `resolved`, `dismissed` (needs a `note`) (LD-346) |
+| POST | `/internal/affected-documents` | Internal (`INTERNAL_API_SECRET`). Parts of the given saved documents a source change (LD-116) may have made outdated, each `direct` or `dependent` (LD-122) |
 
 Built-in templates: `default`, `api-reference`, `brief`.
 
@@ -56,6 +87,136 @@ for the AI) and an ordered list of `sections` taken from `Overview`, `Classes`, 
   An unreadable file is renamed to `templates.corrupt-<time>.json` and the service starts with
   the built-in templates.
 - Errors: `422` invalid template, `409` duplicate name, `403` built-in template, `404` unknown id.
+
+### Versioned documentation (LD-195)
+
+- `POST /documents {"job_id": ...}` stores a completed job as **version 1** (accepted). Every later
+  change adds a new, immutable version; nothing is edited in place or deleted (LD-195).
+- Saved to `DOCUMENTS_FILE` (default `data/documents.json`, atomic writes; empty = memory only).
+  In Docker Compose the file is on the `ai-templates` volume, so documents and their evidence
+  survive a restart.
+- **Evidence of edits and rollbacks (LD-402)**: a version made by an owner edit (after a review
+  asked for changes) or by a rollback keeps the evidence of the version it was made from
+  (`evidence_report`, `review_report`, `source_snapshot`), and `evidence_from_version` says which
+  one. Before, such versions had none, so `GET /internal/documents/{id}/review-evidence` (staff)
+  and `/evidence` (manager) returned 404 for a resubmitted or restored document. Files saved
+  before the fix are repaired when loaded. Tests: `tests/test_evidence_persistence.py` (also a
+  real two-process restart with `DOCUMENTS_FILE`).
+- Details: `Docs/Linh/` FR6.md.
+
+### Documentation drift detection (LD-145, LD-151, LD-346)
+
+Checks whether a Pull Request makes existing documentation outdated.
+
+```
+PR files (patch + analyzer result at base/head)
+  -> LD-146 app/drift_changes.py   changed entities: added / removed / renamed /
+                                   signature_changed / behavior_changed
+  -> LD-148 app/drift_affected.py  saved document sections + repository Markdown that name them
+  -> LD-147 app/drift.py           findings: type, severity, confidence
+     LD-151 app/drift_referential.py / drift_signature.py / drift_semantic.py: kind, breaking
+  -> LD-149 app/drift_evidence.py  code diff, documentation passage, commit, Jira ticket
+```
+
+- **Input** (`DriftAnalyzeRequest`): `pull_request` (number, title, branch, `head_sha`, url, ...),
+  `files[]` with `path`, `status` (GitHub values), `previous_path`, `patch` (unified diff) and
+  optionally `before` / `after` (analyzer `FileAnalysis`, see [CONTRACT.md](CONTRACT.md)). With
+  `before`/`after` the comparison is exact; with only `patch`, Python and Java declarations are read
+  from the diff (confidence x0.8). `docs[]`: Markdown files of the repository; `document_ids`:
+  saved documents to check (omit = all).
+- **Types** (BR-49): *Referential* (removed / renamed code, moved endpoint, deleted or moved file
+  still named), *Signature* (parameters, return type, fields, endpoint contract changed), *Semantic*
+  (body or docstring changed, or a new entity is not described in its file's section).
+- **Classification (LD-151)**: every finding also has a `kind`, `breaking` and the `rules` that set
+  its severity; `summary.by_kind` and `summary.breaking` count them.
+
+  | Type | Kinds | Module |
+  |---|---|---|
+  | Referential (LD-152) | `entity_removed`, `endpoint_removed`, `entity_renamed`, `endpoint_moved`, `file_removed`, `file_moved`, `module_removed` (`shop.cart`, `com.acme.Order`), `module_moved`, `line_reference_stale` (`shop/cart.py:19-25`, `#L19-L25`: new range computed from the diff) | `app/drift_referential.py` |
+  | Signature (LD-153) | `endpoint_method_changed` (GET -> POST, same path), `parameter_removed`, `parameter_renamed`, `parameter_type_changed`, `parameter_order_changed`, `return_type_changed`, `endpoint_contract_changed`, `class_contract_changed`, `parameter_added`, `parameter_default_changed` | `app/drift_signature.py` |
+  | Semantic (LD-154) | `status_codes_changed`, `exceptions_changed`, `values_changed`, `docstring_changed`, `implementation_changed`, `undocumented_entity` | `app/drift_semantic.py` |
+
+  Breaking = documented usage stops working (removed / renamed / required parameter, type, order,
+  return type, HTTP method, contract; status codes for semantic). The documentation is also checked
+  for what it *still says* after a mention of the entity: removed parameter, old type or default
+  (same table row), removed exception, old status code, old value, a sentence of the old docstring.
+  Such passages are listed in `document.matches` (`kind` = parameter, type, default, exception,
+  status_code, value, docstring, line_ref) and as `D` evidence, and raise the severity by one level.
+  A signature change whose body also changed (status codes, exceptions, values) gives a second,
+  semantic finding.
+- **Severity assessment (LD-156)**, all rules in `app/drift_severity.py` (one table, `RULES`):
+  - *LD-157 rules*: a classifier only names the **base rule** and the **adjustments** that apply,
+    each with the documentation passages that prove it. Base rules: `endpoint_gone` Critical,
+    `entity_gone` High, `file_section_removed` High, `file_reference_removed` / `file_reference_moved`
+    Medium, `own_section_moved` Low, `line_reference_changed` Medium / `line_reference_shifted` Low,
+    `breaking_signature` Medium / `compatible_signature` Low, `behaviour_changed` Low,
+    `undocumented_entity` Low. Adjustments: `public_endpoint` +1, `doc_states_old_detail` +1,
+    `contract_behaviour` +1, `large_change` +1, `private_name` -1, `uncertain_match` -1 (confidence
+    < 0.5). Semantic drift is capped at High.
+  - *LD-158 classification*: score 0-100 inside the level's band (Low 0-24, Medium 25-49, High 50-74,
+    Critical 75-100; more confident findings score higher; `classify_score` maps back). Each affected
+    document and the report take the level of their most severe finding; `summary.severity_score`
+    and `summary.recommendation` (action for that level, e.g. "Fix the documentation before
+    merging").
+  - *Evidence*: `finding.severity_assessment` = level, score, base rule + reason + evidence ids,
+    every adjustment with its evidence ids (X1 code diff, D2 documentation line), cap, one-line
+    summary. `finding.rules` keeps the short form.
+  - *LD-159 display*: `GET /drift/reports/{id}/markdown` (PR comment) and the frontend page
+    "Documentation Drift" (`frontend/src/DocumentationDrift.jsx`).
+- **Confidence** 0-1 = match x method x location x certainty x evidence; levels as LD-340
+  (high >= 0.75, medium >= 0.50). Every finding has `factors` explaining the score. LD-356: a
+  finding missing its code diff or its documentation passage is x0.70 per missing proof (never
+  high; without both, low); every evidence id the AI review cites that the finding does not have
+  costs -0.10 (max 0.30, `factors.invalid_citations`, `ai_review.invalid_citations`) - severity
+  is not changed.
+- **Evidence** (BR-50): `X1` code diff of the entity (without a diff: signature and docstring
+  before -> after), `D1..` documentation lines, `C1` commit / PR link, `T1..` Jira keys from the PR
+  title, branch and description.
+- Matching avoids false positives: whole identifiers only, common words (`add`, `run`) only in
+  code / headings, bare method names only in the section of their own file, endpoint paths match
+  any placeholder style (`{id}`, `:id`, `<id>`).
+- **Source-documentation comparison (LD-347)**, `app/drift_compare.py` - no finding when the
+  documentation is not outdated:
+  - *already updated*: no stale detail and the entity's section shows every new parameter, type,
+    default and return type (signature) or the new status code, exception, value or docstring
+    sentence (semantic);
+  - *change acknowledged*: each mention says it was removed / renamed / deprecated / moved, or
+    names the new name on the line; change logs (`CHANGELOG.md`, `HISTORY.md`, `RELEASE_NOTES.md`...)
+    are skipped with a warning;
+  - *no real code change*: comments, blank lines and whitespace are ignored (Python `#`, Java `//`
+    and `/* */`; `//` in Python is division); docstring changes still count;
+  - *one change, one finding*: defaults on the `def` line are a signature change, not also a
+    semantic "values" change; values that only follow an added / removed / renamed parameter are
+    ignored; an endpoint whose parameters changed only through its handler is reported on the
+    handler (as in diff-only mode);
+  - stale details are searched from the mention of the entity to the next heading only;
+    `affected_documents` lists only parts with findings.
+  - Regression fixtures: `tests/fixtures/drift_cases.json` (15 Pull Requests: referential,
+    signature, semantic, unchanged documentation, no-change PRs), each run with the analyzer's
+    results and with the diff only, exact expected findings (`tests/test_drift_cases.py`). Refresh
+    the analyzer results with `python ai-service/scripts/capture_drift_cases.py` (repository root).
+- **AI review (LD-346)**, `app/drift_review.py`: after the rules, the AI reviews every finding (the
+  20 most severe, one call per report) like a second reviewer - `ai_review.verdict` confirmed /
+  disputed / uncertain, a plain-language `explanation` citing the finding's evidence ids (unknown
+  ids are dropped; an answer with no valid citation is `uncertain`), and a `suggested_update` for
+  the documentation. It never changes type or severity. Invalid JSON is retried with a repair
+  message; without `ANTHROPIC_API_KEY`, or when the AI fails, `mode: offline` with an explanation
+  and suggestion built from the rules and evidence (`verdict: not_reviewed`). `ai_review: false` in
+  the request skips the AI. With a key, `/drift/analyze` waits for one AI call (`LLM_TIMEOUT`,
+  `LLM_MAX_ATTEMPTS`, default 2).
+- **Review and resolution (LD-346)**: every finding has `resolution` (status, actor, note,
+  history), starting `open`; reviewers acknowledge, resolve, dismiss (with a reason) or reopen it.
+  The report's `review` gives the progress (`pending`, `in_progress`, `completed`, `not_required`)
+  and the AI verdict counts; the Markdown report and the frontend page show both.
+- **Manual analysis from the app:** github-integration-service `POST /api/repositories/{id}/drift/analyze`
+  `{"pullRequestNumber": 7}` reads the PR from GitHub, runs the analyzer on both commits and calls
+  `/drift/analyze` with the saved documents of that repository only. Details:
+  [github-integration-service README](../services/github-integration-service/README.md).
+- Reports (with their resolutions) are kept in memory (last 500); persistent drift history is LD-167.
+- Tests (LD-150, LD-155, LD-160, LD-346, LD-347): `tests/test_drift.py`, `tests/test_drift_classification.py`,
+  `tests/test_drift_severity.py`, `tests/test_drift_cases.py`, `tests/test_drift_review.py`, `tests/test_drift_api.py`,
+  `tests/integration/test_drift_integration.py`, live: `test_live_pipeline.py`; UI:
+  `tests/test_frontend_drift.py` (repository root).
 
 ### Example request
 
@@ -78,6 +239,13 @@ POST /generate
 ```
 
 Poll `GET /jobs/{id}` until `status` is `completed` (or `failed`), then read `/jobs/{id}/result`.
+
+## Service credential
+
+When `INTERNAL_API_SECRET` is set (Docker Compose always sets it, from `GITHUB_INTEGRATION_INTERNAL_SECRET`),
+every endpoint except `GET /health` needs `Authorization: Bearer <secret>`; a missing or wrong value returns
+401. GitHub Integration already sends it. Without `INTERNAL_API_SECRET` (unit tests, running `uvicorn`
+alone for development) the public endpoints stay open, while `/internal/*` still fails closed (503).
 
 ## Tests
 
@@ -122,6 +290,19 @@ analysis (LD-328) -> prompt -> Claude -> JSON (FileDoc) -> validate -> Markdown 
 - `app/confidence.py`: 0-1 confidence per entity, file and job, mostly from checkable signals
   (input quality, evidence grounding, whether it was described) plus the AI's self-assessment.
   Shown in the Markdown and returned by `GET /jobs/{id}/report`.
+- **Confidence scoring rules (LD-356)**, same for generated documentation and drift findings:
+  - *bounded*: `confidence.bounded()` clamps every score to 0-1 (NaN / infinity / not a number
+    -> 0) and rounds half-up to 2 decimals, so the same input always gives the same score; the
+    response models reject values outside 0-1.
+  - *thresholds*: `HIGH = 0.75`, `MEDIUM = 0.50` are defined once; the level is taken from the
+    rounded score (0.745 -> 0.75 high, 0.7449 -> 0.74 medium). Drift severity
+    (`UNCERTAIN_CONFIDENCE`) and the Markdown renderer use the same constants.
+  - *unknown evidence*: -0.10 per cited id that is not in the evidence (max 0.30); ids are
+    matched ignoring case and counted once.
+  - *missing evidence*: an entity without its own source evidence is x0.70 (never high); an AI
+    self-assessment that is not a finite number counts as missing (0.5).
+  - Tests: `tests/test_confidence_scoring.py` (boundaries, penalties, missing evidence,
+    reproducibility of generation and drift reports).
 
 Input format agreed with LD-328: see [CONTRACT.md](CONTRACT.md).
 
@@ -135,8 +316,22 @@ python scripts/run_sample.py path/to/real_analysis.json
 Environment variables: `TEMPLATES_FILE` (default `data/templates.json`), `ANTHROPIC_API_KEY`, `LLM_MODEL` (default `claude-sonnet-5-5`),
 `LLM_MAX_TOKENS` (4096), `LLM_TIMEOUT` seconds (60), `LLM_MAX_ATTEMPTS` (3).
 
+## Job monitoring and restarts (LD-281)
+
+- The job owner can poll `GET /api/documentation/jobs/{jobId}` through the application to see
+  the state, progress and any failure message. The AI service logs the job ID and state changes.
+- To reproduce restart behavior, generate documentation, record the job ID, and confirm that the
+  owner can poll it. Restart either `ai-service` or `github-integration` and poll the same ID.
+  Both cases return HTTP 404. The AI service holds job status and results in memory, and GitHub
+  Integration holds job ownership in memory. Start a new job to continue after either restart.
+  Documents already saved to the configured document volume remain available.
+
+GitHub Integration logs signed webhook deliveries with the delivery ID and ingestion outcome
+(`PROCESSED`, `DUPLICATE`, `IGNORED` or `FAILED`). For downstream source-change progress and errors, use
+the existing workspace-scoped `GET /api/repositories/{id}/source-changes` endpoint.
+
 ## Notes / next steps
 
-- Jobs are stored in memory and reset on restart. Custom templates are saved to
+- Drift reports are stored in memory and reset on restart. Custom templates are saved to
   `TEMPLATES_FILE`; templates are shared by all users (the AI service has no user accounts).
 - The `files` input format should match what the LivingDocs code analyzer outputs.

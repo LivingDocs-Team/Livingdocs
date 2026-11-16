@@ -1,37 +1,43 @@
 package com.livingdocs.github;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.livingdocs.github.dto.DocumentationGenerationRequest;
-import com.livingdocs.github.exception.ApiException;
-import com.livingdocs.github.service.DocumentationGenerationService;
-import com.livingdocs.github.service.RepositorySyncService;
-import com.livingdocs.github.sync.RepositorySnapshot;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.http.MediaType;
-import org.springframework.http.HttpStatus;
-import org.springframework.test.web.client.MockRestServiceServer;
-import org.springframework.web.client.RestClient;
-
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.Set;
 
+import static org.mockito.Mockito.lenient;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
 import static org.mockito.Mockito.when;
+import org.mockito.junit.jupiter.MockitoExtension;
+import static org.springframework.http.HttpMethod.GET;
+import static org.springframework.http.HttpMethod.POST;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.client.MockRestServiceServer;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
-import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
-import static org.springframework.http.HttpMethod.POST;
-import static org.springframework.http.HttpMethod.GET;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+import org.springframework.web.client.RestClient;
+
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.livingdocs.github.sync.SyncOptions;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.livingdocs.github.dto.DocumentationGenerationRequest;
+import com.livingdocs.github.exception.ApiException;
+import com.livingdocs.github.service.DocumentationGenerationService;
+import com.livingdocs.github.service.DocumentationCodeRelationshipService;
+import com.livingdocs.github.service.RepositorySyncService;
+import com.livingdocs.github.sync.RepositorySnapshot;
 
 @ExtendWith(MockitoExtension.class)
 class DocumentationGenerationServiceTest {
@@ -44,13 +50,36 @@ class DocumentationGenerationServiceTest {
             ]}
             """;
     private static final String EXPECTED_AI_REQUEST = """
-            {"scope":"repository","target":"acme/shop","template_id":"default","output_language":"en","files":[
-              {"path":"src/App.java","language":"java","status":"ok","classes":[],"functions":[],"endpoints":[]}
-            ]}
-            """;
+        {
+          "scope": "repository",
+          "target": "acme/shop",
+          "template_id": "default",
+          "output_language": "en",
+          "source_snapshot": {
+            "repository_id": "11111111-1111-1111-1111-111111111111",
+            "repository_full_name": "acme/shop",
+            "branch": "main",
+            "commit_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "fetched_at": "2026-01-01T00:00:00Z"
+          },
+          "files": [
+            {
+              "path": "src/App.java",
+              "language": "java",
+              "status": "ok",
+              "classes": [],
+              "functions": [],
+              "endpoints": []
+            }
+          ]
+        }
+        """;
 
     @Mock
     private RepositorySyncService repositorySyncService;
+
+    @Mock
+    private DocumentationCodeRelationshipService relationshipService;
 
     private MockRestServiceServer analyzerServer;
     private MockRestServiceServer aiServiceServer;
@@ -66,9 +95,48 @@ class DocumentationGenerationServiceTest {
         aiServiceServer = MockRestServiceServer.bindTo(aiBuilder).build();
         RestClient aiClient = aiBuilder.baseUrl("http://ai.test").build();
 
-        generationService = new DocumentationGenerationService(
-                repositorySyncService, analyzerClient, aiClient);
-        when(repositorySyncService.latest(USER_ID, REPOSITORY_ID)).thenReturn(snapshot());
+         generationService = new DocumentationGenerationService(
+                repositorySyncService, analyzerClient, aiClient, relationshipService);
+
+        lenient().when(repositorySyncService.latestOrSync(USER_ID, REPOSITORY_ID))
+                .thenReturn(snapshot());
+
+        org.mockito.Mockito.lenient().when(relationshipService.recordGeneration(
+                org.mockito.ArgumentMatchers.eq(USER_ID),
+                org.mockito.ArgumentMatchers.eq(REPOSITORY_ID),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+                .thenReturn(UUID.fromString("22222222-2222-2222-2222-222222222222"));
+    }
+
+    @Test
+    void ownerCanInspectFailedJobAndIntegrationRestartForgetsOwnership() {
+        analyzerServer.expect(requestTo("http://analyzer.test/api/v1/analyze-repo"))
+                .andRespond(withSuccess(ANALYSIS, MediaType.APPLICATION_JSON));
+        aiServiceServer.expect(requestTo("http://ai.test/generate"))
+                .andRespond(withStatus(HttpStatus.ACCEPTED).contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {"id":"job-failed","status":"pending"}
+                                """));
+        aiServiceServer.expect(requestTo("http://ai.test/jobs/job-failed"))
+                .andRespond(withSuccess("""
+                        {"id":"job-failed","status":"failed","error":"No documentation generated"}
+                        """, MediaType.APPLICATION_JSON));
+
+        generationService.generate(USER_ID, REPOSITORY_ID, new DocumentationGenerationRequest("default", "en"));
+        assertEquals(403, assertThrows(ApiException.class,
+                () -> generationService.getJob("another-owner", "job-failed")).getStatus().value());
+        JsonNode job = generationService.getJob(USER_ID, "job-failed");
+        assertEquals("failed", job.path("status").asText());
+        assertEquals("No documentation generated", job.path("error").asText());
+
+        RestClient unusedClient = RestClient.builder().build();
+        var restarted = new DocumentationGenerationService(repositorySyncService, unusedClient, unusedClient, relationshipService);
+        assertEquals(404, assertThrows(ApiException.class,
+                () -> restarted.getJob(USER_ID, "job-failed")).getStatus().value());
+        analyzerServer.verify();
+        aiServiceServer.verify();
     }
 
     @Test
@@ -92,6 +160,7 @@ class DocumentationGenerationServiceTest {
 
         assertEquals("job-123", job.path("id").asText());
         assertEquals("pending", job.path("status").asText());
+        assertEquals("22222222-2222-2222-2222-222222222222", job.path("documentId").asText());
         analyzerServer.verify();
         aiServiceServer.verify();
     }
@@ -206,11 +275,51 @@ class DocumentationGenerationServiceTest {
     }
 
     @Test
+    void savesOwnedDocumentOnlyForTheAuthenticatedJobOwner() throws Exception {
+        analyzerServer.expect(requestTo("http://analyzer.test/api/v1/analyze-repo"))
+                .andRespond(withSuccess(ANALYSIS, MediaType.APPLICATION_JSON));
+        aiServiceServer.expect(requestTo("http://ai.test/generate"))
+                .andRespond(withStatus(HttpStatus.ACCEPTED).contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"id\":\"job-doc\",\"status\":\"pending\"}"));
+        aiServiceServer.expect(requestTo("http://ai.test/internal/documents/from-job"))
+                .andExpect(method(POST))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.header("X-User-Id", USER_ID))
+                .andExpect(content().json("{\"job_id\":\"job-doc\",\"title\":\"Review me\"}"))
+                .andRespond(withSuccess("{\"id\":\"owned-doc\",\"owner_user_id\":\"integration-user\"}",
+                        MediaType.APPLICATION_JSON));
+
+        generationService.generate(USER_ID, REPOSITORY_ID, null);
+        JsonNode document = generationService.saveOwnedDocument(USER_ID,
+                Set.of("DOCUMENT_CREATE"), "job-doc", "Review me");
+
+        assertEquals("owned-doc", document.path("id").asText());
+        assertEquals(USER_ID, document.path("owner_user_id").asText());
+        analyzerServer.verify();
+        aiServiceServer.verify();
+    }
+
+    @Test
+    void cannotSaveAnotherUsersJobOrSaveWithoutDocumentCreatePermission() {
+        analyzerServer.expect(requestTo("http://analyzer.test/api/v1/analyze-repo"))
+                .andRespond(withSuccess(ANALYSIS, MediaType.APPLICATION_JSON));
+        aiServiceServer.expect(requestTo("http://ai.test/generate"))
+                .andRespond(withStatus(HttpStatus.ACCEPTED).contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"id\":\"job-protected\",\"status\":\"pending\"}"));
+        generationService.generate(USER_ID, REPOSITORY_ID, null);
+
+        assertEquals(403, assertThrows(ApiException.class, () -> generationService.saveOwnedDocument(
+                USER_ID, Set.of(), "job-protected", null)).getStatus().value());
+        assertEquals(403, assertThrows(ApiException.class, () -> generationService.saveOwnedDocument(
+                "another-user", Set.of("DOCUMENT_CREATE"), "job-protected", null)).getStatus().value());
+        aiServiceServer.verify();
+    }
+
+    @Test
     void rejectsSnapshotWithoutAnalyzableFilesBeforeCallingServices() {
         RepositorySnapshot emptySnapshot = new RepositorySnapshot(
                 snapshot().repository(), "main", snapshot().headCommit(), Map.of(), List.of(), List.of(),
                 new RepositorySnapshot.SyncStats(1, 0, 0, 1, false, false), List.of(), Instant.now());
-        when(repositorySyncService.latest(USER_ID, REPOSITORY_ID)).thenReturn(emptySnapshot);
+        when(repositorySyncService.latestOrSync(USER_ID, REPOSITORY_ID)).thenReturn(emptySnapshot);
 
         ApiException error = assertThrows(ApiException.class,
                 () -> generationService.generate(USER_ID, REPOSITORY_ID, null));
@@ -219,7 +328,59 @@ class DocumentationGenerationServiceTest {
         analyzerServer.verify();
         aiServiceServer.verify();
     }
+    @Test
+    void verifiesSourceSnapshotWhenCommitMatches() {
+        String commitSha = "a".repeat(40);
 
+        when(repositorySyncService.sync(USER_ID, REPOSITORY_ID, SyncOptions.defaults()))
+                .thenReturn(snapshot());
+
+        JsonNode result = generationService.verifySourceSnapshot(
+                USER_ID, reviewEvidence(REPOSITORY_ID.toString(), commitSha));
+
+        assertEquals("MATCH", result.path("source_verification").path("status").asText());
+        assertEquals(commitSha,
+                result.path("source_verification").path("current_commit_sha").asText());
+    }
+
+    @Test
+    void detectsChangedSourceSnapshotWhenCommitDiffers() {
+        String originalSha = "b".repeat(40);
+        String currentSha = "a".repeat(40);
+
+        when(repositorySyncService.sync(USER_ID, REPOSITORY_ID, SyncOptions.defaults()))
+                .thenReturn(snapshot());
+
+        JsonNode result = generationService.verifySourceSnapshot(
+                USER_ID, reviewEvidence(REPOSITORY_ID.toString(), originalSha));
+
+        assertEquals("CHANGED", result.path("source_verification").path("status").asText());
+        assertEquals(originalSha,
+                result.path("source_verification").path("expected_commit_sha").asText());
+        assertEquals(currentSha,
+                result.path("source_verification").path("current_commit_sha").asText());
+    }
+
+    @Test
+    void marksSourceSnapshotUnverifiableWhenOriginalCommitShaIsInvalid() {
+        JsonNode result = generationService.verifySourceSnapshot(
+                USER_ID, reviewEvidence(REPOSITORY_ID.toString(), "invalid-sha"));
+
+        assertEquals("UNVERIFIABLE",
+                result.path("source_verification").path("status").asText());
+        assertEquals("invalid-sha",
+                result.path("source_verification").path("expected_commit_sha").asText());
+    }
+
+    private static JsonNode reviewEvidence(String repositoryId, String commitSha) {
+        ObjectNode evidence = JsonNodeFactory.instance.objectNode();
+        ObjectNode sourceSnapshot = evidence.putObject("source_snapshot");
+
+        sourceSnapshot.put("repository_id", repositoryId);
+        sourceSnapshot.put("commit_sha", commitSha);
+
+        return evidence;
+    }
     private static RepositorySnapshot snapshot() {
         return new RepositorySnapshot(
                 new RepositorySnapshot.RepositoryInfo(42L, "acme/shop", "acme", "shop", null,
@@ -232,6 +393,6 @@ class DocumentationGenerationServiceTest {
                         "src/App.java", "b".repeat(40), 12, "java", "class App {}", null)),
                 List.of(),
                 new RepositorySnapshot.SyncStats(1, 1, 1, 0, false, false),
-                List.of(), Instant.now());
+                List.of(), Instant.parse("2026-01-01T00:00:00Z"));
     }
 }
