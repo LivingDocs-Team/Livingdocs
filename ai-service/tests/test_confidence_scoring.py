@@ -52,6 +52,7 @@ def entity_score(evidence, self_score=1.0, summary="Returns the total.", own=Tru
     ent = entities(ROUTES)[0]
     if not own:
         catalog.own.pop(ent.key)
+        getattr(catalog, "own_ids", {}).pop(ent.key, None)
     doc = FunctionDoc(name=ent.key, summary=summary, evidence=evidence, confidence=self_score)
     return score_entity(ent, doc, catalog, ai_mode)
 
