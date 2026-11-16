@@ -167,6 +167,7 @@ function App() {
       sessionStorage.removeItem('livingdocs.userId');
       setUserId(null);
       setUserRole('');
+      setLoginSuccess('');
       setPage('login');
     } catch {
       setLogoutError('Could not connect to the backend to end the session.');
@@ -253,8 +254,8 @@ function App() {
           <>
             <DocumentationSearch userId={userId} />
             <p className="switch-page">
-              <button type="button" onClick={() => setPage('documentation')}>
-                Back to Documentation Management
+              <button type="button" onClick={() => setPage('login')}>
+                Back to Login
               </button>
             </p>
           </>
@@ -305,13 +306,23 @@ function App() {
               </form>
               {loginError && <p role="alert">{loginError}</p>}
               {loginSuccess && <p role="status">{loginSuccess}</p>}
+              {userId && (
+                <p className="footer">
+                  <button className="text-button" type="button" onClick={handleLogout}>
+                    Sign out
+                  </button>
+                </p>
+              )}
+              {logoutError && <p role="alert">{logoutError}</p>}
 
               <div className="separator">or</div>
 
               <button
                 className="github-button"
                 type="button"
-                onClick={() => window.location.assign('/oauth2/authorization/github')}
+                onClick={() => window.location.assign(
+                  `${(import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')}/oauth2/authorization/github`,
+                )}
               >
                 Continue with GitHub
               </button>

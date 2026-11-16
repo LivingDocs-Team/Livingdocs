@@ -1,9 +1,43 @@
 import pytest
 import re
 from playwright.sync_api import Page, expect
+from fastapi.testclient import TestClient
+from app.main import app
 
 REPOSITORY_ID = "11111111-1111-1111-1111-111111111111"
 WORKSPACE_ID = "ws-42"
+
+client = TestClient(app)
+
+def test_evidence_and_submission_workflow():
+    # 1. Tạo Evidence
+    ev_response = client.post("/api/v1/evidences", json={
+        "task_id": "LD-106",
+        "evidence_type": "test_result",
+        "file_path": "artifacts/e2e_report.json",
+        "description": "E2E Test Output Evidence"
+    })
+    assert ev_response.status_code == 201
+    ev_data = ev_response.json()
+    assert ev_data["id"].startswith("ev-")
+
+    # 2. Tạo Submission ở dạng DRAFT
+    sub_response = client.post("/api/v1/submissions", json={
+        "task_id": "LD-106",
+        "title": "Nộp bài kiểm thử tự động LD-106",
+        "evidence_ids": [ev_data["id"]],
+        "notes": "Đã hoàn thành các test case"
+    })
+    assert sub_response.status_code == 201
+    sub_data = sub_response.json()
+    assert sub_data["status"] == "DRAFT"
+
+    # 3. Gửi yêu cầu Nộp bài (Submit)
+    submit_response = client.post(f"/api/v1/submissions/{sub_data['id']}/submit")
+    assert submit_response.status_code == 200
+    final_data = submit_response.json()
+    assert final_data["status"] == "SUBMITTED"
+    assert final_data["submitted_at"] is not None
 
 def test_frontend_homepage_title(page: Page):
     """LD-373: Kiểm tra tiêu đề giao diện Frontend Dashboard LivingDocs"""
@@ -227,7 +261,7 @@ def test_frontend_upload_repo_flow(page: Page):
                 "username": "test-user", "firstName": "Test", "lastName": "User", "role": "DEVELOPER",
             })
         if path.endswith("/api/managed-workspaces") and request.method == "GET":
-         return route.fulfill(status=200, json=[])
+            return route.fulfill(status=200, json=[])
         if path.endswith("/api/github/connection") and request.method == "GET":
             return route.fulfill(status=200, json={"connected": True, "githubLogin": "test-user", "status": "ACTIVE"})
         if path.endswith("/api/github/repos/available") and request.method == "GET":
@@ -291,6 +325,7 @@ def test_frontend_upload_repo_flow(page: Page):
 
     expected_calls = {
         ("POST", "http://localhost:3000/api/auth/login"),
+        ("GET", "http://localhost:3000/api/managed-workspaces"),
         ("GET", "http://localhost:3000/api/github/connection"),
         ("GET", "http://localhost:3000/api/github/repos/available"),
         ("POST", f"http://localhost:3000/api/workspaces/{WORKSPACE_ID}/repositories"),
@@ -352,6 +387,39 @@ def test_documentation_search_shows_documentation_and_code_navigation(page: Page
     )
     expect(page.get_by_role("link", name="View source ↗").first).to_have_attribute("target", "_blank")
     assert len(search_calls) == 1
+
+
+def test_documentation_search_back_to_login_keeps_session_and_does_not_log_out(page: Page):
+    calls = []
+
+    def mock_api(route):
+        request = route.request
+        path = request.url.split("?", 1)[0]
+        calls.append((request.method, path))
+        if path.endswith("/api/auth/csrf"):
+            return route.fulfill(status=200, json={"token": "csrf-test-token"})
+        if path.endswith("/api/auth/login") and request.method == "POST":
+            return route.fulfill(status=200, json={
+                "message": "Login successful", "id": 42, "email": "user@example.test",
+                "username": "test-user", "firstName": "Test", "lastName": "User", "role": "DEVELOPER",
+            })
+        if path.endswith("/api/workspaces/ws-42/repositories"):
+            return route.fulfill(status=200, json=[])
+        if path.endswith("/api/auth/logout"):
+            return route.fulfill(status=200, json={"message": "Unexpected logout"})
+        return route.fulfill(status=404, json={"message": f"Unexpected API request: {request.method} {path}"})
+
+    page.route("**/api/**", mock_api)
+    page.goto("http://localhost:3000/")
+    page.get_by_label("Email").fill("user@example.test")
+    page.get_by_label("Password").fill("test-only-password")
+    page.get_by_role("button", name="Sign in").click()
+    page.get_by_role("button", name="Documentation Search").click()
+
+    expect(page.get_by_role("heading", name="Documentation Search")).to_be_visible()
+    page.get_by_role("button", name="Back to Login").click()
+    expect(page.get_by_role("heading", name="LivingDocs")).to_be_visible()
+    assert ("POST", "http://localhost:3000/api/auth/logout") not in calls
 
 
 def test_documentation_search_validates_empty_query(page: Page):
@@ -532,3 +600,6 @@ def test_login_can_open_github_connection_and_view_status(page: Page):
     expect(page.get_by_role("heading", name="GitHub Integration")).to_be_visible()
     expect(page.get_by_role("status").filter(has_text="Connected as @test-user")).to_be_visible()
 
+def test_frontend_homepage_title(page: Page, base_url: str):
+    page.goto(f"{base_url}/")
+    expect(page).to_have_title("LivingDocs - Automated Documentation Generator")

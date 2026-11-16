@@ -41,7 +41,7 @@ class RepositoryManagementServiceTest {
         when(connection.getId()).thenReturn(CONNECTION_ID);
         when(connection.getAccessToken()).thenReturn("access-token");
         when(connectionRepository.findByIdForUpdate(CONNECTION_ID)).thenReturn(Optional.of(connection));
-        when(gitHubClient.listAccessibleRepositories("access-token"))
+        when(gitHubClient.listUserRepositories("access-token"))
                 .thenReturn(List.of(availableRepository(), conflictingRepository()));
         when(repositoryRepository.existsByConnectionIdAndGithubRepoIdAndWorkspaceIdNot(
                 CONNECTION_ID, CONFLICTING_REPOSITORY_ID, WORKSPACE_ID)).thenReturn(true);
@@ -70,7 +70,7 @@ class RepositoryManagementServiceTest {
         GitHubConnection connection = mock(GitHubConnection.class);
         when(connectionService.getActiveConnection(USER_ID)).thenReturn(connection);
         when(connection.getAccessToken()).thenReturn("access-token");
-        when(gitHubClient.listAccessibleRepositories("access-token"))
+        when(gitHubClient.listUserRepositories("access-token"))
                 .thenReturn(List.of(availableRepository()));
 
         var service = new RepositoryManagementService(
@@ -96,7 +96,7 @@ class RepositoryManagementServiceTest {
         when(connection.getId()).thenReturn(CONNECTION_ID);
         when(connection.getAccessToken()).thenReturn("access-token");
         when(connectionRepository.findByIdForUpdate(CONNECTION_ID)).thenReturn(Optional.of(connection));
-        when(gitHubClient.listAccessibleRepositories("access-token"))
+        when(gitHubClient.listUserRepositories("access-token"))
                 .thenReturn(List.of(availableRepository()));
         when(repositoryRepository.existsByWorkspaceIdAndConnectionIdAndGithubRepoId(
                 WORKSPACE_ID, CONNECTION_ID, GITHUB_REPOSITORY_ID)).thenReturn(true);

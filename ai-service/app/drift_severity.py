@@ -27,10 +27,13 @@ LD-159 / evidence
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from .confidence import MEDIUM, bounded
 from .drift_models import (SEVERITY_ORDER, DocMatch, DriftEvidence, DriftType, Severity,
                            SeverityAdjustment, SeverityAssessment)
 
-UNCERTAIN_CONFIDENCE = 0.5     # below: the documentation names the code only weakly
+# LD-356: the "medium" confidence threshold - a finding is uncertain exactly when its
+# confidence level is low
+UNCERTAIN_CONFIDENCE = MEDIUM     # below: the documentation names the code only weakly
 
 
 @dataclass(frozen=True)
@@ -152,7 +155,7 @@ def score_of(level: Severity, confidence: float) -> int:
     """A score inside the level's band: more confident findings rank higher."""
     lo, hi = SCORE_BANDS[level]
     mid = (lo + hi) // 2
-    return max(lo, min(hi, mid + round((confidence - 0.5) * 20)))
+    return max(lo, min(hi, mid + round((bounded(confidence) - 0.5) * 20)))
 
 
 def highest(levels: Sequence[Optional[Severity]]) -> Optional[Severity]:
@@ -182,7 +185,7 @@ def assess(type_: DriftType, base: str, adjustments: Sequence[Tuple[str, Sequenc
         r = RULES[rid]
         steps.append(SeverityAdjustment(rule=rid, delta=r.delta, label=r.label, reason=r.description,
                                         evidence=_evidence_ids(matches, evidence) or code_ids))
-    if confidence < UNCERTAIN_CONFIDENCE:
+    if bounded(confidence) < UNCERTAIN_CONFIDENCE:
         r = RULES["uncertain_match"]
         steps.append(SeverityAdjustment(rule=r.id, delta=r.delta, label=r.label,
                                         reason=r.description, evidence=doc_ids[:1]))
