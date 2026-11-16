@@ -384,6 +384,7 @@ def test_detected_drift_without_severity_is_not_reported_as_no_drift(page: Page)
     expect(page.locator(".drift-overall")).to_contain_text("Drift was detected, but severity details are unavailable")
     expect(page.locator(".drift-overall")).not_to_contain_text("No documentation drift")
 
+
 def test_ai_review_is_shown_for_every_finding(page: Page):
     install_api(page, {})
     open_drift(page)
