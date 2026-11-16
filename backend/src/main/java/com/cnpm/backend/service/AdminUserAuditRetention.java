@@ -16,7 +16,7 @@ public class AdminUserAuditRetention {
     private final int retentionDays;
 
     public AdminUserAuditRetention(AdminUserAuditRepository audit,
-            @Value("${app.admin-user-audit.retention-days}") int retentionDays) {
+            @Value("${app.admin-user-audit.retention-days:0}") int retentionDays) {
         if (retentionDays < 0) {
             throw new IllegalArgumentException("Admin user audit retention days must be non-negative");
         }
