@@ -252,7 +252,7 @@ class ConfidenceLevel(str, Enum):
 class EntityReport(BaseModel):
     kind: str                                 # class | method | function | endpoint
     name: str
-    confidence: float
+    confidence: float = Field(ge=0.0, le=1.0)          # LD-356: bounded, see app/confidence.py
     level: ConfidenceLevel
     evidence: List[Evidence] = Field(default_factory=list)
     factors: Dict[str, float] = Field(default_factory=dict)
@@ -261,7 +261,7 @@ class EntityReport(BaseModel):
 class FileReport(BaseModel):
     path: str
     status: FileResultStatus
-    confidence: Optional[float] = None
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     level: Optional[ConfidenceLevel] = None
     entities: List[EntityReport] = Field(default_factory=list)
     context_used: List[Evidence] = Field(default_factory=list)  # retrieved C/D items cited
@@ -275,7 +275,7 @@ class JobReport(BaseModel):
     # Snapshot of the template used when the document was generated.
     template_instructions: Optional[str] = None
     template_sections: List[str] = Field(default_factory=list)
-    confidence: Optional[float] = None
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     level: Optional[ConfidenceLevel] = None
     method: str = ""
     files: List[FileReport] = Field(default_factory=list)

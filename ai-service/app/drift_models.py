@@ -312,6 +312,7 @@ class AIDriftReview(BaseModel):
     evidence: List[str] = Field(default_factory=list)   # DriftEvidence ids the explanation cites
     suggested_update: Optional[str] = None               # replacement text for the documentation
     model: Optional[str] = None
+    invalid_citations: List[str] = Field(default_factory=list)   # LD-356: ids not in the evidence
 
 
 class ResolutionStatus(str, Enum):
@@ -368,7 +369,7 @@ class DriftFinding(BaseModel):
     kind: str = ""                     # LD-151, one of DRIFT_KINDS[type]
     breaking: bool = False             # documented usage no longer works (wrong call / URL)
     severity: Severity
-    confidence: float                  # 0-1
+    confidence: float = Field(ge=0.0, le=1.0)   # LD-356: always bounded (confidence.bounded)
     confidence_level: str              # high | medium | low (same thresholds as LD-340)
     entity: Optional[str] = None       # changed code entity (None for a whole-file finding)
     entity_kind: Optional[str] = None

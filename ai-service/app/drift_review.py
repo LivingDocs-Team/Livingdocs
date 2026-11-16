@@ -24,6 +24,7 @@ import os
 import re
 from typing import Dict, List, Optional, Tuple
 
+from .confidence import bounded, citation_penalty, level_of
 from .drift_models import (AIDriftReview, AIVerdict, DriftFinding, DriftReport, FindingResolution,
                            ResolutionEvent, ResolutionStatus, ResolutionUpdate, ReviewProgress,
                            ReviewStatus, now)
@@ -135,10 +136,21 @@ def parse_reviews(text: str, findings: List[DriftFinding]) -> Tuple[Dict[str, AI
             verdict = AIVerdict.uncertain       # not grounded in the evidence: not trusted
             suggestion = None
         out[f.id] = AIDriftReview(mode="ai", verdict=verdict, explanation=explanation, evidence=cited,
-                                  suggested_update=suggestion if verdict != AIVerdict.disputed else None)
+                                  suggested_update=suggestion if verdict != AIVerdict.disputed else None,
+                                  invalid_citations=unknown)
     if not out:
         raise InvalidReview("no review for any finding id")
     return out, warnings
+
+
+def penalize_citations(f: DriftFinding) -> None:
+    """LD-356: an AI review that cites evidence the finding does not have lowers the finding's
+    confidence (-0.10 per id, at most 0.30). The severity stays the one of the rule table."""
+    unknown = list(dict.fromkeys(f.ai_review.invalid_citations if f.ai_review else []))
+    f.factors["invalid_citations"] = float(len(unknown))
+    if unknown:
+        f.confidence = bounded(f.confidence - citation_penalty(len(unknown)))
+        f.confidence_level = level_of(f.confidence).value
 
 
 # ---------- offline explanation (also the fallback) ----------
@@ -190,6 +202,7 @@ class DriftReviewer:
                     if r.suggested_update is None and r.verdict != AIVerdict.disputed:
                         r.suggested_update = f.ai_review.suggested_update
                     f.ai_review = r
+                    penalize_citations(f)
             if len(report.findings) > MAX_REVIEWED:
                 report.warnings.append(f"Only the {MAX_REVIEWED} most severe findings were reviewed by the AI.")
         refresh_progress(report, self.mode)
