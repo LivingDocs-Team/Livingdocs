@@ -280,7 +280,8 @@ def test_internal_document_routes_require_the_service_credential(monkeypatch):
 def test_internal_document_creation_uses_trusted_owner_not_request_fields(monkeypatch):
     monkeypatch.setenv("INTERNAL_API_SECRET", "workflow-internal-secret")
     job_response = client.post("/generate", json={"scope": "repository", "target": "acme/shop",
-                                                   "files": [CART, USERS]})
+                                                   "files": [CART, USERS]},
+                                 headers={"Authorization": "Bearer workflow-internal-secret"})
     assert job_response.status_code == 202
     job_id = job_response.json()["id"]
 
@@ -293,14 +294,16 @@ def test_internal_document_creation_uses_trusted_owner_not_request_fields(monkey
     assert response.json()["id"]
     assert response.json()["current_version"] == 0
     assert response.json()["pending_version"] == 1
-    assert client.get(f"/documents/{response.json()['id']}").status_code == 404
-    assert response.json()["id"] not in [doc["id"] for doc in client.get("/documents").json()]
+    assert client.get(f"/documents/{response.json()['id']}",
+                      headers={"Authorization": "Bearer workflow-internal-secret"}).status_code == 404
+    assert response.json()["id"] not in [doc["id"] for doc in client.get("/documents", headers={"Authorization": "Bearer workflow-internal-secret"}).json()]
 
 
 def test_internal_document_edit_checks_owner_and_adds_version(monkeypatch):
     monkeypatch.setenv("INTERNAL_API_SECRET", "workflow-internal-secret")
     job_response = client.post("/generate", json={"scope": "repository", "target": "acme/shop",
-                                                   "files": [CART, USERS]})
+                                                   "files": [CART, USERS]},
+                                 headers={"Authorization": "Bearer workflow-internal-secret"})
     job_id = job_response.json()["id"]
     created = client.post("/internal/documents/from-job", headers={
         "Authorization": "Bearer workflow-internal-secret", "X-User-Id": "73",
@@ -373,7 +376,8 @@ def create_internal_review_document(monkeypatch, source_snapshot=None):
     if source_snapshot is not None:
         payload["source_snapshot"] = source_snapshot
 
-    job_response = client.post("/generate", json=payload)
+    job_response = client.post("/generate", json=payload,
+                               headers={"Authorization": "Bearer workflow-internal-secret"})
     assert job_response.status_code == 202, job_response.text
 
     job_id = job_response.json()["id"]
