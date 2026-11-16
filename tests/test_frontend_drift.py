@@ -383,3 +383,52 @@ def test_detected_drift_without_severity_is_not_reported_as_no_drift(page: Page)
 
     expect(page.locator(".drift-overall")).to_contain_text("Drift was detected, but severity details are unavailable")
     expect(page.locator(".drift-overall")).not_to_contain_text("No documentation drift")
+
+def test_ai_review_is_shown_for_every_finding(page: Page):
+    install_api(page, {})
+    open_drift(page)
+    run_check(page)
+
+    expect(page.locator(".drift-review-progress")).to_contain_text("Review pending: 3 open")
+    expect(page.locator(".drift-review-progress")).to_contain_text("AI review on")
+    f1 = page.locator('[data-finding="F1"]').get_by_label("AI review")
+    expect(f1.locator(".drift-ai-verdict")).to_have_attribute("data-verdict", "confirmed")
+    expect(f1).to_contain_text("README still calls the old path [D1]")
+    expect(f1.locator(".drift-suggestion")).to_have_text("Read a total with `GET /api/carts/:id`.")
+    f2 = page.locator('[data-finding="F2"]').get_by_label("AI review")
+    expect(f2.locator(".drift-ai-verdict")).to_have_text("AI disputed")
+    expect(f2.locator(".drift-suggestion")).to_have_count(0)
+    expect(page.locator('[data-finding="F3"] .drift-ai-verdict')).to_have_text("Rule-based explanation")
+
+
+def test_findings_are_acknowledged_resolved_dismissed_and_reopened(page: Page):
+    state = {}
+    install_api(page, state)
+    open_drift(page)
+    run_check(page)
+
+    f1 = page.locator('[data-finding="F1"]')
+    f1.get_by_role("button", name="Acknowledge").click()
+    expect(f1.locator(".drift-resolution-status")).to_have_attribute("data-status", "acknowledged")
+    expect(page.locator(".drift-review-progress")).to_contain_text("Review in progress: 2 open · 1 acknowledged")
+    f1.get_by_role("button", name="Mark resolved").click()
+    expect(f1.locator(".drift-resolution-status")).to_have_text("Resolved")
+    expect(f1.get_by_role("button", name="Dismiss")).to_have_count(0)
+
+    f2 = page.locator('[data-finding="F2"]')
+    f2.get_by_role("button", name="Dismiss").click()
+    expect(f2.get_by_role("button", name="Confirm dismiss")).to_be_disabled()     # a reason is required
+    f2.get_by_label("Why is this not a documentation drift?").fill("Table is in the v1 archive section.")
+    f2.get_by_role("button", name="Confirm dismiss").click()
+    expect(f2.locator(".drift-resolution-status")).to_have_text("Dismissed")
+    expect(f2.locator(".drift-resolution")).to_contain_text("Table is in the v1 archive section.")
+
+    page.locator('[data-finding="F3"]').get_by_role("button", name="Mark resolved").click()
+    expect(page.locator(".drift-review-progress")).to_contain_text(
+        "Review completed: 0 open · 0 acknowledged · 2 resolved · 1 dismissed")
+    f2.get_by_role("button", name="Reopen").click()
+    expect(f2.locator(".drift-resolution-status")).to_have_text("Open")
+    assert state["resolutions"] == [
+        ("F1", {"status": "acknowledged"}), ("F1", {"status": "resolved"}),
+        ("F2", {"status": "dismissed", "note": "Table is in the v1 archive section."}),
+        ("F3", {"status": "resolved"}), ("F2", {"status": "open"})]
