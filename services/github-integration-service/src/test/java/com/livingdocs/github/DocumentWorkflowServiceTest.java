@@ -620,6 +620,7 @@ void nonManagerCannotReadGroundingEvidence() {
                 .containsExactly("SUBMITTED", "APPROVED");
         assertThat(history.get(0).actorRole()).isNull();
         assertThat(history.get(1).actorUserId()).isEqualTo(MANAGER);
+        assertThat(history.get(1).workflowId()).isEqualTo(ID);
         assertThat(history.get(1).actorRole()).isEqualTo("MANAGER");
         assertThat(history.get(1).previousStatus()).isEqualTo("PENDING_MANAGER_APPROVAL");
         assertThat(history.get(1).newStatus()).isEqualTo("APPROVED");

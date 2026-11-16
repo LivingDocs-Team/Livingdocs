@@ -211,7 +211,7 @@ public class DocumentWorkflowService {
         DocumentWorkflow workflow = find(workflowId);
         requireReadable(workflow, actor, authorities);
         return audit.findByWorkflowIdOrderByCreatedAtAsc(workflowId).stream()
-                .map(e -> new AuditResponse(e.getId(), e.getActorUserId(), e.getActorRole(), e.getAction(),
+                .map(e -> new AuditResponse(e.getId(), e.getWorkflowId(), e.getActorUserId(), e.getActorRole(), e.getAction(),
                         e.getPreviousStatus(), e.getNewStatus(), e.getPreviousReviewerUserId(),
                         e.getNewReviewerUserId(), e.getComment(), e.getCreatedAt()))
                 .toList();
@@ -513,12 +513,12 @@ public class DocumentWorkflowService {
             }
             return pending;
         }
-        // LD-402: a newly generated owned document has no accepted version yet
-        // (current_version 0) and its proposal as pending_version 1; it must be submittable.
+        // A document saved from a generation job has current_version 0 (nothing approved yet) and
+        // pending_version 1: that pending version is exactly what the owner submits for review.
+        if (pending > 0) return pending;
         int current = document.path("current_version").asInt(0);
-        int version = pending > 0 ? pending : current;
-        if (version < 1) throw conflict("The document has no readable version.");
-        return version;
+        if (current < 1) throw conflict("The document has no readable version.");
+        return current;
     }
 
     private int visibleDocumentVersion(DocumentWorkflow workflow, JsonNode document) {

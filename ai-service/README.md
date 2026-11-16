@@ -44,6 +44,7 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | GET | `/jobs/{id}` | Status, progress, message, error, result |
 | GET | `/jobs/{id}/result` | Generated Markdown |
 | GET | `/jobs/{id}/report` | Evidence and confidence per file and entity |
+| POST | `/retrieval/preview` | Index summary and the related code (C) / docs (D) each file would get (LD-335) |
 | GET/POST | `/templates` | List (built-in first, then custom by name) / create templates |
 | GET | `/templates/sections` | Sections a template may contain |
 | GET/PUT/DELETE | `/templates/{id}` | Read / update / delete (built-ins are read-only) |
@@ -53,11 +54,18 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | GET | `/documents/{id}/versions`, `/versions/{n}` | Version history (newest first) / one version |
 | GET | `/documents/{id}/history` | Audit trail: created, proposed, accepted, edited, dismissed, ... |
 | POST | `/drift/changes` | Changed code entities of a Pull Request (LD-146); nothing is stored |
+| POST | `/suggestions/updates` | Proposed edits (original → proposed text, reason, confidence) to the docs describing code changed by a PR (LD-353); kept for review |
+| POST | `/drift/reports/{id}/suggestions` | Concrete fixes for the findings of a drift report, same format as `/suggestions/updates`; send the repository Markdown again in `docs` (LD-354) |
+| POST | `/suggestions/{id}/review` | Accept (optionally with edited text) or reject a suggestion (LD-357) |
+| POST | `/suggestions/apply` | Apply accepted suggestions: one new version per saved document, new text + diff for repository Markdown; conflicts leave the document unchanged (LD-357) |
+| GET | `/suggestions`, `/suggestions/{id}`, `/suggestions/batches/{id}` | Read kept suggestions; filter by `batch_id`, `status`, `document_id` (LD-353) |
+| POST | `/drift/context` | Context to update the docs of each changed entity: diff (X1), related code (C), docs naming it first (D), prompt text (LD-338); nothing is stored |
 | POST | `/drift/analyze` | Drift report of a Pull Request: findings, affected docs, evidence (LD-147/148/149) |
 | GET | `/drift/reports?repository=&pull_request=` | Drift reports, newest first |
 | GET | `/drift/reports/{id}?min_severity=high` | One drift report (optionally only findings at or above a level) |
 | GET | `/drift/reports/{id}/markdown?min_severity=` | The report as Markdown grouped by severity (PR comment) |
 | GET | `/drift/severity-rules` | Severity levels (score bands, meaning, action) and every severity rule |
+| POST | `/internal/affected-documents` | Internal (`INTERNAL_API_SECRET`). Parts of the given saved documents a source change (LD-116) may have made outdated, each `direct` or `dependent` (LD-122) |
 
 Built-in templates: `default`, `api-reference`, `brief`.
 
@@ -194,6 +202,13 @@ POST /generate
 
 Poll `GET /jobs/{id}` until `status` is `completed` (or `failed`), then read `/jobs/{id}/result`.
 
+## Service credential
+
+When `INTERNAL_API_SECRET` is set (Docker Compose always sets it, from `GITHUB_INTEGRATION_INTERNAL_SECRET`),
+every endpoint except `GET /health` needs `Authorization: Bearer <secret>`; a missing or wrong value returns
+401. GitHub Integration already sends it. Without `INTERNAL_API_SECRET` (unit tests, running `uvicorn`
+alone for development) the public endpoints stay open, while `/internal/*` still fails closed (503).
+
 ## Tests
 
 ```bash
@@ -250,8 +265,22 @@ python scripts/run_sample.py path/to/real_analysis.json
 Environment variables: `TEMPLATES_FILE` (default `data/templates.json`), `ANTHROPIC_API_KEY`, `LLM_MODEL` (default `claude-sonnet-5-5`),
 `LLM_MAX_TOKENS` (4096), `LLM_TIMEOUT` seconds (60), `LLM_MAX_ATTEMPTS` (3).
 
+## Job monitoring and restarts (LD-281)
+
+- The job owner can poll `GET /api/documentation/jobs/{jobId}` through the application to see
+  the state, progress and any failure message. The AI service logs the job ID and state changes.
+- To reproduce restart behavior, generate documentation, record the job ID, and confirm that the
+  owner can poll it. Restart either `ai-service` or `github-integration` and poll the same ID.
+  Both cases return HTTP 404. The AI service holds job status and results in memory, and GitHub
+  Integration holds job ownership in memory. Start a new job to continue after either restart.
+  Documents already saved to the configured document volume remain available.
+
+GitHub Integration logs signed webhook deliveries with the delivery ID and ingestion outcome
+(`PROCESSED`, `DUPLICATE`, `IGNORED` or `FAILED`). For downstream source-change progress and errors, use
+the existing workspace-scoped `GET /api/repositories/{id}/source-changes` endpoint.
+
 ## Notes / next steps
 
-- Jobs and drift reports are stored in memory and reset on restart. Custom templates are saved to
+- Drift reports are stored in memory and reset on restart. Custom templates are saved to
   `TEMPLATES_FILE`; templates are shared by all users (the AI service has no user accounts).
 - The `files` input format should match what the LivingDocs code analyzer outputs.
