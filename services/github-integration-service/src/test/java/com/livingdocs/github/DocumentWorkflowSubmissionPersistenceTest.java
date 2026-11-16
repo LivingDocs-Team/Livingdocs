@@ -21,6 +21,8 @@ import org.springframework.test.context.ActiveProfiles;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.livingdocs.github.config.FlywayMigrationLineageConfig;
+import com.livingdocs.github.config.FlywayMigrationLineageSelector;
 import com.livingdocs.github.dto.WorkflowDtos.StaffReviewRequest;
 import com.livingdocs.github.entity.DocumentWorkflow;
 import com.livingdocs.github.entity.DocumentWorkflowAudit;
@@ -44,7 +46,8 @@ import jakarta.persistence.EntityManager;
 @DataJpaTest(properties = "spring.flyway.enabled=true")
 @ActiveProfiles("test")
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import(DocumentWorkflowSubmissionPersistenceTest.TestTokenEncryptorConfiguration.class)
+@Import({DocumentWorkflowSubmissionPersistenceTest.TestTokenEncryptorConfiguration.class,
+        FlywayMigrationLineageConfig.class, FlywayMigrationLineageSelector.class})
 class DocumentWorkflowSubmissionPersistenceTest {
 
     @TestConfiguration(proxyBeanMethods = false)
