@@ -13,7 +13,6 @@ import pytest
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 
-
 def pytest_configure(config):
     config.addinivalue_line("markers", "live: needs running services (ANALYZER_URL, AI_SERVICE_URL)")
     config.addinivalue_line("markers", "llm: calls the real Claude API (RUN_LLM_TESTS=1 + ANTHROPIC_API_KEY)")
@@ -93,6 +92,10 @@ class PromptDrivenModel:
 
 
 @pytest.fixture
+def base_url():
+    return os.getenv("BASE_URL", "http://localhost:3000")
+
+@pytest.fixture
 def use_model(monkeypatch):
     """Route the API's background jobs through a fake model: use_model(PromptDrivenModel())."""
     from app import jobs
@@ -104,7 +107,6 @@ def use_model(monkeypatch):
         return model
 
     return install
-
 
 def live_url(name):
     return (os.getenv(name) or "").rstrip("/")
