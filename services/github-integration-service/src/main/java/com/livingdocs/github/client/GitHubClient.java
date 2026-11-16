@@ -94,31 +94,31 @@ public class GitHubClient {
 
     // ------------------------------------------------------------------ Repository list (Epic 3)
 
-    /**
-     * Liệt kê các repo người dùng truy cập được THÔNG QUA GitHub App
-     * (tức là các repo đã chọn khi cài app).
-     */
-    public List<GitHubRepo> listAccessibleRepositories(String accessToken) {
+    /** Liệt kê các repository mà OAuth user access token có quyền xem. */
+    public List<GitHubRepo> listUserRepositories(String accessToken) {
         List<GitHubRepo> result = new ArrayList<>();
-        for (Installation installation : listInstallations(accessToken)) {
-            for (int page = 1; page <= MAX_PAGES; page++) {
-                final int p = page;
-                InstallationRepos repos = call(() -> apiClient.get()
-                        .uri("/user/installations/{id}/repositories?per_page={pp}&page={p}",
-                                installation.id(), PER_PAGE, p)
-                        .headers(auth(accessToken))
-                        .retrieve()
-                        .body(InstallationRepos.class));
-                if (repos == null || repos.repositories() == null || repos.repositories().isEmpty()) {
-                    break;
-                }
-                result.addAll(repos.repositories());
-                if (repos.repositories().size() < PER_PAGE) {
-                    break;
-                }
+        for (int page = 1; page <= MAX_PAGES; page++) {
+            final int currentPage = page;
+            List<GitHubRepo> repositories = call(() -> apiClient.get()
+                    .uri("/user/repos?per_page={pp}&page={p}", PER_PAGE, currentPage)
+                    .headers(auth(accessToken))
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<List<GitHubRepo>>() {}));
+            if (repositories == null || repositories.isEmpty()) {
+                break;
+            }
+            result.addAll(repositories);
+            if (repositories.size() < PER_PAGE) {
+                break;
             }
         }
         return result;
+    }
+
+    /** @deprecated use {@link #listUserRepositories(String)}. */
+    @Deprecated
+    public List<GitHubRepo> listAccessibleRepositories(String accessToken) {
+        return listUserRepositories(accessToken);
     }
 
     public GitHubRepo getRepository(String accessToken, String fullName) {
@@ -185,19 +185,107 @@ public class GitHubClient {
         return result == null ? List.of() : result;
     }
 
-    // ------------------------------------------------------------------ helpers
+    // ------------------------------------------------------------------ Pull Request (LD-68)
 
-    private List<Installation> listInstallations(String accessToken) {
-        Installations installations = call(() -> apiClient.get()
-                .uri("/user/installations?per_page={pp}", PER_PAGE)
+    /** Các Pull Request (mọi trạng thái) cập nhật gần nhất trước. limit tối đa 100. */
+    public List<GitHubPullRequest> listPullRequests(String accessToken, String owner, String repo, int limit) {
+        int perPage = Math.max(1, Math.min(limit, PER_PAGE));
+        List<GitHubPullRequest> result = call(() -> apiClient.get()
+                .uri("/repos/{owner}/{repo}/pulls?state=all&sort=updated&direction=desc&per_page={pp}",
+                        owner, repo, perPage)
                 .headers(auth(accessToken))
                 .retrieve()
-                .body(Installations.class));
-        if (installations == null || installations.installations() == null) {
-            return List.of();
-        }
-        return installations.installations();
+                .body(new ParameterizedTypeReference<List<GitHubPullRequest>>() {
+                }));
+        return result == null ? List.of() : result;
     }
+
+    // ------------------------------------------------------------------ File thay đổi (LD-116)
+
+    /** File thay đổi của một commit (GitHub trả tối đa 300 file đầu tiên). */
+    public List<GitHubChangedFile> getCommitFiles(String accessToken, String owner, String repo, String sha) {
+        CommitFiles commit = call(() -> apiClient.get().uri("/repos/{owner}/{repo}/commits/{sha}", owner, repo, sha)
+                .headers(auth(accessToken))
+                .retrieve()
+                .body(CommitFiles.class));
+        return commit == null || commit.files() == null ? List.of() : commit.files();
+    }
+
+    /**
+     * File thay đổi của một Pull Request so với nhánh đích, tối đa 1000 file. Khác
+     * {@link #listPullRequestFiles}: trả về {@link GitHubChangedFile} cho source change (LD-116).
+     */
+    public List<GitHubChangedFile> listPullRequestChangedFiles(String accessToken, String owner, String repo,
+                                                               int number) {
+        List<GitHubChangedFile> result = new ArrayList<>();
+        for (int page = 1; page <= MAX_PAGES; page++) {
+            final int p = page;
+            List<GitHubChangedFile> files = call(() -> apiClient.get()
+                    .uri("/repos/{owner}/{repo}/pulls/{number}/files?per_page={pp}&page={p}",
+                            owner, repo, number, PER_PAGE, p)
+                    .headers(auth(accessToken))
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<List<GitHubChangedFile>>() {
+                    }));
+            if (files == null || files.isEmpty()) {
+                break;
+            }
+            result.addAll(files);
+            if (files.size() < PER_PAGE) {
+                break;
+            }
+        }
+        return result;
+    }
+
+    // ------------------------------------------------------------------ Pull Request (LD-146)
+
+    /** Thông tin một Pull Request: tiêu đề, mô tả, nhánh và commit head / base. */
+    public GitHubPullRequest getPullRequest(String accessToken, String owner, String repo, int number) {
+        return call(() -> apiClient.get().uri("/repos/{owner}/{repo}/pulls/{number}", owner, repo, number)
+                .headers(auth(accessToken))
+                .retrieve()
+                .body(GitHubPullRequest.class));
+    }
+
+    /**
+     * Các file thay đổi của Pull Request kèm diff (patch). GitHub trả tối đa 100 file mỗi trang;
+     * đọc tối đa {@value #MAX_PAGES} trang (1000 file).
+     */
+    public List<GitHubPullRequestFile> listPullRequestFiles(String accessToken, String owner, String repo,
+                                                            int number) {
+        List<GitHubPullRequestFile> result = new ArrayList<>();
+        for (int page = 1; page <= MAX_PAGES; page++) {
+            int current = page;
+            List<GitHubPullRequestFile> batch = call(() -> apiClient.get()
+                    .uri("/repos/{owner}/{repo}/pulls/{number}/files?per_page={pp}&page={page}",
+                            owner, repo, number, PER_PAGE, current)
+                    .headers(auth(accessToken))
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<List<GitHubPullRequestFile>>() {
+                    }));
+            if (batch == null || batch.isEmpty()) {
+                break;
+            }
+            result.addAll(batch);
+            if (batch.size() < PER_PAGE) {
+                break;
+            }
+        }
+        return result;
+    }
+
+    /** Commit chung gần nhất của base và head (diff của PR tính từ commit này). Null nếu GitHub không trả về. */
+    public String getMergeBase(String accessToken, String owner, String repo, String baseSha, String headSha) {
+        GitHubCompare compare = call(() -> apiClient.get()
+                .uri("/repos/{owner}/{repo}/compare/{base}...{head}?per_page=1", owner, repo, baseSha, headSha)
+                .headers(auth(accessToken))
+                .retrieve()
+                .body(GitHubCompare.class));
+        return compare == null || compare.mergeBaseCommit() == null ? null : compare.mergeBaseCommit().sha();
+    }
+
+    // ------------------------------------------------------------------ helpers
 
     private GitHubTokenResponse postToken(MultiValueMap<String, String> form) {
         GitHubTokenResponse response = call(() -> oauthClient.post()
@@ -243,14 +331,6 @@ public class GitHubClient {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record Installation(Long id) {
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public record Installations(@JsonProperty("total_count") Integer totalCount, List<Installation> installations) {
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public record InstallationRepos(@JsonProperty("total_count") Integer totalCount, List<GitHubRepo> repositories) {
+    public record CommitFiles(String sha, List<GitHubChangedFile> files) {
     }
 }

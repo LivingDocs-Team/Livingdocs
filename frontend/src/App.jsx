@@ -9,23 +9,83 @@ import NotificationPreferences from './NotificationPreferences';
 import GitHubConnection from './GitHubConnection';
 import RepositoryManagement from './RepositoryManagement';
 import DocumentationManagement from './DocumentationManagement';
+import DocumentationSearch from './DocumentationSearch';
+import DocumentationDrift from './DocumentationDrift';
 
 function App() {
-  const [page, setPage] = useState(() => (
-    new URLSearchParams(window.location.search).has('github') ? 'github' : 'login'
-  ));
-  const [userId, setUserId] = useState(() => sessionStorage.getItem('livingdocs.userId'));
+  const [page, setPage] = useState('login');
+  const [userId, setUserId] = useState(null);
+  const [userRole, setUserRole] = useState('');
+  const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [loginError, setLoginError] = useState('');
+  const [loginError, setLoginError] = useState(() => (
+    new URLSearchParams(window.location.search).get('oauth') === 'error'
+      ? 'Could not sign in with GitHub. If your LivingDocs account already uses this email, sign in with your password and connect GitHub from GitHub Connection.'
+      : ''
+  ));
   const [loginSuccess, setLoginSuccess] = useState('');
   const [logoutError, setLogoutError] = useState('');
 
   useEffect(() => {
+  let cancelled = false;
+
+  async function restoreSession() {
+    try {
+      const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+
+      const response = await fetch(apiBaseUrl + '/api/auth/me', {
+        method: 'GET',
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        sessionStorage.removeItem('livingdocs.userId');
+        if (!cancelled) {
+          setUserId(null);
+          setUserRole('');
+          setPage('login');
+        }
+        return;
+      }
+
+      const user = await response.json();
+
+      if (!user || user.id == null) {
+        throw new Error('Invalid current-user response');
+      }
+
+      if (!cancelled) {
+        setUserId(String(user.id));
+        setUserRole(typeof user.role === 'string' ? user.role : '');
+        sessionStorage.setItem('livingdocs.userId', String(user.id));
+        setPage('github');
+      }
+    } catch {
+      if (!cancelled) {
+        setUserId(null);
+        setUserRole('');
+        setPage('login');
+      }
+    } finally {
+      if (!cancelled) {
+        setIsCheckingSession(false);
+      }
+    }
+  }
+
+  restoreSession();
+
+  return () => {
+    cancelled = true;
+  };
+}, []);
+  useEffect(() => {
     const handleSessionExpired = () => {
       sessionStorage.removeItem('livingdocs.userId');
       setUserId(null);
+      setUserRole('');
       setPage('login');
       setLoginError('Your LivingDocs session has expired. Please sign in again.');
     };
@@ -61,8 +121,8 @@ function App() {
         const errorMessage = response.status === 401
           ? 'Invalid email or password.'
           : response.status === 400
-            ? 'Please enter a valid email and password.'
-            : 'Login failed. Please try again.';
+            ? (result?.message || 'Please enter a valid email and password.')
+            : (result?.message || result?.detail || `Login failed (HTTP ${response.status}). Please try again.`);
         setLoginError(errorMessage);
         return;
       }
@@ -81,6 +141,7 @@ function App() {
 
       sessionStorage.setItem('livingdocs.userId', String(result.id));
       setUserId(String(result.id));
+      setUserRole(result.role);
       setLoginSuccess('Signed in successfully as ' + result.email + '.');
     } catch {
       setLoginError('Could not connect to the backend. Check the backend URL and try again.');
@@ -105,6 +166,8 @@ function App() {
       }
       sessionStorage.removeItem('livingdocs.userId');
       setUserId(null);
+      setUserRole('');
+      setLoginSuccess('');
       setPage('login');
     } catch {
       setLogoutError('Could not connect to the backend to end the session.');
@@ -177,10 +240,34 @@ function App() {
       case 'documentation':
         return (
           <>
-            <DocumentationManagement userId={userId} />
+            <DocumentationManagement userId={userId} userRole={userRole} />
             <p className="switch-page">
               <button type="button" onClick={() => setPage('login')}>
                 Back to login
+              </button>
+            </p>
+          </>
+        );
+
+      case 'search':
+        return (
+          <>
+            <DocumentationSearch userId={userId} />
+            <p className="switch-page">
+              <button type="button" onClick={() => setPage('login')}>
+                Back to Login
+              </button>
+            </p>
+          </>
+        );
+
+      case 'drift':
+        return (
+          <>
+            <DocumentationDrift userId={userId} />
+            <p className="switch-page">
+              <button type="button" onClick={() => setPage('login')}>
+                Back to Login
               </button>
             </p>
           </>
@@ -219,13 +306,23 @@ function App() {
               </form>
               {loginError && <p role="alert">{loginError}</p>}
               {loginSuccess && <p role="status">{loginSuccess}</p>}
+              {userId && (
+                <p className="footer">
+                  <button className="text-button" type="button" onClick={handleLogout}>
+                    Sign out
+                  </button>
+                </p>
+              )}
+              {logoutError && <p role="alert">{logoutError}</p>}
 
               <div className="separator">or</div>
 
               <button
                 className="github-button"
                 type="button"
-                onClick={() => setPage('github')}
+                onClick={() => window.location.assign(
+                  `${(import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')}/oauth2/authorization/github`,
+                )}
               >
                 Continue with GitHub
               </button>
@@ -247,7 +344,7 @@ function App() {
                   type="button"
                   onClick={() => setPage('profile')}
                 >
-                  View demo profile
+                  View profile
                 </button>
               </p>
 
@@ -319,13 +416,39 @@ function App() {
                   </span>
                   <span className="quick-access-link">Open feature →</span>
                 </button>
+                <button
+                  className="quick-access-card"
+                  type="button"
+                  onClick={() => setPage('search')}
+                >
+                  <span className="quick-access-icon" aria-hidden="true">⌕</span>
+                  <span className="quick-access-title">Documentation Search</span>
+                  <span className="quick-access-description">
+                    Find documentation and linked code in your repositories.
+                  </span>
+                  <span className="quick-access-link">Open feature ↗</span>
+                </button>
+                <button
+                  className="quick-access-card"
+                  type="button"
+                  onClick={() => setPage('drift')}
+                >
+                  <span className="quick-access-icon" aria-hidden="true">⚠</span>
+                  <span className="quick-access-title">Documentation Drift</span>
+                  <span className="quick-access-description">
+                    Check a pull request for outdated documentation, ranked by severity.
+                  </span>
+                  <span className="quick-access-link">Open feature →</span>
+                </button>
               </div>
             </section>
           </main>
         );
     }
   };
-
+  if (isCheckingSession) {
+  return <div className="app-content">Checking session...</div>;
+}
   return (
     <div className="app">
       {page !== 'login' && (
@@ -343,6 +466,14 @@ function App() {
 
             <button type="button" onClick={() => setPage('documentation')}>
               Documentation Management
+            </button>
+
+            <button type="button" onClick={() => setPage('search')}>
+              Documentation Search
+            </button>
+
+            <button type="button" onClick={() => setPage('drift')}>
+              Documentation Drift
             </button>
 
             <button type="button" onClick={() => setPage('profile')}>

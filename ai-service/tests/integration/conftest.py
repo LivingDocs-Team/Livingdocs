@@ -13,7 +13,6 @@ import pytest
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 
-
 def pytest_configure(config):
     config.addinivalue_line("markers", "live: needs running services (ANALYZER_URL, AI_SERVICE_URL)")
     config.addinivalue_line("markers", "llm: calls the real Claude API (RUN_LLM_TESTS=1 + ANTHROPIC_API_KEY)")
@@ -93,6 +92,10 @@ class PromptDrivenModel:
 
 
 @pytest.fixture
+def base_url():
+    return os.getenv("BASE_URL", "http://localhost:3000")
+
+@pytest.fixture
 def use_model(monkeypatch):
     """Route the API's background jobs through a fake model: use_model(PromptDrivenModel())."""
     from app import jobs
@@ -105,6 +108,31 @@ def use_model(monkeypatch):
 
     return install
 
-
 def live_url(name):
     return (os.getenv(name) or "").rstrip("/")
+
+
+# ---------- drift detection (LD-145): a Pull Request on shop/cart_service.py ----------
+
+DRIFT_FILE = "shop/cart_service.py"
+DRIFT_PR = {"number": 7, "title": "LD-146 Cart: quantity is qty, prices in USD",
+            "head_branch": "ld-147-cart-usd", "head_sha": "abc1234",
+            "url": "https://github.com/acme/shop/pull/7"}
+
+
+def cart_head_version(before):
+    """The analyzer's result for shop/cart_service.py at the head commit of DRIFT_PR, made from
+    its result at the base commit: `add_item(quantity)` -> `add_item(qty)`, `total` ->
+    `grand_total`, CartService docstring: prices in USD without VAT."""
+    after = copy.deepcopy(before)
+    service = next(c for c in after["classes"] if c["name"] == "CartService")
+    service["docstring"] = "Business rules for shopping carts. Prices are in USD, without VAT."
+    add = next(m for m in service["methods"] if m["name"] == "add_item")
+    next(p for p in add["parameters"] if p["name"] == "quantity")["name"] = "qty"
+    add["signature"] = add["signature"].replace("quantity", "qty")
+    add["source"] = add["source"].replace("quantity", "qty")
+    total = next(m for m in service["methods"] if m["name"] == "total")
+    total["name"] = "grand_total"
+    total["signature"] = total["signature"].replace("def total", "def grand_total")
+    total["source"] = total["source"].replace("def total", "def grand_total")
+    return after

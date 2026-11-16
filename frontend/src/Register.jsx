@@ -52,7 +52,7 @@ function Register() {
             ? 'That username or email is already registered.'
             : response.status === 400
               ? 'Please check the registration details and try again.'
-              : 'Registration failed. Please try again.');
+              : `Registration failed (HTTP ${response.status}). Please try again.`);
 
         throw new Error(errorMessage);
       }

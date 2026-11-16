@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -30,6 +31,8 @@ class GitHubClientRepositoryApiTest {
     private GitHubClient client;
     private final AtomicReference<String> lastAuthorization = new AtomicReference<>();
     private final AtomicReference<String> lastQuery = new AtomicReference<>();
+    private final AtomicReference<String> lastAccept = new AtomicReference<>();
+    private final AtomicReference<String> lastApiVersion = new AtomicReference<>();
 
     @BeforeEach
     void startServer() throws IOException {
@@ -114,6 +117,68 @@ class GitHubClientRepositoryApiTest {
         List<GitHubCommit> commits = client.listCommits("tok", "o", "r", "main", 5);
         assertThat(commits).hasSize(1);
         assertThat(lastQuery.get()).contains("sha=main").contains("per_page=5");
+    }
+
+    @Test
+    void listsPublicPrivateAndOrganizationRepositoriesWithUserTokenAndPagination() {
+        AtomicInteger requests = new AtomicInteger();
+        server.createContext("/user/repos", exchange -> {
+            lastAuthorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            lastAccept.set(exchange.getRequestHeaders().getFirst("Accept"));
+            lastApiVersion.set(exchange.getRequestHeaders().getFirst("X-GitHub-Api-Version"));
+            lastQuery.set(exchange.getRequestURI().getRawQuery());
+            int page = Integer.parseInt(exchange.getRequestURI().getRawQuery()
+                    .replaceAll(".*(?:^|&)page=(\\d+).*", "$1"));
+            requests.incrementAndGet();
+            String body = page == 1
+                    ? "[" + java.util.stream.IntStream.range(0, 100)
+                            .mapToObj(i -> repoJson(i + 1, "public-owner/repo-" + i, false))
+                            .collect(java.util.stream.Collectors.joining(",")) + "]"
+                    : "[" + repoJson(101, "private-owner/private-repo", true) + ","
+                            + repoJson(102, "LivingDocs-Team/Livingdocs", false) + "]";
+            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream out = exchange.getResponseBody()) { out.write(bytes); }
+        });
+
+        List<GitHubRepo> repositories = client.listUserRepositories("user-token");
+
+        assertThat(requests.get()).isEqualTo(2);
+        assertThat(lastQuery.get()).isEqualTo("per_page=100&page=2");
+        assertThat(lastAuthorization.get()).isEqualTo("Bearer user-token");
+        assertThat(lastAccept.get()).isEqualTo("application/vnd.github+json");
+        assertThat(lastApiVersion.get()).isEqualTo("2022-11-28");
+        assertThat(repositories).hasSize(102);
+        assertThat(repositories.get(0).id()).isEqualTo(1L);
+        assertThat(repositories.get(0).fullName()).isEqualTo("public-owner/repo-0");
+        assertThat(repositories.get(0).privateRepo()).isFalse();
+        assertThat(repositories.get(100).fullName()).isEqualTo("private-owner/private-repo");
+        assertThat(repositories.get(100).privateRepo()).isTrue();
+        assertThat(repositories.get(101).fullName()).isEqualTo("LivingDocs-Team/Livingdocs");
+        assertThat(repositories.get(101).defaultBranch()).isEqualTo("main");
+        assertThat(repositories.get(101).htmlUrl()).isEqualTo("https://github.com/LivingDocs-Team/Livingdocs");
+    }
+
+    @Test
+    void userRepositoryListPreservesUnauthorizedAndForbiddenErrors() {
+        stub("/user/repos", 401, "{\"message\":\"Bad credentials\"}", Map.of());
+        GitHubApiException unauthorized = failure(() -> client.listUserRepositories("expired-token"));
+        assertThat(unauthorized.getStatusCode()).isEqualTo(401);
+        assertThat(unauthorized.isUnauthorized()).isTrue();
+
+        server.removeContext("/user/repos");
+        stub("/user/repos", 403, "{\"message\":\"Resource not accessible by integration\"}",
+                Map.of("x-ratelimit-remaining", "4999"));
+        GitHubApiException forbidden = failure(() -> client.listUserRepositories("limited-token"));
+        assertThat(forbidden.getStatusCode()).isEqualTo(403);
+        assertThat(forbidden.getResponseBody()).contains("Resource not accessible by integration");
+        assertThat(forbidden.isRateLimited()).isFalse();
+    }
+
+    private static String repoJson(long id, String fullName, boolean isPrivate) {
+        return "{\"id\":" + id + ",\"full_name\":\"" + fullName + "\",\"private\":" + isPrivate
+                + ",\"default_branch\":\"main\",\"html_url\":\"https://github.com/" + fullName + "\"}";
     }
 
     @Test

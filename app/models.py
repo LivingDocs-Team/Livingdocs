@@ -1,4 +1,6 @@
+from enum import Enum
 from typing import List, Optional
+from datetime import datetime
 from pydantic import BaseModel, Field
 
 class FileInput(BaseModel):
@@ -32,11 +34,23 @@ class Function(BaseModel):
     lineno: Optional[int] = None
     end_lineno: Optional[int] = None
 
+class ClassField(BaseModel):
+    """Attribute of a class: pydantic/dataclass field, Java field, record component, enum constant."""
+    name: str
+    type: Optional[str] = None
+    default: Optional[str] = None
+    description: Optional[str] = None
+    lineno: Optional[int] = None
+
 class ClassInfo(BaseModel):
     name: str
+    kind: str = "class"  # class | interface | enum | record | annotation
     bases: List[str] = Field(default_factory=list)
     docstring: Optional[str] = None
     methods: List[Function] = Field(default_factory=list)
+    fields: List[ClassField] = Field(default_factory=list)
+    lineno: Optional[int] = None
+    end_lineno: Optional[int] = None
 
 class Endpoint(BaseModel):
     http_method: str
@@ -45,6 +59,8 @@ class Endpoint(BaseModel):
     parameters: List[Parameter] = Field(default_factory=list)
     request_body: Optional[str] = None
     response: Optional[str] = None
+    lineno: Optional[int] = None
+    end_lineno: Optional[int] = None
 
 class FileAnalysis(BaseModel):
     path: str
@@ -61,3 +77,57 @@ class RepoAnalysisResponse(BaseModel):
     scope: str
     target: str
     files: List[FileAnalysis] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+class EvidenceType(str, Enum):
+    LOG = "log"
+    SCREENSHOT = "screenshot"
+    TEST_RESULT = "test_result"
+    DOCUMENT_DIFF = "document_diff"
+
+class SubmissionStatus(str, Enum):
+    DRAFT = "DRAFT"
+    PENDING = "PENDING"
+    SUBMITTED = "SUBMITTED"
+    VERIFIED = "VERIFIED"
+    REJECTED = "REJECTED"
+
+class EvidenceCreate(BaseModel):
+    task_id: str
+    evidence_type: EvidenceType
+    file_path: str
+    description: Optional[str] = None
+    metadata: Optional[dict] = Field(default_factory=dict)
+
+class EvidenceResponse(EvidenceCreate):
+    """LD-402: the only EvidenceResponse (PR #108 declared it twice; the second one replaced the
+    first and dropped created_at and metadata from every response)."""
+    id: str
+    created_at: datetime
+
+class SubmissionCreate(BaseModel):
+    task_id: str
+    title: str
+    evidence_ids: List[str]
+    notes: Optional[str] = None
+
+class SubmissionRecord(BaseModel):
+    """What is stored for a submission (app/submissions.py): evidences by id."""
+    id: str
+    task_id: str
+    title: str
+    notes: Optional[str] = None
+    status: SubmissionStatus
+    evidence_ids: List[str] = Field(default_factory=list)
+    submitted_at: Optional[datetime] = None
+    created_at: datetime
+
+class SubmissionResponse(BaseModel):
+    id: str
+    task_id: str
+    title: str
+    notes: Optional[str] = None
+    status: SubmissionStatus
+    evidences: List[EvidenceResponse]
+    submitted_at: Optional[datetime] = None
+    created_at: datetime

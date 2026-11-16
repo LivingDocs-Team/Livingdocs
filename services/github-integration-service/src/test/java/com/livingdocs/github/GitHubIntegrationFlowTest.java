@@ -21,6 +21,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.context.TestPropertySource;
 
 import java.util.List;
 
@@ -40,6 +41,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@TestPropertySource(properties = {
+        "github.client-id=test-client-id",
+        "github.client-secret=test-client-secret",
+        "github.app-slug=livingdocs-test"
+})
 @Import(com.livingdocs.github.security.InternalServiceTestMvcConfig.class)
 class GitHubIntegrationFlowTest {
 
@@ -73,7 +79,7 @@ class GitHubIntegrationFlowTest {
         assertThat(rawToken).isNotEqualTo("ghu_token_1");
 
         // Liệt kê repo có thể thêm
-        when(gitHubClient.listAccessibleRepositories("ghu_token_1")).thenReturn(List.of(REPO_A, REPO_B));
+        when(gitHubClient.listUserRepositories("ghu_token_1")).thenReturn(List.of(REPO_A, REPO_B));
         mvc.perform(get("/api/github/repos/available").header("X-User-Id", user))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(2));
@@ -163,7 +169,7 @@ class GitHubIntegrationFlowTest {
     void revokedTokenOnGitHub_marksConnectionInvalid() throws Exception {
         String user = "user-invalid";
         connect(user, "code-2");
-        when(gitHubClient.listAccessibleRepositories(anyString()))
+        when(gitHubClient.listUserRepositories(anyString()))
                 .thenThrow(new GitHubApiException("401 Bad credentials", true));
 
         mvc.perform(get("/api/github/repos/available").header("X-User-Id", user))
