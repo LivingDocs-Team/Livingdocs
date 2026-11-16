@@ -350,7 +350,7 @@ class GitHubWebhookIngestionTest {
         connection.setStatus(ConnectionStatus.ACTIVE);
         connectionRepository.save(connection);
 
-        when(gitHubClient.listAccessibleRepositories(TOKEN)).thenReturn(List.of(BILLING));
+        when(gitHubClient.listUserRepositories(TOKEN)).thenReturn(List.of(BILLING));
         String body = mvc.perform(asUser(post("/api/workspaces/ws-" + user + "/repositories"), user)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"githubRepoIds\":[" + BILLING.id() + "]}"))

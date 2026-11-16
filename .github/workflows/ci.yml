@@ -280,6 +280,9 @@ jobs:
     env:
       TOKEN_ENCRYPTION_KEY: "ci-validation-placeholder-only"
       GITHUB_INTEGRATION_INTERNAL_SECRET: "ci-validation-placeholder-only"
+      # compose.yaml requires the sign-in OAuth App credentials (no default), like the two variables above
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID: "ci-validation-placeholder-only"
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_SECRET: "ci-validation-placeholder-only"
 
     steps:
       - name: Checkout source code
