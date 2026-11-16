@@ -2,6 +2,7 @@ package com.livingdocs.github.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.livingdocs.github.dto.DriftAnalysisRequest;
+import com.livingdocs.github.dto.DriftResolutionRequest;
 import com.livingdocs.github.service.DriftAnalysisService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -11,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -81,6 +83,20 @@ public class DriftAnalysisController {
             @RequestParam(name = "minSeverity", required = false) String minSeverity) {
         return ResponseEntity.ok().contentType(MediaType.parseMediaType("text/markdown"))
                 .body(driftService.getReportMarkdown(userId, id, reportId, minSeverity));
+    }
+
+    /** LD-346: acknowledge, resolve, dismiss (with a reason) or reopen one finding. */
+    @PutMapping(path = "/api/repositories/{id}/drift/reports/{reportId}/findings/{findingId}/resolution",
+            consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    @Operation(summary = "Review and resolve one drift finding",
+            description = "status: open | acknowledged | resolved | dismissed; dismissing needs a note.")
+    public JsonNode resolveFinding(
+            @RequestHeader(USER_HEADER) String userId,
+            @PathVariable UUID id,
+            @PathVariable String reportId,
+            @PathVariable String findingId,
+            @RequestBody DriftResolutionRequest request) {
+        return driftService.resolveFinding(userId, id, reportId, findingId, request);
     }
 
     @GetMapping(path = "/api/documentation/drift/severity-rules", produces = MediaType.APPLICATION_JSON_VALUE)

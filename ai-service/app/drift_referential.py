@@ -24,6 +24,7 @@ import re
 from typing import Dict, List, Optional, Tuple
 
 from .drift_affected import FILE_REMOVED, FILE_RENAMED, LINE_REFS, Hit, Term, excerpt
+from .drift_compare import acknowledged
 from .drift_changes import numbered
 from .drift_models import DiffHunk, DocMatch, DriftType, EntityChangeType
 from .drift_rules import Classified, code, private
@@ -156,6 +157,9 @@ def classify(hit: Hit) -> Optional[Classified]:
             + " (regenerating the section does both).",
             certainty=1.0)
 
+    if t.file_event in (FILE_REMOVED, FILE_RENAMED) and acknowledged(
+            hit.doc, hit.matches, f.path if t.file_event == FILE_RENAMED else None):
+        return None      # LD-347: the documentation already says it was deleted / moved
     if t.file_event == FILE_REMOVED:
         kind = _file_kind(hit, removed=True)
         if hit.documents_file:
@@ -190,6 +194,8 @@ def classify(hit: Hit) -> Optional[Classified]:
 
     if c is None or not hit.matches:
         return None
+    if acknowledged(hit.doc, hit.matches, c.name if c.change == EntityChangeType.renamed else None):
+        return None      # LD-347: "`x` was removed", "`a` was renamed to `b`"
     endpoint = c.kind == "endpoint"
     base = "endpoint_gone" if endpoint else "entity_gone"
     adjust = [("private_name", [])] if private(c.name) else []

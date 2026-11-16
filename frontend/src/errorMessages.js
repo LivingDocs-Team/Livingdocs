@@ -35,6 +35,7 @@ const MESSAGES_BY_CODE = {
   // Documentation drift (LD-145, LD-156)
   PULL_REQUEST_NOT_FOUND: 'The pull request was not found in this repository. Check the number and try again.',
   DRIFT_REQUEST_INVALID: 'The pull request could not be checked for documentation drift.',
+  DRIFT_RESOLUTION_INVALID: 'The finding could not be updated. A reason is required to dismiss it.',
   GITHUB_INVALID_RESPONSE: 'GitHub returned an incomplete pull request. Please try again later.',
 };
 
