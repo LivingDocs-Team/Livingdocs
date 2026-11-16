@@ -105,6 +105,8 @@ class FakeApi:
                 "fullName": "acme/shop", "defaultBranch": "main", "privateRepo": False,
                 "status": "CONNECTED", "lastSyncedAt": "2026-10-24T08:00:00Z",
             }])
+        if (request.method, path) == ("GET", f"/api/repositories/{REPOSITORY_ID}/documentation"):
+            return route.fulfill(status=200, json=[])
         if (request.method, path) == ("GET", "/api/documentation/templates"):
             return route.fulfill(status=200, json=[{
                 "id": "default", "name": "Standard technical docs", "description": "",

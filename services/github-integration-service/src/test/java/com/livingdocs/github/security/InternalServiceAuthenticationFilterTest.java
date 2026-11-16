@@ -64,6 +64,19 @@ class InternalServiceAuthenticationFilterTest {
         assertThat(continued).isTrue();
     }
 
+    /** LD-68: GitHub gọi webhook trực tiếp; controller tự kiểm chữ ký X-Hub-Signature-256. */
+    @Test
+    void allowsGitHubWebhookPostWithoutServiceCredential() throws Exception {
+        InternalServiceAuthenticationFilter filter = new InternalServiceAuthenticationFilter(TEST_CREDENTIAL);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/github/webhook");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        AtomicBoolean continued = new AtomicBoolean();
+
+        filter.doFilter(request, response, (req, res) -> continued.set(true));
+
+        assertThat(continued).isTrue();
+    }
+
     private void assertRejected(String authorization) throws Exception {
         InternalServiceAuthenticationFilter filter = new InternalServiceAuthenticationFilter(TEST_CREDENTIAL);
         MockHttpServletRequest request = apiRequest();
