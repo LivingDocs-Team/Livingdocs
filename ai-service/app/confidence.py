@@ -130,7 +130,8 @@ def score_entity(ent: Entity, doc: Optional[ItemDoc], catalog: EvidenceCatalog,
         described = 1.0 if (doc is not None and doc.summary.strip()) else 0.0
         found, unknown = catalog.resolve(doc.evidence if doc else [])
         found_ids = {e.id for e in found}
-        grounding = 1.0 if (own and own.id in found_ids) else (0.5 if found else 0.0)
+        own_ids = set(catalog.own_ids.get(ent.key, [own.id] if own else []))
+        grounding = 1.0 if own_ids & found_ids else (0.5 if found else 0.0)
         self_score = doc.confidence if (doc is not None and doc.confidence is not None) else DEFAULT_SELF
         penalty = citation_penalty(len(unknown))
         score = (W_INPUT * q + W_GROUND * grounding + W_DESCRIBED * described
