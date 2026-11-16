@@ -159,7 +159,7 @@ RESTART_SCRIPT = textwrap.dedent('''
     c = TestClient(app)
     H = {"Authorization": "Bearer %s", "X-User-Id": "73"}
     if sys.argv[1] == "write":
-        job = c.post("/generate", json={"scope": "file", "target": "a.py", "files": [{
+        job = c.post("/generate", headers=H, json={"scope": "file", "target": "a.py", "files": [{
             "path": "a.py", "language": "python", "status": "ok",
             "functions": [{"name": "f", "parameters": [], "source": "def f():\\n    return 1"}]}]}).json()
         doc = c.post("/internal/documents/from-job", headers=H, json={"job_id": job["id"]}).json()
