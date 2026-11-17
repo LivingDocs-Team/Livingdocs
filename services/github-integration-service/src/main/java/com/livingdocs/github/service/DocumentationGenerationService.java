@@ -1,11 +1,14 @@
 package com.livingdocs.github.service;
 
+import java.time.Instant;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.time.Instant;
+import java.util.function.Supplier;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -16,40 +19,81 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.livingdocs.github.dto.DocumentationGenerationRequest;
+import com.livingdocs.github.entity.ChangeTriggerSource;
 import com.livingdocs.github.exception.ApiException;
 import com.livingdocs.github.sync.AnalysisInput;
 import com.livingdocs.github.sync.RepositorySnapshot;
 import com.livingdocs.github.sync.RepositorySyncException;
 import com.livingdocs.github.sync.SyncOptions;
 
-
 @Service
 public class DocumentationGenerationService {
+
+    record ChangeLogOverride(Set<String> authorities, boolean suppressChangeLog) {}
+
+    private static final ThreadLocal<ChangeLogOverride> CHANGE_LOG_OVERRIDE = new ThreadLocal<>();
 
     private final RepositorySyncService repositorySyncService;
     private final RestClient analyzerClient;
     private final RestClient aiServiceClient;
     private final DocumentationCodeRelationshipService relationshipService;
+    private final DocumentationChangeLogService changeLogService;
     private final ConcurrentMap<String, String> jobOwners = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, UUID> jobRepositories = new ConcurrentHashMap<>();
 
     public DocumentationGenerationService(
             RepositorySyncService repositorySyncService,
             @Qualifier("codeAnalyzerRestClient") RestClient analyzerClient,
             @Qualifier("aiServiceRestClient") RestClient aiServiceClient,
             DocumentationCodeRelationshipService relationshipService) {
+        this(repositorySyncService, analyzerClient, aiServiceClient, relationshipService, null);
+    }
+
+    @Autowired
+    public DocumentationGenerationService(
+            RepositorySyncService repositorySyncService,
+            @Qualifier("codeAnalyzerRestClient") RestClient analyzerClient,
+            @Qualifier("aiServiceRestClient") RestClient aiServiceClient,
+            DocumentationCodeRelationshipService relationshipService,
+            DocumentationChangeLogService changeLogService) {
         this.repositorySyncService = repositorySyncService;
         this.analyzerClient = analyzerClient;
         this.aiServiceClient = aiServiceClient;
         this.relationshipService = relationshipService;
+        this.changeLogService = changeLogService;
     }
 
-    /**
-     * Analyze the latest authorized repository snapshot and start an AI documentation job.
-     * The snapshot is kept in memory only: after a restart the repository is synchronized again (LD-77).
-     */
+    static void runWithChangeLogOverride(Set<String> authorities, boolean suppressChangeLog, Runnable action) {
+        ChangeLogOverride previous = CHANGE_LOG_OVERRIDE.get();
+        CHANGE_LOG_OVERRIDE.set(new ChangeLogOverride(authorities, suppressChangeLog));
+        try {
+            action.run();
+        } finally {
+            if (previous == null) {
+                CHANGE_LOG_OVERRIDE.remove();
+            } else {
+                CHANGE_LOG_OVERRIDE.set(previous);
+            }
+        }
+    }
+
+    static <T> T callWithChangeLogOverride(Set<String> authorities, boolean suppressChangeLog, Supplier<T> action) {
+        ChangeLogOverride previous = CHANGE_LOG_OVERRIDE.get();
+        CHANGE_LOG_OVERRIDE.set(new ChangeLogOverride(authorities, suppressChangeLog));
+        try {
+            return action.get();
+        } finally {
+            if (previous == null) {
+                CHANGE_LOG_OVERRIDE.remove();
+            } else {
+                CHANGE_LOG_OVERRIDE.set(previous);
+            }
+        }
+    }
+
     public JsonNode generate(String userId, UUID repositoryId,
             DocumentationGenerationRequest request) {
         return generate(userId, repositoryId, request, null);
@@ -138,9 +182,11 @@ public class DocumentationGenerationService {
             throw integrationFailure("AI_SERVICE_INVALID_RESPONSE",
                     "The AI service returned an invalid job response.");
         }
-        jobOwners.put(job.path("id").asText(), userId);
+        String jobId = job.path("id").asText();
+        jobOwners.put(jobId, userId);
+        jobRepositories.put(jobId, repositoryId);
         UUID documentId = relationshipService.recordGeneration(userId, repositoryId,
-                job.path("id").asText(), analysis, snapshot);
+                jobId, analysis, snapshot);
         if (job instanceof ObjectNode jobObject) jobObject.put("documentId", documentId.toString());
         return job;
     }
@@ -184,15 +230,18 @@ public class DocumentationGenerationService {
                 "The AI service could not return the documentation report.");
     }
 
-    public JsonNode saveOwnedDocument(String userId, java.util.Set<String> authorities,
+    public JsonNode saveOwnedDocument(String userId, Set<String> authorities,
             String jobId, String title) {
         if (authorities == null || !authorities.contains("DOCUMENT_CREATE")) {
             throw ApiException.forbidden("Missing permission: DOCUMENT_CREATE");
         }
         requireJobOwner(userId, jobId);
+        String primaryRole = resolvePrimaryRole(authorities);
         try {
             JsonNode document = aiServiceClient.post().uri("/internal/documents/from-job")
                     .header("X-User-Id", userId)
+                    .header("X-User-Roles", primaryRole)
+                    .header("X-Trigger-Source", ChangeTriggerSource.AI_GENERATION.name())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(java.util.Map.of("job_id", jobId, "title", title == null ? "" : title))
                     .retrieve().body(JsonNode.class);
@@ -200,6 +249,23 @@ public class DocumentationGenerationService {
                     || !userId.equals(document.path("owner_user_id").asText())) {
                 throw integrationFailure("AI_SERVICE_INVALID_RESPONSE",
                         "The AI service did not return a document owned by the authenticated user.");
+            }
+            if (changeLogService != null) {
+                String docId = document.path("id").asText();
+                String docTitle = document.path("title").asText(title == null ? docId : title);
+                changeLogService.recordChange(
+                        docId,
+                        jobRepositories.get(jobId),
+                        1,
+                        "CREATED",
+                        "Saved generated documentation \"" + docTitle + "\" from job " + jobId,
+                        userId,
+                        null,
+                        authorities,
+                        ChangeTriggerSource.AI_GENERATION,
+                        "DRAFT",
+                        jobId
+                );
             }
             return document;
         } catch (RestClientResponseException e) {
@@ -276,13 +342,6 @@ public class DocumentationGenerationService {
         }
     }
 
-    /**
-     * Verify whether the repository source has changed since the document
-     * version was generated.
-     *
-     * A fresh GitHub synchronization is required; cached snapshots must not
-     * be used for this verification.
-     */
     public JsonNode verifySourceSnapshot(String ownerUserId, JsonNode evidence) {
         ObjectNode result = evidence.deepCopy();
         ObjectNode verification = JsonNodeFactory.instance.objectNode();
@@ -419,18 +478,43 @@ public class DocumentationGenerationService {
         }
     }
 
-
     public JsonNode editOwnedDocument(String userId, String documentId, int expectedVersion,
             String content, String note) {
+        ChangeLogOverride override = CHANGE_LOG_OVERRIDE.get();
+        Set<String> authorities = override != null ? override.authorities() : Set.of();
+        boolean suppressLog = override != null && override.suppressChangeLog();
+        String primaryRole = resolvePrimaryRole(authorities);
         try {
             ObjectNode request = JsonNodeFactory.instance.objectNode().put("content", content)
                     .put("expected_version", expectedVersion);
             if (note != null) request.put("note", note);
             JsonNode version = aiServiceClient.put().uri("/internal/documents/{id}/content", documentId)
-                    .header("X-User-Id", userId).contentType(MediaType.APPLICATION_JSON)
+                    .header("X-User-Id", userId)
+                    .header("X-User-Roles", primaryRole)
+                    .header("X-Trigger-Source", ChangeTriggerSource.MANUAL_EDIT.name())
+                    .contentType(MediaType.APPLICATION_JSON)
                     .body(request).retrieve().body(JsonNode.class);
             if (version == null || !version.isObject()) {
                 throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid version.");
+            }
+            if (!suppressLog && changeLogService != null) {
+                int newVersion = version.path("number").asInt(expectedVersion + 1);
+                String summary = (note != null && !note.isBlank())
+                        ? note
+                        : "Updated documentation content to version " + newVersion;
+                changeLogService.recordChange(
+                        documentId,
+                        null,
+                        newVersion,
+                        "CONTENT_UPDATED",
+                        summary,
+                        userId,
+                        null,
+                        authorities,
+                        ChangeTriggerSource.MANUAL_EDIT,
+                        "DRAFT",
+                        null
+                );
             }
             return version;
         } catch (RestClientResponseException e) {
@@ -445,6 +529,10 @@ public class DocumentationGenerationService {
 
     public void resolveDocumentVersion(String actorUserId, String ownerUserId, String documentId,
             int version, String decision, String note) {
+        ChangeLogOverride override = CHANGE_LOG_OVERRIDE.get();
+        Set<String> authorities = override != null ? override.authorities() : Set.of();
+        boolean suppressLog = override != null && override.suppressChangeLog();
+        String primaryRole = resolvePrimaryRole(authorities);
         try {
             ObjectNode request = JsonNodeFactory.instance.objectNode()
                     .put("version", version).put("decision", decision);
@@ -452,8 +540,29 @@ public class DocumentationGenerationService {
             aiServiceClient.post().uri("/internal/documents/{id}/review-decision", documentId)
                     .header("X-User-Id", actorUserId)
                     .header("X-Document-Owner-Id", ownerUserId)
+                    .header("X-User-Roles", primaryRole)
+                    .header("X-Trigger-Source", ChangeTriggerSource.REVIEW_WORKFLOW.name())
                     .contentType(MediaType.APPLICATION_JSON).body(request)
                     .retrieve().toBodilessEntity();
+
+            if (!suppressLog && changeLogService != null) {
+                String summary = (note != null && !note.isBlank())
+                        ? note
+                        : "Version " + version + " marked as " + decision;
+                changeLogService.recordChange(
+                        documentId,
+                        null,
+                        version,
+                        "WORKFLOW_" + decision,
+                        summary,
+                        actorUserId,
+                        null,
+                        authorities,
+                        ChangeTriggerSource.REVIEW_WORKFLOW,
+                        decision,
+                        "v" + version
+                );
+            }
         } catch (RestClientResponseException e) {
             if (e.getStatusCode().value() == 404) throw ApiException.notFound("Owned document version not found.");
             if (e.getStatusCode().value() == 409) throw new ApiException(HttpStatus.CONFLICT,
@@ -463,12 +572,17 @@ public class DocumentationGenerationService {
             throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not record the document decision.");
         }
     }
-        public JsonNode rollbackDocumentVersion(
+
+    public JsonNode rollbackDocumentVersion(
             String actorUserId,
             String ownerUserId,
             String documentId,
             int sourceVersion,
             String reason) {
+        ChangeLogOverride override = CHANGE_LOG_OVERRIDE.get();
+        Set<String> authorities = override != null ? override.authorities() : Set.of();
+        boolean suppressLog = override != null && override.suppressChangeLog();
+        String primaryRole = resolvePrimaryRole(authorities);
         try {
             ObjectNode request = JsonNodeFactory.instance.objectNode()
                     .put("source_version", sourceVersion)
@@ -478,6 +592,8 @@ public class DocumentationGenerationService {
                     .uri("/internal/documents/{id}/rollback", documentId)
                     .header("X-User-Id", actorUserId)
                     .header("X-Document-Owner-Id", ownerUserId)
+                    .header("X-User-Roles", primaryRole)
+                    .header("X-Trigger-Source", ChangeTriggerSource.ROLLBACK.name())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(request)
                     .retrieve()
@@ -488,6 +604,23 @@ public class DocumentationGenerationService {
                 throw integrationFailure(
                         "AI_SERVICE_INVALID_RESPONSE",
                         "The AI service returned an invalid rollback version.");
+            }
+
+            if (!suppressLog && changeLogService != null) {
+                int newVersion = version.path("number").asInt(0);
+                changeLogService.recordChange(
+                        documentId,
+                        null,
+                        newVersion > 0 ? newVersion : null,
+                        "ROLLED_BACK",
+                        "Rolled back to version " + sourceVersion + (reason != null ? ": " + reason : ""),
+                        actorUserId,
+                        null,
+                        authorities,
+                        ChangeTriggerSource.ROLLBACK,
+                        "PENDING_STAFF_REVIEW",
+                        "v" + sourceVersion
+                );
             }
 
             return version;
@@ -515,6 +648,14 @@ public class DocumentationGenerationService {
                     "The AI service could not create the rollback version.");
         }
     }
+
+    private String resolvePrimaryRole(Set<String> authorities) {
+        if (changeLogService != null) {
+            return changeLogService.resolvePrimaryRole(authorities);
+        }
+        return "DEVELOPER";
+    }
+
     private JsonNode getAiJson(String path, String code, String message) {
         try {
             JsonNode result = aiServiceClient.get().uri(path).retrieve().body(JsonNode.class);
