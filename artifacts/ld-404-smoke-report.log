@@ -1,0 +1,53 @@
+﻿
+=== LD-404 Release Smoke & Deployment Verification (2026-11-17T12:08:39.5468710+07:00) ===
+1. Validate compose configuration
+  [PASS] compose.yaml is valid
+2. Clean deployment: tearing down existing containers & volumes
+  [PASS] Removed old containers and volumes
+3. Starting stack with docker compose up --build -d
+4. Waiting for all services to become healthy
+  [PASS] backend-db is healthy/running
+  [PASS] github-db is healthy/running
+  [PASS] code-analyzer is healthy/running
+  [PASS] ai-service is healthy/running
+  [PASS] github-integration is healthy/running
+  [PASS] backend is healthy/running
+  [PASS] frontend is healthy/running
+5. Verifying database migrations
+  [PASS] github-db Flyway migrations applied (9 successful versions)
+  [PASS] github-db has 0 failed Flyway migrations
+  [PASS] backend-db schema initialized (8 tables in cnpm)
+6. Verifying service health endpoints
+  [PASS] code-analyzer /health (:8000)
+  [PASS] ai-service /health (:8001)
+  [PASS] github-integration /actuator/health (:8082)
+  [PASS] backend /actuator/health (:8080)
+  [PASS] frontend serves / (:3000)
+7. Running Pre-Restart E2E Smoke Test (Generation & Review)
+  [PASS] GET /api/auth/csrf via frontend proxy returned 200
+  [PASS] Acquired XSRF-TOKEN from BFF
+  [PASS] Registered smoke user 'smoke_20261117051014@example.com' (HTTP 201): {'role': 'DEVELOPER', 'email': 'smoke_20261117051014@example.com', 'message': 'Registration successful', 'id': 1, 'firstName': 'Release', 'lastName': 'Smoke'}
+  [PASS] Logged in smoke user 'smoke_20261117051014@example.com' (HTTP 200): {'message': 'Login successful', 'email': 'smoke_20261117051014@example.com', 'firstName': 'Release', 'role': 'DEVELOPER', 'id': 1, 'username': 'smoke_20261117051014', 'lastName': 'Smoke'}
+  [PASS] Verified authenticated session via GET /api/auth/me (HTTP 200)
+  [PASS] Code Analyzer analyzed sample file (HTTP 200)
+  [PASS] Started generation job (HTTP 202): {'id': '38a06967e3c546f5a7c28d27acf67616', 'scope': 'repository', 'target': 'smoke/repo-20261117051014', 'template_id': 'default', 'template_name': 'Standard technical docs', 'template_sections': ['Overview', 'Classes', 'Functions', 'API Endpoints'], 'status': 'pending', 'progress': 0.0, 'message': 'Queued', 'files_total': 1, 'files_done': 0, 'file_results': [], 'warnings': [], 'confidence': None, 'confidence_level': None, 'result': None, 'error': None, 'created_at': '2026-11-17T05:10:30.846713Z', 'updated_at': '2026-11-17T05:10:30.846717Z'}
+  [PASS] Generation job 38a06967e3c546f5a7c28d27acf67616 completed
+  [PASS] Saved generated document v1 (HTTP 201): {'id': '8b1cec4eb7dc4305bccb69ab6edde229', 'title': 'Smoke Doc 20261117051014', 'target': 'smoke/repo-20261117051014', 'scope': 'repository', 'template_id': 'default', 'output_language': 'en', 'source_job_id': '38a06967e3c546f5a7c28d27acf67616', 'owner_user_id': '1', 'current_version': 0, 'pending_version': 1, 'versions_total': 1, 'created_at': '2026-11-17T05:10:34.917884Z', 'updated_at': '2026-11-17T05:10:34.917889Z'}
+  [PASS] Created document version 2 in review flow (HTTP 200)
+  [PASS] Approved document version 2 (HTTP 204): 
+  [PASS] Verified grounding evidence preserved on v2 (HTTP 200)
+8. Restarting application services for recovery verification
+  [PASS] backend-db is healthy/running
+  [PASS] github-db is healthy/running
+  [PASS] code-analyzer is healthy/running
+  [PASS] ai-service is healthy/running
+  [PASS] github-integration is healthy/running
+  [PASS] backend is healthy/running
+  [PASS] frontend is healthy/running
+9. Running Post-Restart Persistence Verification
+  [PASS] User 'smoke_20261117051014@example.com' persisted in backend-db across restart (HTTP 200)
+  [PASS] Document '8b1cec4eb7dc4305bccb69ab6edde229' v2 persisted across ai-service restart
+  [PASS] Reviewed Markdown content persisted on ai-templates volume
+  [PASS] In-memory job '38a06967e3c546f5a7c28d27acf67616' reset after restart as designed (HTTP 404)
+=== ALL LD-404 RELEASE SMOKE & PERSISTENCE CHECKS PASSED ===
+Recorded results saved to: artifacts\ld-404-smoke-report.log
