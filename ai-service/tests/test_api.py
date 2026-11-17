@@ -1,3 +1,4 @@
+import logging
 import os
 
 os.environ.pop("ANTHROPIC_API_KEY", None)  # tests use the offline generator
@@ -42,6 +43,25 @@ def test_generate_file_docs():
     for expected in ["UserService", "get_user", "user_id", "hash_password",
                      "GET /users/{id}", "**Giá trị trả về:** `User`"]:
         assert expected in md
+
+
+def test_failed_job_logs_state_without_source_details(caplog):
+    with caplog.at_level(logging.INFO, logger="uvicorn.error.jobs"):
+        response = client.post("/generate", json={
+            "scope": "file", "target": SAMPLE_FILE["path"],
+            "files": [{**SAMPLE_FILE, "status": "invalid", "error": "Parser failed"}],
+        })
+    assert response.status_code == 202
+    job_id = response.json()["id"]
+    job = client.get(f"/jobs/{job_id}").json()
+    assert job["status"] == "failed"
+    assert job["error"] == "No documentation could be generated for any file"
+    assert [record.getMessage() for record in caplog.records
+            if record.name == "uvicorn.error.jobs"] == [
+        f"Documentation job {job_id}: pending",
+        f"Documentation job {job_id}: running",
+        f"Documentation job {job_id}: failed",
+    ]
 
 
 def test_repository_scope_has_overview():

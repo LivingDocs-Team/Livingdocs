@@ -211,6 +211,39 @@ class DocumentWorkflowServiceTest {
     }
 
     @Test
+    void newlyGeneratedDocumentCanBeSubmittedForTheFirstTime() throws Exception {
+        // LD-402: the AI service creates an owned document with no accepted version yet
+        // (current_version 0) and the generated proposal as pending_version 1.
+        DocumentWorkflow workflow = new DocumentWorkflow("doc-1", "Document", OWNER);
+        ReflectionTestUtils.setField(workflow, "id", ID);
+        when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
+        when(workflows.saveAndFlush(workflow)).thenReturn(workflow);
+        when(documents.getDocument(OWNER, "doc-1")).thenReturn(new ObjectMapper().readTree(
+                "{\"owner_user_id\":\"73\",\"current_version\":0,\"pending_version\":1}"));
+
+        var submitted = service.submit(OWNER, Set.of("DOCUMENT_SUBMIT"), ID);
+
+        assertThat(submitted.status()).isEqualTo(DocumentWorkflowStatus.PENDING_STAFF_REVIEW);
+        assertThat(submitted.submittedDocumentVersion()).isEqualTo(1);
+        verify(workflows).saveAndFlush(workflow);
+    }
+
+    @Test
+    void documentWithoutAnyVersionCannotBeSubmitted() throws Exception {
+        DocumentWorkflow workflow = new DocumentWorkflow("doc-1", "Document", OWNER);
+        ReflectionTestUtils.setField(workflow, "id", ID);
+        when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
+        when(documents.getDocument(OWNER, "doc-1")).thenReturn(new ObjectMapper().readTree(
+                "{\"owner_user_id\":\"73\",\"current_version\":0,\"pending_version\":null}"));
+
+        assertThatThrownBy(() -> service.submit(OWNER, Set.of("DOCUMENT_SUBMIT"), ID))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(409));
+        verify(workflows, never()).saveAndFlush(any());
+        assertThat(workflow.getStatus()).isEqualTo(DocumentWorkflowStatus.DRAFT);
+    }
+
+    @Test
     void staffClaimIsExclusiveAndCannotBeRepeatedAfterClaim() {
         DocumentWorkflow workflow = submittedWorkflow();
         when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
@@ -587,6 +620,7 @@ void nonManagerCannotReadGroundingEvidence() {
                 .containsExactly("SUBMITTED", "APPROVED");
         assertThat(history.get(0).actorRole()).isNull();
         assertThat(history.get(1).actorUserId()).isEqualTo(MANAGER);
+        assertThat(history.get(1).workflowId()).isEqualTo(ID);
         assertThat(history.get(1).actorRole()).isEqualTo("MANAGER");
         assertThat(history.get(1).previousStatus()).isEqualTo("PENDING_MANAGER_APPROVAL");
         assertThat(history.get(1).newStatus()).isEqualTo("APPROVED");

@@ -2,6 +2,7 @@ package com.livingdocs.github.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.livingdocs.github.dto.DriftAnalysisRequest;
+import com.livingdocs.github.dto.DriftResolutionRequest;
 import com.livingdocs.github.service.DriftAnalysisService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -107,5 +109,25 @@ class DriftAnalysisControllerTest {
         mockMvc.perform(get("/api/documentation/drift/severity-rules").header("X-User-Id", "user-1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.levels[0].min_score").value(75));
+    }
+
+    @Test
+    void resolvesOneFinding() throws Exception {
+        DriftResolutionRequest request = new DriftResolutionRequest("resolved", "README updated in #43");
+        when(driftService.resolveFinding("user-1", REPOSITORY_ID, "report-1", "F2", request))
+                .thenReturn(JSON.readTree("""
+                        {"id":"F2","resolution":{"status":"resolved","actor":"user-1","note":"README updated in #43"}}
+                        """));
+
+        mockMvc.perform(put("/api/repositories/" + REPOSITORY_ID + "/drift/reports/report-1/findings/F2/resolution")
+                        .header("X-User-Id", "user-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"status":"resolved","note":"README updated in #43"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.resolution.status").value("resolved"));
+
+        verify(driftService).resolveFinding("user-1", REPOSITORY_ID, "report-1", "F2", request);
     }
 }

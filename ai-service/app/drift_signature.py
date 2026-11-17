@@ -173,28 +173,49 @@ def finding_kind(entity_kind: str, aspects: Sequence[str], changes: Sequence[Par
     return "signature_changed"
 
 
-def stale_details(doc, near: List[DocMatch], changes: Sequence[ParameterChange],
-                  window: int) -> List[DocMatch]:
-    """What the documentation still shows after the entity is mentioned: removed / renamed
-    parameter names, parameters with their old type or default (on the same line)."""
-    out: List[DocMatch] = []
-    lines = doc.lines
-    starts = sorted({m.line - 1 for m in near})
+def _unquote(value: str) -> str:
+    v = value.strip()
+    return v[1:-1] if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"" else v
 
-    def scan(name: str, extra: Optional[str], kind: str, note: str) -> None:
+
+def _finder(doc, near: List[DocMatch], window: int):
+    """find(name, extra): first line of the entity's section(s) (LD-347: up to the next heading)
+    where `name` is written in code and `extra` (a type or default, quotes optional) follows it on
+    the same line; None when not found."""
+    lines = doc.lines
+    sections = [doc.section(s, window) for s in sorted({m.line - 1 for m in near})]
+
+    def find(name: str, extra: Optional[str] = None, need_code: bool = True) -> Optional[int]:
         pat = re.compile(r"(?<![\w$])" + re.escape(name) + r"(?![\w$])")
-        xpat = re.compile(r"(?<![\w$.])" + re.escape(extra) + r"(?![\w$])") if extra else None
-        for start in starts:
-            for i in range(start, min(len(lines), start + window)):
+        xpat = None
+        if extra:
+            xpat = re.compile(r"(?<![\w$.])['\"`]?" + re.escape(_unquote(extra)) + r"['\"`]?(?![\w$])")
+        for rows in sections:
+            for i in rows:
                 m = pat.search(lines[i])
-                if not m or not doc.in_code(i, m.start()):
+                if not m or (need_code and not doc.in_code(i, m.start())):
                     continue
                 if xpat is not None and not xpat.search(lines[i][m.end():]):
                     continue
-                out.append(DocMatch(term=name if extra is None else f"{name} {extra}", target=name,
-                                    line=i + 1, excerpt=lines[i].strip()[:200], in_code=True,
-                                    kind=kind, note=note))
-                return
+                return i
+        return None
+
+    return find
+
+
+def stale_details(doc, near: List[DocMatch], changes: Sequence[ParameterChange],
+                  window: int) -> List[DocMatch]:
+    """What the documentation still shows in the entity's section: removed / renamed parameter
+    names, parameters with their old type or default (on the same line)."""
+    out: List[DocMatch] = []
+    find = _finder(doc, near, window)
+
+    def scan(name: str, extra: Optional[str], kind: str, note: str) -> None:
+        i = find(name, extra)
+        if i is not None:
+            out.append(DocMatch(term=name if extra is None else f"{name} {extra}", target=name,
+                                line=i + 1, excerpt=doc.lines[i].strip()[:200], in_code=True,
+                                kind=kind, note=note))
 
     for c in changes:
         if c.change in (ParameterChangeKind.removed, ParameterChangeKind.renamed):
@@ -208,6 +229,36 @@ def stale_details(doc, near: List[DocMatch], changes: Sequence[ParameterChange],
             scan(c.name, c.old_default, "default",
                  f"default is now `{c.new_default}`" if c.new_default else "no default any more")
     return sorted({(m.line, m.term): m for m in out}.values(), key=lambda m: m.line)
+
+
+CHECKABLE = {"parameters", "return_type", "fields"}
+
+
+def documented_as_new(doc, near: List[DocMatch], change, window: int) -> bool:
+    """LD-347: the entity's section already shows the code *after* the change (the documentation
+    was updated in the same Pull Request): every new parameter name, new type, new default and new
+    return type is there. Only for what can be checked exactly; never for an HTTP method or
+    request / response contract change."""
+    if set(change.aspects) - CHECKABLE:
+        return False
+    if not change.parameter_changes and "return_type" not in change.aspects:
+        return False
+    find = _finder(doc, near, window)
+    for p in change.parameter_changes:
+        if p.change in (ParameterChangeKind.added, ParameterChangeKind.renamed):
+            if find(p.name) is None:
+                return False
+        elif p.change == ParameterChangeKind.type_changed and p.new_type:
+            if find(p.name, p.new_type) is None:
+                return False
+        elif p.change in (ParameterChangeKind.default_changed, ParameterChangeKind.default_added) \
+                and p.new_default:
+            if find(p.name, p.new_default) is None:
+                return False
+    if "return_type" in change.aspects and change.new_return_type:
+        if find(change.new_return_type, need_code=False) is None:
+            return False
+    return True
 
 
 def describe(c: ParameterChange) -> str:
@@ -241,6 +292,8 @@ def classify(hit):
     details = [m for m in stale_details(hit.doc, hit.matches, c.parameter_changes, PARAM_WINDOW)
                if (m.line, m.term) not in seen]
     stale = hit.param_matches + details
+    if not stale and documented_as_new(hit.doc, hit.matches, c, PARAM_WINDOW):
+        return None      # LD-347: the documentation already shows the new signature
 
     adjust = []
     if endpoint:

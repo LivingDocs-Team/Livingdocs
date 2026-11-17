@@ -116,6 +116,9 @@ class VersionSummary(BaseModel):
     created_at: datetime = Field(default_factory=now)
     decided_by: Optional[str] = None        # who accepted / dismissed it
     decided_at: Optional[datetime] = None
+    # LD-402: an edit or a rollback keeps the generation evidence (evidence_report, review_report,
+    # source_snapshot) of the version it was made from; this is that version (None: its own)
+    evidence_from_version: Optional[int] = None
 
 
 class DocumentVersion(VersionSummary):
