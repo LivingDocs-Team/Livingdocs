@@ -1209,7 +1209,10 @@ export default function DocumentationManagement({ userId }) {
           workflowsError={workflowsError}
         />
 
-        <StaffReviewQueue userId={userId} />
+        {/* Working the Staff queue needs matrix row #10 U (Staff); a Developer only reads review feedback (R). */}
+        <Can screen="staffReview" action="U">
+          <StaffReviewQueue userId={userId} />
+        </Can>
 
         <ManagerApprovalQueue userId={userId} />
 

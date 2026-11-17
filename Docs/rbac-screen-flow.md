@@ -2,7 +2,7 @@
 
 Tài liệu này mô tả cách frontend hiển thị menu, màn hình và nút theo 5 vai trò, và cách thêm vai trò / màn hình / quyền mới. Mã nguồn nằm trong `frontend/src/rbac/`.
 
-> **Phạm vi hiện tại: chỉ frontend.** Ẩn menu, chặn URL và ẩn nút chỉ giúp người dùng không thấy chức năng ngoài quyền. Server vẫn phải từ chối request; hiện backend mới kiểm tra quyền cho các API workflow (`DOCUMENT_*`, `DocumentWorkflowService`). Việc kiểm tra cùng ma trận ở backend là việc riêng, cần nhóm duyệt vì thuộc security config (xem mục 7).
+> **Phạm vi:** frontend (menu, chặn URL, ẩn nút) và backend (BFF chặn theo cùng ma trận, xem mục 9). Ẩn nút ở frontend chỉ để tiện cho người dùng; backend mới là nơi từ chối request.
 
 ## 1. Kiến trúc
 
@@ -151,7 +151,7 @@ Lỗi backend đã sửa (2026-11-18): `GET /api/admin/users` không có tham s�
 
 - `cd frontend && npm test` — `node --test`: `can()` với toàn bộ ma trận (23 dòng × 5 role × 6 action, và các dòng đã xoá không role nào truy cập được), cấu trúc flow, menu 3 flow chính thức, độ phủ của 2 flow tạm, route guard cho mọi role × mọi đường dẫn nội bộ.
 - `python -m pytest -v tests/test_rbac_screen_flow.py` — E2E Playwright: màn hình công khai, chuyển về Login, menu từng role, chặn URL trực tiếp (403), placeholder, Register chỉ Developer, nút theo `can()`.
-- Việc còn lại cần nhóm duyệt: kiểm tra cùng ma trận ở backend (BFF `GitHubIntegrationBffController` / `@PreAuthorize`), vì thuộc security config.
+- Backend: `mvnw test` (xem mục 9).
 
 ## 8. Giao diện (theme tối) — 2026-11-18
 
@@ -167,3 +167,21 @@ Lỗi backend đã sửa (2026-11-18): `GET /api/admin/users` không có tham s�
 - **Điểm ngắt giao diện (`@media`) trong `App.css` và `theme.css` đã được nhân 1,5** (ví dụ 960px → 1440px) vì media query đọc chiều rộng cửa sổ thật, không đọc chiều rộng sau khi phóng. Vì vậy cửa sổ rộng dưới khoảng 1440px sẽ xếp menu lên trên nội dung, giống trình duyệt phóng 150%.
 - `100vh` trong vùng đã phóng được viết `calc(100vh / var(--ui-scale))`, và `spotlight.js` chia tọa độ chuột cho hệ số phóng.
 - **Đổi hệ số:** sửa `--ui-scale` rồi nhân lại các điểm ngắt `@media` và kiểm tra lại (script đã dùng nằm ngoài repo); chỉ sửa biến sẽ làm điểm ngắt lệch.
+
+## 9. Kiểm tra quyền ở backend (BFF) — 2026-11-18
+
+Mọi request của trình duyệt tới `/api/github|workspaces|repositories|documentation|document-workflows/**` đi qua `GitHubIntegrationBffController`. Trước khi chuyển tiếp, BFF kiểm tra role của tài khoản theo ma trận; không có quyền → **403**, không gọi GitHub Integration.
+
+| Thành phần | File | Vai trò |
+|---|---|---|
+| Ma trận | `backend/.../security/ScreenPermissions.java` | Bản Java của `permissions.js` (23 dòng × 5 role). `ADMIN` (cũ) = `ADMINISTRATOR`. |
+| Quy tắc route | `backend/.../security/ApiRoutePermissions.java` | Mỗi (method, đường dẫn) cần **ít nhất một** cặp (dòng ma trận, action). Route chưa có quy tắc bị từ chối (deny by default), nên route mới phải được thêm vào đây. |
+| Gắn vào BFF | `GitHubIntegrationBffController.proxy()` | Chạy sau khi xác định người dùng, trước kiểm tra workspace. |
+
+- Ma trận là **giới hạn trên**. GitHub Integration vẫn kiểm tra thêm (chủ sở hữu tài liệu, quyền `DOCUMENT_*`, thành viên workspace), nên kết quả cuối là phần giao của hai bên.
+- Các màn hình cùng đọc một dữ liệu dùng nhiều dòng (ví dụ danh sách repository cần #6 R **hoặc** #8 R **hoặc** #7 R **hoặc** #20 R) để Staff (chỉ có #8) và Technical Lead (chỉ có #20) vẫn mở được màn hình của mình.
+- Các route drift (`/api/repositories/{id}/drift/**`) bị từ chối với mọi role vì dòng #16 đã bị gỡ; `GET /api/documentation/drift/severity-rules` cần #17 R (Technical Lead). Reassign review cần #24 U (Administrator) và `DOCUMENT_REASSIGN` như trước.
+- `/api/admin/**` giữ nguyên: chỉ ADMIN/ADMINISTRATOR và `@PreAuthorize` theo quyền (khớp các dòng #24, #27, #28 chỉ có Administrator).
+- **Chưa theo ma trận (cố ý):** `/api/managed-workspaces/**` (`WorkspaceController`) và `/api/profile/**` kiểm tra theo chủ sở hữu/thành viên, không theo role. Dòng #25 chỉ cho Administrator, nhưng Developer đang dùng workspace tự quản trong trang Repository; áp dụng #25 sẽ làm hỏng chức năng đó nên cần nhóm quyết định. Các quyền đọc của Technical Lead (#7–#11, #13) đã được BFF cho phép nhưng GitHub Integration chưa cấp quyền `DOCUMENT_*` tương ứng cho role này; sẽ nối khi màn hình của Technical Lead được xây.
+- **Giữ ma trận hai nơi đồng bộ:** `ScreenPermissionsParityTest` đọc `frontend/src/rbac/permissions.js` và `roles.js` rồi so với bản Java; đổi quyền ở một nơi mà quên nơi kia sẽ làm test fail. `ApiRoutePermissionsTest` kiểm tra 49 route × 5 role theo bảng viết tay từ ma trận.
+- Frontend: khung "Staff Review Queue" nhúng trong trang Documentation chỉ hiện cho role có #10 U (Staff); Developer chỉ đọc phản hồi duyệt (#10 R) nên không còn thấy khung này (trước đó bấm vào sẽ báo 403).
