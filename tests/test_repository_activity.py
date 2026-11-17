@@ -16,6 +16,8 @@ pytest.importorskip("pytest_playwright", reason="cần cài pytest-playwright đ
 
 from playwright.sync_api import Page, expect  # noqa: E402
 
+from rbac_nav import open_screen  # noqa: E402
+
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 USER_ID = "42"
 WORKSPACE_ID = f"ws-{USER_ID}"
@@ -68,7 +70,7 @@ class FakeApi:
         if (request.method, path) == ("GET", "/api/auth/csrf"):
             return route.fulfill(status=200, json={"token": "csrf-ld68"})
         if (request.method, path) == ("GET", "/api/auth/me"):
-            return route.fulfill(status=200, json={"id": USER_ID, "email": "ld68@example.com"})
+            return route.fulfill(status=200, json={"id": USER_ID, "email": "ld68@example.com", "role": "DEVELOPER"})
         if (request.method, path) == ("GET", "/api/managed-workspaces"):
             return route.fulfill(status=200, json=[])  # LD-267: chỉ có workspace cá nhân
         if (request.method, path) == ("GET", "/api/github/connection"):
@@ -98,7 +100,7 @@ def open_workspace_repositories(page: Page, api: FakeApi) -> None:
     page.add_init_script(f"window.sessionStorage.setItem('livingdocs.userId', '{USER_ID}')")
     page.route("**/api/**", api.handle)
     page.goto(FRONTEND_URL + "/")
-    page.get_by_role("button", name="Repository Management").first.click()
+    open_screen(page, "Repository List")
     expect(page.get_by_role("heading", name="Repository Management")).to_be_visible()
     page.get_by_role("button", name="Workspace (1)").click()
     expect(page.get_by_role("heading", name="acme/shop")).to_be_visible()
