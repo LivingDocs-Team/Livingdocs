@@ -13,6 +13,8 @@ from urllib.parse import urlsplit
 
 from playwright.sync_api import Page, expect
 
+from rbac_nav import open_screen
+
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 DOCUMENT_ID = "22222222-2222-4222-8222-222222222222"
 WORKFLOW_ID = "33333333-3333-4333-8333-333333333333"
@@ -256,18 +258,30 @@ class StatefulBackend:
         return send(404, {"message": f"Unexpected request: {method} {path}"})
 
 
+# Each role works from its own screen of the role-based menu (frontend/src/rbac/flows).
+ROLE_SCREEN = {
+    "developer": ("Generated Documents", "Documentation Management"),
+    "staff": ("Review Queue", "Staff Review Queue"),
+    "manager": ("Approval Queue", "Manager Approval"),
+}
+
+
+def open_role_screen(page: Page, backend: StatefulBackend):
+    label, heading = ROLE_SCREEN[backend.current]
+    open_screen(page, label)
+    expect(page.get_by_role("heading", name=heading)).to_be_visible()
+
+
 def open_documentation(page: Page, backend: StatefulBackend):
     page.route("**/api/**", backend.handle)
     page.goto(FRONTEND_URL)
-    page.get_by_role("button", name="Documentation Management").first.click()
-    expect(page.get_by_role("heading", name="Documentation Management")).to_be_visible()
+    open_role_screen(page, backend)
 
 
 def switch_user(page: Page, backend: StatefulBackend, who: str):
     backend.login_as(who)
     page.reload()
-    page.get_by_role("button", name="Documentation Management").first.click()
-    expect(page.get_by_role("heading", name="Documentation Management")).to_be_visible()
+    open_role_screen(page, backend)
 
 
 def actions_in(locator):
@@ -304,9 +318,8 @@ def test_claim_staff_review_manager_approval_and_history_timeline(page: Page):
     expect(manager_history).to_contain_text("APPROVED", timeout=7000)
     assert actions_in(manager_history) == ["SUBMITTED", "CLAIMED", "PASSED", "APPROVED"]
 
-    # The Approval History panel of DocumentationManagement is fetched when a workflow is selected and
-    # is not refreshed by a decision made in the Manager panel (see the LD-403 report); reload to read it.
-    switch_user(page, backend, "manager")
+    # The owner reads the Approval History panel of Documentation Management (Generated Documents).
+    switch_user(page, backend, "developer")
     approval_history = page.get_by_role("region", name="Approval History")
     expect(approval_history).to_contain_text("Document ID")
     expect(approval_history.locator("li strong").first).to_be_visible()
@@ -346,7 +359,7 @@ def test_manager_rejection_requires_reason_and_is_recorded_in_history(page: Page
     expect(manager_history).to_contain_text("REJECTED", timeout=7000)
     assert actions_in(manager_history)[-1] == "REJECTED"
     expect(manager_history).to_contain_text("Comment: The guide omits the new endpoints.")
-    switch_user(page, backend, "manager")
+    switch_user(page, backend, "developer")
     approval_history = page.get_by_role("region", name="Approval History")
     expect(approval_history).to_contain_text("Comment / reason: The guide omits the new endpoints.")
     assert actions_in(approval_history)[-1] == "REJECTED"
@@ -511,7 +524,7 @@ def test_ui_submit_then_claim_review_approve_and_full_history(page: Page):
     page.get_by_role("button", name="Approve document").click()
     expect(page.get_by_role("status").filter(has_text="Backend confirmed APPROVED")).to_be_visible()
 
-    switch_user(page, backend, "manager")
+    switch_user(page, backend, "developer")
     full = page.get_by_role("region", name="Approval History")
     expect(full.locator("li strong").first).to_be_visible()
     assert actions_in(full) == ["CREATED", "SUBMITTED", "CLAIMED", "PASSED", "APPROVED"]
@@ -556,12 +569,13 @@ def test_ui_submit_retry_continues_from_the_failed_step_without_duplicates(page:
     assert backend.item["status"] == "PENDING_STAFF_REVIEW"
 
 
-def test_ui_submit_shows_403_for_a_role_that_cannot_save_documents(page: Page):
+def test_ui_submit_shows_403_when_the_backend_refuses_to_save_the_document(page: Page):
     backend = StatefulBackend(seed=False)
-    backend.login_as("staff")
+    backend.login_as("developer")
     open_documentation(page, backend)
     generate_documentation(page)
 
+    backend.forced["document"] = 403
     page.get_by_role("button", name="Submit for review").click()
     expect(page.get_by_role("alert").filter(has_text="You are not allowed to save the generated document")).to_be_visible()
     expect(page.get_by_role("button", name="Submit for review")).to_be_enabled()

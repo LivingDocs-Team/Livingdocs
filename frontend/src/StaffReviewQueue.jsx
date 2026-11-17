@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { githubApi } from './githubApi';
+import Can from './rbac/Can';
 
 function errorMessage(error, action) {
   if (error?.status === 401) return 'Your session expired. Sign in again to continue.';
@@ -347,13 +348,15 @@ export default function StaffReviewQueue({ userId }) {
                 )}
 
                 {selectedWorkflow.status === 'PENDING_STAFF_REVIEW' && (
-                  <button type="button" className="documentation-primary-button" disabled={Boolean(action)}
-                    onClick={() => runAction('claim', 'claim', 'STAFF_REVIEWING')}>
-                    {action === 'claim' ? 'Claiming...' : 'Claim review'}
-                  </button>
+                  <Can screen="staffReview" action="U">
+                    <button type="button" className="documentation-primary-button" disabled={Boolean(action)}
+                      onClick={() => runAction('claim', 'claim', 'STAFF_REVIEWING')}>
+                      {action === 'claim' ? 'Claiming...' : 'Claim review'}
+                    </button>
+                  </Can>
                 )}
                 {assignedToMe && (
-                  <>
+                  <Can screen="staffReview" action="A">
                     <button type="button" className="documentation-secondary-button" disabled={Boolean(action)}
                       onClick={() => runAction('release', 'release', 'PENDING_STAFF_REVIEW')}>
                       {action === 'release' ? 'Releasing...' : 'Release claim'}
@@ -376,7 +379,7 @@ export default function StaffReviewQueue({ userId }) {
                         {action === 'review' ? 'Submitting review...' : 'Submit review'}
                       </button>
                     </form>
-                  </>
+                  </Can>
                 )}
               </>
             )}
