@@ -7,10 +7,16 @@ Runs against the built frontend on http://localhost:3000 with every /api call mo
 test_frontend.py.
 """
 import json
+import re
 
 from playwright.sync_api import Page, expect
 
 from rbac_nav import LOGIN_URL, open_screen, sign_in
+
+# Radio names contain the whole card text, so a plain "Onboarding" also matches the built-in
+# "Brief summary" card (its description mentions onboarding) while the template list is still loading.
+# Only the custom card has the "Custom" badge right after its name.
+ONBOARDING_CARD = re.compile(r"Onboarding\s*Custom")
 
 REPOSITORY_ID = "11111111-1111-1111-1111-111111111111"
 WORKSPACE_ID = "ws-42"
@@ -175,9 +181,9 @@ def test_technical_lead_manages_custom_templates_and_developer_applies_them(page
 
     # a Developer applies the custom template
     open_documentation(page, state)
-    page.get_by_role("radio", name="Onboarding").check()
+    page.get_by_role("radio", name=ONBOARDING_CARD).check()
     page.get_by_role("button", name="Generate documentation").click()
-    expect(page.get_by_role("status").filter(has_text='using the "Onboarding" template')).to_be_visible()
+    expect(page.get_by_role("status").filter(has_text='using the "Onboarding" template')).to_be_visible(timeout=15_000)
     assert state["generate_bodies"][-1]["templateId"] == "c1"
 
     # delete needs a second click
@@ -189,7 +195,7 @@ def test_technical_lead_manages_custom_templates_and_developer_applies_them(page
 
     # the Developer's selection is back on the default template
     open_documentation(page, state)
-    expect(page.get_by_role("radio", name="Onboarding")).to_have_count(0)
+    expect(page.get_by_role("radio", name=ONBOARDING_CARD)).to_have_count(0)
     expect(page.get_by_role("radio", name="Standard technical docs")).to_be_checked()
 
 

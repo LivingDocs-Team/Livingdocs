@@ -105,8 +105,9 @@ def start(page: Page, api: Api, url=f"{FRONTEND}/"):
     page.goto(url)
 
 
-def menu_screens(page: Page):
-    return main_menu(page).get_by_role("link").all_inner_texts()
+def expect_menu_screens(page: Page, screens):
+    """Waits until the menu lists exactly these screens (the page may still be loading on a slow runner)."""
+    expect(main_menu(page).get_by_role("link")).to_have_text(screens)
 
 
 def menu_modules(page: Page):
@@ -119,7 +120,7 @@ def test_signed_out_user_sees_only_home_login_and_register(page: Page):
     start(page, Api())
     expect(page.get_by_role("heading", name="LivingDocs")).to_be_visible()
     public = page.get_by_role("navigation", name="Public")
-    assert public.get_by_role("link").all_inner_texts() == ["Home", "Login", "Register"]
+    expect(public.get_by_role("link")).to_have_text(["Home", "Login", "Register"])
     expect(main_menu(page)).to_have_count(0)
     for internal in ("GitHub Connection", "Repository Management", "Documentation Management", "Profile",
                      "Notifications", "Documentation Drift"):
@@ -186,8 +187,8 @@ def test_each_role_sees_exactly_its_flow_menu_and_lands_on_its_default_page(page
     start(page, Api(role))
     expect(main_menu(page)).to_be_visible()
     expect(page).to_have_url(ends_with(MENUS[role]["landing"]))
+    expect_menu_screens(page, MENUS[role]["screens"])
     assert menu_modules(page) == MENUS[role]["modules"]
-    assert menu_screens(page) == MENUS[role]["screens"]
     provisional = page.get_by_text("Provisional flow")
     expect(provisional).to_have_count(1 if role in ("TECHNICAL_LEAD", "ADMINISTRATOR") else 0)
 
@@ -195,7 +196,7 @@ def test_each_role_sees_exactly_its_flow_menu_and_lands_on_its_default_page(page
 def test_legacy_admin_role_uses_the_administrator_flow(page: Page):
     start(page, Api("ADMIN"))
     expect(main_menu(page)).to_be_visible()
-    assert menu_screens(page) == MENUS["ADMINISTRATOR"]["screens"]
+    expect_menu_screens(page, MENUS["ADMINISTRATOR"]["screens"])
 
 
 def test_account_without_a_known_role_gets_no_menu(page: Page):
@@ -256,14 +257,14 @@ def test_placeholder_screen_keeps_its_place_in_the_flow(page: Page):
     expect(page.get_by_role("heading", name="Coverage Gaps")).to_be_visible()
     expect(page.get_by_text("Chưa triển khai")).to_be_visible()
     breadcrumb = page.get_by_role("navigation", name="Breadcrumb")
-    assert breadcrumb.get_by_role("listitem").all_inner_texts() == ["Documentation Generation", "Coverage Gaps"]
+    expect(breadcrumb.get_by_role("listitem")).to_have_text(["Documentation Generation", "Coverage Gaps"])
     expect(page.get_by_text("#8 Documentation Generation & Editing")).to_be_visible()
 
 
 def test_menu_lists_main_screens_only_and_the_parent_stays_highlighted_on_a_sub_screen(page: Page):
     start(page, Api("STAFF"), f"{FRONTEND}/#/review/queue/comments")
     expect(main_menu(page)).to_be_visible()
-    assert menu_screens(page) == MENUS["STAFF"]["screens"]
+    expect_menu_screens(page, MENUS["STAFF"]["screens"])
     expect(main_menu(page).locator("ul ul")).to_have_count(0)               # no nested sub-screens
     expect(menu_link(page, "Review Queue")).to_have_attribute("aria-current", "page")
     expect(page.get_by_role("navigation", name="Breadcrumb")).to_contain_text("Comments & Change Requests")
@@ -272,8 +273,8 @@ def test_menu_lists_main_screens_only_and_the_parent_stays_highlighted_on_a_sub_
 def test_sub_screen_breadcrumb_links_back_to_its_parent(page: Page):
     start(page, Api("STAFF"), f"{FRONTEND}/#/review/queue/template-check")
     breadcrumb = page.get_by_role("navigation", name="Breadcrumb")
-    assert breadcrumb.get_by_role("listitem").all_inner_texts() == [
-        "Document Review", "Review Queue", "Template & Code Check"]
+    expect(breadcrumb.get_by_role("listitem")).to_have_text(
+        ["Document Review", "Review Queue", "Template & Code Check"])
     breadcrumb.get_by_role("link", name="Review Queue").click()
     expect(page.get_by_role("heading", name="Staff Review Queue")).to_be_visible()
 
@@ -281,7 +282,7 @@ def test_sub_screen_breadcrumb_links_back_to_its_parent(page: Page):
 def test_profile_settings_lists_its_sub_screens(page: Page):
     start(page, Api("MANAGER"))
     open_screen(page, "Profile & Settings")
-    assert page.locator(".tile b").all_inner_texts() == ["Profile", "Notification Preferences"]
+    expect(page.locator(".tile b")).to_have_text(["Profile", "Notification Preferences"])
     open_tile(page, "Notification Preferences")
     expect(page).to_have_url(ends_with("#/account/notification-preferences"))
     expect(menu_link(page, "Profile & Settings")).to_have_attribute("aria-current", "page")
