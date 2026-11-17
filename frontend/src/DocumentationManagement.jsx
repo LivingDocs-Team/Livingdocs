@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import { githubApi, githubApiText } from './githubApi';
 import { TemplateManager, TemplatePicker } from './DocumentationTemplates';
@@ -6,6 +6,8 @@ import { useTemplates } from './templateApi';
 import DocumentationSuggestionReview from './DocumentationSuggestionReview';
 import StaffReviewQueue from './StaffReviewQueue';
 import ManagerApprovalQueue from './ManagerApprovalQueue';
+import DocumentVersionComparison, { DiffSummary, DiffView } from './DocumentVersionComparison';
+import { diffTexts } from './documentationDiff';
 
 
 function escapeHtml(value) {
@@ -913,17 +915,16 @@ export default function DocumentationManagement({ userId, userRole }) {
 
   );
 
-  const currentLines = markdown.split('\n');
   const rawProgress = Number(job?.progress ?? 0);
   const progressFraction = Number.isFinite(rawProgress)
     ? Math.min(1, Math.max(0, rawProgress > 1 ? rawProgress / 100 : rawProgress))
     : 0;
 
-  const comparisonLines = compareVersion
-
-    ? compareVersion.content.split('\n')
-
-    : [];
+  // LD-183: the same line diff as the AI service (added / removed / modified)
+  const sessionDiff = useMemo(
+    () => (compareVersion ? diffTexts(compareVersion.content, markdown) : null),
+    [compareVersion, markdown],
+  );
 
   return (
 
@@ -1187,6 +1188,10 @@ export default function DocumentationManagement({ userId, userRole }) {
                     </li>
                   ))}
                 </ol>
+              )}
+
+              {selectedWorkflowId && (
+                <DocumentVersionComparison key={selectedWorkflowId} workflowId={selectedWorkflowId} userId={userId} />
               )}
             </>
           )}
@@ -1632,71 +1637,15 @@ export default function DocumentationManagement({ userId, userRole }) {
                 </select>
 
                 {compareVersion ? (
-
-                  <div className="documentation-diff">
-
-                    <div className="documentation-diff-column">
-
-                      <h4>Saved version</h4>
-
-                      {comparisonLines.map((line, index) => {
-
-                        const changed = currentLines[index] !== line;
-
-                        return (
-
-                          <div
-
-                            key={`${index}-${line}`}
-
-                            className={`documentation-diff-line ${changed ? 'diff-removed' : ''}`}
-
-                          >
-
-                            <span>{changed ? '−' : ' '}</span>
-
-                            {line || ' '}
-
-                          </div>
-
-                        );
-
-                      })}
-
-                    </div>
-
-                    <div className="documentation-diff-column">
-
-                      <h4>Current document</h4>
-
-                      {currentLines.map((line, index) => {
-
-                        const changed = comparisonLines[index] !== line;
-
-                        return (
-
-                          <div
-
-                            key={`${index}-${line}`}
-
-                            className={`documentation-diff-line ${changed ? 'diff-added' : ''}`}
-
-                          >
-
-                            <span>{changed ? '+' : ' '}</span>
-
-                            {line || ' '}
-
-                          </div>
-
-                        );
-
-                      })}
-
-                    </div>
-
-                  </div>
-
+                  <>
+                    <DiffSummary diff={sessionDiff} />
+                    <DiffView
+                      key={compareVersion.id}
+                      diff={sessionDiff}
+                      oldLabel={compareVersion.label}
+                      newLabel="Current document"
+                    />
+                  </>
                 ) : (
 
                   <div className="documentation-empty">
