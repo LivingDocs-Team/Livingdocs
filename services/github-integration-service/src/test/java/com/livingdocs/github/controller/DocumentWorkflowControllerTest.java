@@ -260,4 +260,35 @@ class DocumentWorkflowControllerTest {
         verify(workflowService).reviewComparison(STAFF_ID, STAFF_AUTHORITIES, WORKFLOW_ID);
         verify(workflowService).history(MANAGER_ID, MANAGER_AUTHORITIES, WORKFLOW_ID);
     }
+
+    @Test
+    void versionsAndComparisonAreForwardedWithTheChosenVersions() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        when(workflowService.versions(MANAGER_ID, MANAGER_AUTHORITIES, WORKFLOW_ID))
+                .thenReturn(mapper.readTree("[{\"number\":2},{\"number\":1}]"));
+        when(workflowService.compareVersions(MANAGER_ID, MANAGER_AUTHORITIES, WORKFLOW_ID, 1, 2))
+                .thenReturn(mapper.readTree("{\"from_version\":{\"number\":1},\"to_version\":{\"number\":2},"
+                        + "\"stats\":{\"added\":1},\"rows\":[]}"));
+        when(workflowService.compareVersions(MANAGER_ID, MANAGER_AUTHORITIES, WORKFLOW_ID, null, null))
+                .thenReturn(mapper.readTree("{\"rows\":[]}"));
+
+        mockMvc.perform(get("/api/document-workflows/{id}/versions", WORKFLOW_ID)
+                        .header("X-User-Id", MANAGER_ID)
+                        .header("X-User-Authorities", "ROLE_MANAGER,DOCUMENT_APPROVAL_QUEUE_VIEW,DOCUMENT_APPROVE,DOCUMENT_REJECT"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].number").value(2));
+        mockMvc.perform(get("/api/document-workflows/{id}/comparison", WORKFLOW_ID)
+                        .param("from", "1").param("to", "2")
+                        .header("X-User-Id", MANAGER_ID)
+                        .header("X-User-Authorities", "ROLE_MANAGER,DOCUMENT_APPROVAL_QUEUE_VIEW,DOCUMENT_APPROVE,DOCUMENT_REJECT"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.to_version.number").value(2))
+                .andExpect(jsonPath("$.stats.added").value(1));
+        mockMvc.perform(get("/api/document-workflows/{id}/comparison", WORKFLOW_ID)
+                        .header("X-User-Id", MANAGER_ID)
+                        .header("X-User-Authorities", "ROLE_MANAGER,DOCUMENT_APPROVAL_QUEUE_VIEW,DOCUMENT_APPROVE,DOCUMENT_REJECT"))
+                .andExpect(status().isOk());
+
+        verify(workflowService).compareVersions(MANAGER_ID, MANAGER_AUTHORITIES, WORKFLOW_ID, 1, 2);
+        verify(workflowService).compareVersions(MANAGER_ID, MANAGER_AUTHORITIES, WORKFLOW_ID, null, null);
+    }
 }
