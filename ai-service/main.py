@@ -1,6 +1,6 @@
 """LivingDocs AI service - AI-assisted documentation generation (LD-90, LD-340), versioned
-documentation (LD-195), documentation drift detection (LD-145) and AI-based drift analysis
-with review and resolution (LD-346).
+documentation (LD-195), documentation change log (LD-177), documentation drift detection
+(LD-145) and AI-based drift analysis with review and resolution (LD-346).
 
 Run:  uvicorn main:app --reload --port 8001
 Docs: http://localhost:8001/docs
@@ -19,8 +19,6 @@ from app.drift_markdown import at_least, render as render_drift_markdown
 from app.drift_models import (DriftAnalyzeRequest, DriftFinding, DriftReport, DriftReportSummary,
                               PullRequestAnalysis, ResolutionUpdate, Severity)
 from app.drift_review import ResolutionError
-from app.drift_models import (DriftAnalyzeRequest, DriftReport, DriftReportSummary,
-                              PullRequestAnalysis, Severity)
 from app.suggestion_api import router as suggestion_router
 from app.drift_severity import CAPS, SCORE_BANDS, SEVERITY_LEVELS, rules_table
 from app.generator import get_generator
@@ -34,7 +32,7 @@ from app.retrieval import build_index, retrieve
 from app.templates import TemplateNameTaken, templates
 from app.version_models import (Document, DocumentContentEdit, DocumentCreate, DocumentVersion,
                                 HistoryEvent, InternalDocumentCreate, InternalVersionDecision,
-                                InternalRollbackRequest, VersionComparison,
+                                InternalRollbackRequest, TriggerSource, VersionComparison,
                                 VersionSummary)
 from app.versions import VersionError, documents
 from app.internal_auth import require_internal_service, require_service_credential_when_configured
@@ -43,6 +41,29 @@ from app.source_change_impact import (AffectedDocumentsRequest, AffectedDocument
 
 app = FastAPI(title="LivingDocs AI Service", version="0.1.0",
               dependencies=[Depends(require_service_credential_when_configured)])
+
+_ROLE_PRIORITY = ("ADMINISTRATOR", "ADMIN", "MANAGER", "TECHNICAL_LEAD", "STAFF", "DEVELOPER")
+
+
+def _resolve_actor_role(
+    explicit_role: Optional[str],
+    user_roles: Optional[str] = None,
+    user_authorities: Optional[str] = None,
+) -> Optional[str]:
+    if explicit_role and explicit_role.strip():
+        return explicit_role.strip()
+    raw = user_roles or user_authorities
+    if not raw or not raw.strip():
+        return None
+    normalized = [
+        item.strip()[5:] if item.strip().startswith("ROLE_") else item.strip()
+        for item in raw.split(",")
+        if item.strip()
+    ]
+    for role in _ROLE_PRIORITY:
+        if role in normalized:
+            return "ADMINISTRATOR" if role == "ADMIN" else role
+    return normalized[0] if normalized else None
 
 
 @app.get("/health")
@@ -223,19 +244,26 @@ def create_document(data: DocumentCreate):
     if output is None:
         raise HTTPException(409, "Job result is no longer available")
     return documents.create_from_job(
-              data.job_id,
-              output,
-              data.title,
-              data.actor,
-              data.note,
-              report=jobs.get_report(data.job_id),
-)
+        data.job_id,
+        output,
+        data.title,
+        data.actor,
+        data.note,
+        report=jobs.get_report(data.job_id),
+        actor_role=data.actor_role,
+        trigger_source=data.trigger_source or TriggerSource.ai_generation.value,
+    )
 
 
 @app.post("/internal/documents/from-job", response_model=Document, status_code=201,
           dependencies=[Depends(require_internal_service)])
-def create_owned_document(data: InternalDocumentCreate,
-                          user_id: str = Header(alias="X-User-Id")):
+def create_owned_document(
+    data: InternalDocumentCreate,
+    user_id: str = Header(alias="X-User-Id"),
+    user_roles: Optional[str] = Header(default=None, alias="X-User-Roles"),
+    user_authorities: Optional[str] = Header(default=None, alias="X-User-Authorities"),
+    trigger_source: Optional[str] = Header(default=None, alias="X-Trigger-Source"),
+):
     """Trusted integration endpoint. Ownership is sourced only from the authenticated header."""
     if not user_id.isdigit() or int(user_id) < 1:
         raise HTTPException(400, "A valid authenticated LivingDocs user id is required")
@@ -248,14 +276,16 @@ def create_owned_document(data: InternalDocumentCreate,
     if output is None:
         raise HTTPException(409, "Job result is no longer available")
     return documents.create_from_job(
-    data.job_id,
-    output,
-    data.title,
-    user_id,
-    data.note,
-    owner_user_id=user_id,
-    report=jobs.get_report(data.job_id),
-)
+        data.job_id,
+        output,
+        data.title,
+        user_id,
+        data.note,
+        owner_user_id=user_id,
+        report=jobs.get_report(data.job_id),
+        actor_role=_resolve_actor_role(data.actor_role, user_roles, user_authorities),
+        trigger_source=data.trigger_source or trigger_source or TriggerSource.ai_generation.value,
+    )
 
 
 @app.get("/internal/documents/{doc_id}", response_model=Document,
@@ -264,11 +294,20 @@ def get_owned_document(doc_id: str):
     return _call(documents.get, doc_id)
 
 
+@app.get("/internal/documents/{doc_id}/history", response_model=List[HistoryEvent],
+         dependencies=[Depends(require_internal_service)])
+def get_internal_document_history(doc_id: str):
+    """LD-177 / LD-195: version audit trail for owned documents."""
+    return _call(documents.history, doc_id)
+
+
 @app.get("/internal/documents/{doc_id}/content", response_class=PlainTextResponse,
          dependencies=[Depends(require_internal_service)])
 def get_internal_document_content(doc_id: str, version: Optional[int] = Query(None, ge=1)):
     v = _call(documents.version, doc_id, version)
     return PlainTextResponse(v.content, media_type="text/markdown")
+
+
 @app.get(
     "/internal/documents/{doc_id}/review-evidence",
     response_model=ReviewEvidenceResponse,
@@ -323,26 +362,56 @@ def get_internal_document_evidence(
 
     return document_version.evidence_report
 
+
 @app.put("/internal/documents/{doc_id}/content", response_model=DocumentVersion,
          dependencies=[Depends(require_internal_service)])
-def edit_owned_document(doc_id: str, data: DocumentContentEdit,
-                        user_id: str = Header(alias="X-User-Id")):
+def edit_owned_document(
+    doc_id: str,
+    data: DocumentContentEdit,
+    user_id: str = Header(alias="X-User-Id"),
+    user_roles: Optional[str] = Header(default=None, alias="X-User-Roles"),
+    user_authorities: Optional[str] = Header(default=None, alias="X-User-Authorities"),
+    trigger_source: Optional[str] = Header(default=None, alias="X-Trigger-Source"),
+):
     try:
-        return documents.edit_owned(doc_id, user_id, data.expected_version, data.content, data.note)
+        return documents.edit_owned(
+            doc_id,
+            user_id,
+            data.expected_version,
+            data.content,
+            data.note,
+            actor_role=_resolve_actor_role(data.actor_role, user_roles, user_authorities),
+            trigger_source=data.trigger_source or trigger_source or TriggerSource.manual_edit.value,
+        )
     except VersionError as e:
         raise HTTPException(e.status, e.message)
 
 
 @app.post("/internal/documents/{doc_id}/review-decision", status_code=204,
           dependencies=[Depends(require_internal_service)])
-def resolve_owned_document_version(doc_id: str, data: InternalVersionDecision,
-                                   user_id: str = Header(alias="X-User-Id"),
-                                   owner_id: str = Header(alias="X-Document-Owner-Id")):
+def resolve_owned_document_version(
+    doc_id: str,
+    data: InternalVersionDecision,
+    user_id: str = Header(alias="X-User-Id"),
+    owner_id: str = Header(alias="X-Document-Owner-Id"),
+    user_roles: Optional[str] = Header(default=None, alias="X-User-Roles"),
+    user_authorities: Optional[str] = Header(default=None, alias="X-User-Authorities"),
+    trigger_source: Optional[str] = Header(default=None, alias="X-Trigger-Source"),
+):
     try:
-        documents.resolve_workflow_version(doc_id, owner_id,
-                                           data.version, data.decision, user_id, data.note)
+        documents.resolve_workflow_version(
+            doc_id,
+            owner_id,
+            data.version,
+            data.decision,
+            user_id,
+            data.note,
+            actor_role=_resolve_actor_role(data.actor_role, user_roles, user_authorities),
+            trigger_source=data.trigger_source or trigger_source or TriggerSource.review_workflow.value,
+        )
     except VersionError as e:
         raise HTTPException(e.status, e.message)
+
 
 @app.post(
     "/internal/documents/{doc_id}/rollback",
@@ -355,6 +424,9 @@ def rollback_owned_document(
     data: InternalRollbackRequest,
     user_id: str = Header(alias="X-User-Id"),
     owner_id: str = Header(alias="X-Document-Owner-Id"),
+    user_roles: Optional[str] = Header(default=None, alias="X-User-Roles"),
+    user_authorities: Optional[str] = Header(default=None, alias="X-User-Authorities"),
+    trigger_source: Optional[str] = Header(default=None, alias="X-Trigger-Source"),
 ):
     try:
         return documents.rollback_owned(
@@ -363,9 +435,13 @@ def rollback_owned_document(
             data.source_version,
             user_id,
             data.note,
+            actor_role=_resolve_actor_role(data.actor_role, user_roles, user_authorities),
+            trigger_source=data.trigger_source or trigger_source or TriggerSource.rollback.value,
         )
     except VersionError as e:
         raise HTTPException(e.status, e.message)
+
+
 @app.get("/documents", response_model=List[Document], response_model_exclude={"owner_user_id"})
 def list_documents():
     return documents.list_public()
@@ -479,6 +555,8 @@ def resolve_drift_finding(report_id: str, finding_id: str, update: ResolutionUpd
     if finding is None:
         raise HTTPException(404, "Drift report not found")
     return finding
+
+
 @app.post("/internal/affected-documents", response_model=AffectedDocumentsResult,
           dependencies=[Depends(require_internal_service)])
 def affected_documents(req: AffectedDocumentsRequest):

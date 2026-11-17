@@ -1,6 +1,7 @@
 """Versioned documentation produced by the AI service.
 
 - LD-195  version management: save a job as a document, immutable versions, audit trail
+- LD-177  documentation change log: actor role, trigger source and status on history events
 
 Documents are saved to a JSON file (DOCUMENTS_FILE, default data/documents.json, written
 atomically) so they survive a restart. Set DOCUMENTS_FILE= (empty) to keep them in memory only.
@@ -25,8 +26,8 @@ from .jobs import JobOutput
 from .models import JobReport, Scope, now
 from .renderer import render_overview
 from .version_models import (Document, DocumentVersion, FileSection, HistoryAction, HistoryEvent,
-                             SectionAction, SectionChange, SkippedFile, VersionOrigin,
-                             VersionStatus, VersionSummary)
+                             SectionAction, SectionChange, SkippedFile, TriggerSource,
+                             VersionOrigin, VersionStatus, VersionSummary)
 
 log = logging.getLogger(__name__)
 DEFAULT_FILE = "data/documents.json"
@@ -250,18 +251,48 @@ class DocumentStore:
             "diff": diff,
             "changes": pending.changes,
         }
+
     # ---------- internal helpers ----------
 
-    def _event(self, doc_id: str, action: HistoryAction, version: int, actor: Optional[str] = None,
-               note: Optional[str] = None, related: Optional[int] = None) -> None:
-        self._events[doc_id].append(HistoryEvent(action=action, version=version, actor=actor,
-                                                 note=note, related_version=related))
+    def _event(
+        self,
+        doc_id: str,
+        action: HistoryAction,
+        version: int,
+        actor: Optional[str] = None,
+        note: Optional[str] = None,
+        related: Optional[int] = None,
+        actor_role: Optional[str] = None,
+        trigger_source: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> None:
+        self._events[doc_id].append(
+            HistoryEvent(
+                action=action,
+                version=version,
+                actor=actor,
+                actor_role=actor_role,
+                trigger_source=trigger_source,
+                status=status,
+                note=note,
+                related_version=related,
+            )
+        )
 
     # ---------- create ----------
 
-    def create_from_job(self, job_id: str, output: JobOutput, title: Optional[str] = None,
-                        actor: Optional[str] = None, note: Optional[str] = None,
-                        owner_user_id: Optional[str] = None,report: Optional[JobReport] = None) -> Document:
+    def create_from_job(
+        self,
+        job_id: str,
+        output: JobOutput,
+        title: Optional[str] = None,
+        actor: Optional[str] = None,
+        note: Optional[str] = None,
+        owner_user_id: Optional[str] = None,
+        report: Optional[JobReport] = None,
+        actor_role: Optional[str] = None,
+        trigger_source: Optional[str] = None,
+    ) -> Document:
         with self._lock:
             if owner_user_id is not None:
                 for existing in self._docs.values():
@@ -282,7 +313,7 @@ class DocumentStore:
                                 status=VersionStatus.proposed if owner_user_id is not None else VersionStatus.accepted,
                                 origin=VersionOrigin.generated,
                                 content=assemble(doc, sections, skipped, output.template_name),
-                                                                sections=sections, skipped=skipped, confidence=output.confidence,
+                                sections=sections, skipped=skipped, confidence=output.confidence,
                                 review_report=report,
                                 evidence_report=output.evidence_report,
                                 changes=[SectionChange(path=s.path, action=SectionAction.added)
@@ -295,7 +326,16 @@ class DocumentStore:
             self._versions[doc.id] = [v]
             self._events[doc.id] = []
             self._plans[doc.id] = {}
-            self._event(doc.id, HistoryAction.created, 1, actor, note or f"From job {job_id}")
+            self._event(
+                doc.id,
+                HistoryAction.created,
+                1,
+                actor,
+                note or f"From job {job_id}",
+                actor_role=actor_role or ("DEVELOPER" if owner_user_id else ("USER" if actor else "SYSTEM")),
+                trigger_source=trigger_source or TriggerSource.ai_generation.value,
+                status=v.status.value,
+            )
             self._save()
             return doc
 
@@ -306,8 +346,16 @@ class DocumentStore:
                 raise _not_found("Document")
             return doc
 
-    def edit_owned(self, doc_id: str, owner_user_id: str, expected_version: int, content: str,
-                   note: Optional[str] = None) -> DocumentVersion:
+    def edit_owned(
+        self,
+        doc_id: str,
+        owner_user_id: str,
+        expected_version: int,
+        content: str,
+        note: Optional[str] = None,
+        actor_role: Optional[str] = None,
+        trigger_source: Optional[str] = None,
+    ) -> DocumentVersion:
         with self._lock:
             doc = self.get_owned(doc_id, owner_user_id)
             if doc.pending_version is not None:
@@ -319,11 +367,22 @@ class DocumentStore:
                     raise VersionError(409, "The submitted document version has changed")
                 base = self.version(doc_id, doc.current_version)
             number = len(self._versions[doc_id]) + 1
+            resolved_role = actor_role or "DEVELOPER"
+            resolved_trigger = trigger_source or TriggerSource.manual_edit.value
             if doc.pending_version is not None:
                 base.status = VersionStatus.superseded
                 base.superseded_by = number
-                self._event(doc_id, HistoryAction.superseded, base.number, owner_user_id,
-                            "Replaced after another changes request", related=number)
+                self._event(
+                    doc_id,
+                    HistoryAction.superseded,
+                    base.number,
+                    owner_user_id,
+                    "Replaced after another changes request",
+                    related=number,
+                    actor_role=resolved_role,
+                    trigger_source=resolved_trigger,
+                    status=VersionStatus.superseded.value,
+                )
             version = DocumentVersion(
                 number=number,
                 status=VersionStatus.proposed,
@@ -342,9 +401,19 @@ class DocumentStore:
             doc.pending_version = number
             doc.versions_total = number
             doc.updated_at = now()
-            self._event(doc_id, HistoryAction.proposed, number, owner_user_id, note or "Owner edited after changes requested")
+            self._event(
+                doc_id,
+                HistoryAction.proposed,
+                number,
+                owner_user_id,
+                note or "Owner edited after changes requested",
+                actor_role=resolved_role,
+                trigger_source=resolved_trigger,
+                status=VersionStatus.proposed.value,
+            )
             self._save()
             return version
+
     def rollback_owned(
         self,
         doc_id: str,
@@ -352,6 +421,8 @@ class DocumentStore:
         source_version_number: int,
         actor_user_id: str,
         note: Optional[str] = None,
+        actor_role: Optional[str] = None,
+        trigger_source: Optional[str] = None,
     ) -> DocumentVersion:
         with self._lock:
             doc = self.get_owned(doc_id, owner_user_id)
@@ -425,13 +496,25 @@ class DocumentStore:
                 actor_user_id,
                 note or f"Restored from version {source.number}",
                 related=source.number,
+                actor_role=actor_role or "DEVELOPER",
+                trigger_source=trigger_source or TriggerSource.rollback.value,
+                status=VersionStatus.proposed.value,
             )
 
             self._save()
             return version
-    def resolve_workflow_version(self, doc_id: str, owner_user_id: str, version_number: int,
-                                 decision: str, actor_user_id: str,
-                                 note: Optional[str] = None) -> None:
+
+    def resolve_workflow_version(
+        self,
+        doc_id: str,
+        owner_user_id: str,
+        version_number: int,
+        decision: str,
+        actor_user_id: str,
+        note: Optional[str] = None,
+        actor_role: Optional[str] = None,
+        trigger_source: Optional[str] = None,
+    ) -> None:
         with self._lock:
             doc = self.get_owned(doc_id, owner_user_id)
             if doc.pending_version is None:
@@ -459,7 +542,16 @@ class DocumentStore:
             version.note = note or version.note
             doc.pending_version = None
             doc.updated_at = now()
-            self._event(doc_id, action, version_number, actor_user_id, note)
+            self._event(
+                doc_id,
+                action,
+                version_number,
+                actor_user_id,
+                note,
+                actor_role=actor_role or "REVIEWER",
+                trigger_source=trigger_source or TriggerSource.review_workflow.value,
+                status=version.status.value,
+            )
             self._save()
 
 

@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -19,6 +20,7 @@ import com.livingdocs.github.dto.WorkflowDtos.PageResponse;
 import com.livingdocs.github.dto.WorkflowDtos.ReassignRequest;
 import com.livingdocs.github.dto.WorkflowDtos.StaffReviewRequest;
 import com.livingdocs.github.dto.WorkflowDtos.WorkflowResponse;
+import com.livingdocs.github.entity.ChangeTriggerSource;
 import com.livingdocs.github.entity.DocumentWorkflow;
 import com.livingdocs.github.entity.DocumentWorkflowAudit;
 import com.livingdocs.github.entity.DocumentWorkflowStatus;
@@ -33,12 +35,21 @@ public class DocumentWorkflowService {
     private final DocumentWorkflowRepository workflows;
     private final DocumentWorkflowAuditRepository audit;
     private final DocumentationGenerationService documents;
+    private final DocumentationChangeLogService changeLogService;
 
     public DocumentWorkflowService(DocumentWorkflowRepository workflows,
             DocumentWorkflowAuditRepository audit, DocumentationGenerationService documents) {
+        this(workflows, audit, documents, null);
+    }
+
+    @Autowired
+    public DocumentWorkflowService(DocumentWorkflowRepository workflows,
+            DocumentWorkflowAuditRepository audit, DocumentationGenerationService documents,
+            DocumentationChangeLogService changeLogService) {
         this.workflows = workflows;
         this.audit = audit;
         this.documents = documents;
+        this.changeLogService = changeLogService;
     }
 
     @Transactional
@@ -52,6 +63,10 @@ public class DocumentWorkflowService {
         DocumentWorkflow workflow = workflows.saveAndFlush(
                 new DocumentWorkflow(documentId, document.path("title").asText("Untitled"), actor));
         record(workflow, actor, "CREATED", null, workflow.getStatus(), null);
+        recordTimeline(workflow.getDocumentId(), null, "WORKFLOW_CREATED",
+                "Initialized review workflow for \"" + workflow.getDocumentTitle() + "\"",
+                actor, authorities, ChangeTriggerSource.REVIEW_WORKFLOW,
+                workflow.getStatus().name(), workflow.getId().toString());
         return toResponse(workflow);
     }
 
@@ -65,8 +80,6 @@ public class DocumentWorkflowService {
     @Transactional(readOnly = true)
     public PageResponse<WorkflowResponse> historyAccessible(String actor, Set<String> authorities,
             int page, int size) {
-        // Keep discovery permission-only, matching requireReadable exactly. The current role's
-        // permission set is supplied by the authenticated BFF; customized roles remain supported.
         boolean includeOwned = authorities.contains("DOCUMENT_VIEW");
         boolean includeStaffQueue = authorities.contains("DOCUMENT_REVIEW_QUEUE_VIEW");
         boolean includeAssignedReviews = authorities.contains("DOCUMENT_REVIEW");
@@ -121,6 +134,7 @@ public class DocumentWorkflowService {
         return new ContentResponse(workflow.getDocumentId(), version,
                 documents.getDocumentContent(actor, workflow.getDocumentId(), version));
     }
+
     @Transactional(readOnly = true)
     public JsonNode reviewEvidence(String actor, Set<String> authorities, UUID workflowId) {
         require(authorities, "DOCUMENT_REVIEW");
@@ -206,6 +220,7 @@ public class DocumentWorkflowService {
 
         return documents.getDocumentEvidence(actor, workflow.getDocumentId(), version);
     }
+
     @Transactional(readOnly = true)
     public List<AuditResponse> history(String actor, Set<String> authorities, UUID workflowId) {
         DocumentWorkflow workflow = find(workflowId);
@@ -232,6 +247,10 @@ public class DocumentWorkflowService {
         workflow.submit(version);
         workflows.saveAndFlush(workflow);
         record(workflow, actor, "SUBMITTED", previous, workflow.getStatus(), null);
+        recordTimeline(workflow.getDocumentId(), version, "SUBMITTED_FOR_REVIEW",
+                "Submitted version " + version + " for staff review",
+                actor, authorities, ChangeTriggerSource.REVIEW_WORKFLOW,
+                workflow.getStatus().name(), workflow.getId().toString());
         return toResponse(workflow);
     }
 
@@ -247,6 +266,10 @@ public class DocumentWorkflowService {
         workflow.claim(actor);
         workflows.saveAndFlush(workflow);
         record(workflow, actor, "CLAIMED", previous, workflow.getStatus(), null, null, actor);
+        recordTimeline(workflow.getDocumentId(), workflow.getSubmittedDocumentVersion(), "STAFF_CLAIMED",
+                "Staff reviewer claimed version " + workflow.getSubmittedDocumentVersion() + " for review",
+                actor, authorities, ChangeTriggerSource.REVIEW_WORKFLOW,
+                workflow.getStatus().name(), workflow.getId().toString());
         return toResponse(workflow);
     }
 
@@ -265,6 +288,10 @@ public class DocumentWorkflowService {
         workflow.releaseClaim();
         workflows.saveAndFlush(workflow);
         record(workflow, actor, "STAFF_RELEASE", previous, workflow.getStatus(), null, actor, null);
+        recordTimeline(workflow.getDocumentId(), workflow.getSubmittedDocumentVersion(), "STAFF_RELEASED",
+                "Staff reviewer released review claim",
+                actor, authorities, ChangeTriggerSource.REVIEW_WORKFLOW,
+                workflow.getStatus().name(), workflow.getId().toString());
         return toResponse(workflow);
     }
 
@@ -290,6 +317,12 @@ public class DocumentWorkflowService {
         workflows.saveAndFlush(workflow);
         record(workflow, actor, "STAFF_REASSIGN", previous, workflow.getStatus(), request.reason(),
                 previousReviewer, targetId);
+        String reason = normalizeComment(request.reason());
+        recordTimeline(workflow.getDocumentId(), workflow.getSubmittedDocumentVersion(), "STAFF_REASSIGNED",
+                "Reassigned review from " + previousReviewer + " to " + targetId
+                        + (reason != null ? ": " + reason : ""),
+                actor, authorities, ChangeTriggerSource.REVIEW_WORKFLOW,
+                workflow.getStatus().name(), workflow.getId().toString());
         return toResponse(workflow);
     }
 
@@ -309,9 +342,15 @@ public class DocumentWorkflowService {
             throw ApiException.badRequest("A comment is required when requesting changes.");
         }
         DocumentWorkflowStatus previous = workflow.getStatus();
-        workflow.review(result, normalizeComment(request.comment()));
+        String comment = normalizeComment(request.comment());
+        workflow.review(result, comment);
         workflows.saveAndFlush(workflow);
         record(workflow, actor, result.name(), previous, workflow.getStatus(), request.comment());
+        recordTimeline(workflow.getDocumentId(), workflow.getSubmittedDocumentVersion(),
+                "STAFF_" + result.name(),
+                comment != null ? comment : "Staff review completed: " + result.name(),
+                actor, authorities, ChangeTriggerSource.REVIEW_WORKFLOW,
+                workflow.getStatus().name(), workflow.getId().toString());
         return toResponse(workflow);
     }
 
@@ -328,16 +367,25 @@ public class DocumentWorkflowService {
         DocumentWorkflowStatus current = workflow.getStatus();
         JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
         requireDocumentOwner(document, workflow.getOwnerUserId());
-        int expectedVersion = document.path("pending_version").asInt(0);
-        if (expectedVersion <= 0) {
-            expectedVersion = document.path("current_version").asInt(0);
-        }
+        int pendingVersion = document.path("pending_version").asInt(0);
+        int expectedVersion = pendingVersion > 0
+                ? pendingVersion
+                : document.path("current_version").asInt(0);
         if (expectedVersion <= 0) {
             throw conflict("The document has no editable version.");
         }
-        documents.editOwnedDocument(actor, workflow.getDocumentId(),
-                expectedVersion, request.content(), comment);
+        JsonNode editedVersion = DocumentationGenerationService.callWithChangeLogOverride(
+                authorities, true,
+                () -> documents.editOwnedDocument(actor, workflow.getDocumentId(),
+                        expectedVersion, request.content(), comment));
+        int newVersion = editedVersion != null
+                ? editedVersion.path("number").asInt(expectedVersion + 1)
+                : expectedVersion + 1;
         record(workflow, actor, "DOCUMENT_EDITED", current, current, comment);
+        recordTimeline(workflow.getDocumentId(), newVersion, "CONTENT_UPDATED",
+                comment != null ? comment : "Updated documentation content to version " + newVersion,
+                actor, authorities, ChangeTriggerSource.MANUAL_EDIT,
+                current.name(), workflow.getId().toString());
         return toResponse(workflow);
     }
 
@@ -361,9 +409,11 @@ public class DocumentWorkflowService {
         JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
         requireDocumentOwner(document, workflow.getOwnerUserId());
         int pendingVersion = document.path("pending_version").asInt(0);
+        String normalizedComment = normalizeComment(comment);
         if (pendingVersion == workflow.getSubmittedDocumentVersion()) {
-            documents.resolveDocumentVersion(actor, workflow.getOwnerUserId(), workflow.getDocumentId(),
-                    pendingVersion, decision.name(), normalizeComment(comment));
+            DocumentationGenerationService.runWithChangeLogOverride(authorities, true, () ->
+                    documents.resolveDocumentVersion(actor, workflow.getOwnerUserId(), workflow.getDocumentId(),
+                            pendingVersion, decision.name(), normalizedComment));
         } else if (pendingVersion == 0) {
             int currentVersion = document.path("current_version").asInt(0);
             int totalVersions = document.path("versions_total").asInt(0);
@@ -372,102 +422,146 @@ public class DocumentWorkflowService {
             boolean rejectionMayNeedRetry = decision == ManagerDecision.REJECTED
                     && totalVersions >= workflow.getSubmittedDocumentVersion();
             if (rejectionMayNeedRetry) {
-                documents.resolveDocumentVersion(actor, workflow.getOwnerUserId(), workflow.getDocumentId(),
-                        workflow.getSubmittedDocumentVersion(), decision.name(), normalizeComment(comment));
+                DocumentationGenerationService.runWithChangeLogOverride(authorities, true, () ->
+                        documents.resolveDocumentVersion(actor, workflow.getOwnerUserId(), workflow.getDocumentId(),
+                                workflow.getSubmittedDocumentVersion(), decision.name(), normalizedComment));
             } else if (!approvalAlreadyApplied) {
                 throw conflict("The document version changed during review.");
             }
         } else {
             throw conflict("The document version changed during review.");
         }
-        workflow.decide(actor, decision, normalizeComment(comment));
+        workflow.decide(actor, decision, normalizedComment);
         workflows.saveAndFlush(workflow);
         record(workflow, actor, decision.name(), previous, workflow.getStatus(), comment,
                 null, null, actorRole);
+        recordTimeline(workflow.getDocumentId(), workflow.getSubmittedDocumentVersion(),
+                "MANAGER_" + decision.name(),
+                normalizedComment != null ? normalizedComment : "Manager decision: " + decision.name(),
+                actor, authorities, ChangeTriggerSource.REVIEW_WORKFLOW,
+                workflow.getStatus().name(), workflow.getId().toString());
         return toResponse(workflow);
     }
+
     @Transactional
     public WorkflowResponse rollback(
-        String actor,
-        Set<String> authorities,
-        UUID workflowId,
-        Integer sourceVersion,
-        String reason) {
+            String actor,
+            Set<String> authorities,
+            UUID workflowId,
+            Integer sourceVersion,
+            String reason) {
 
-    // Chỉ Manager có quyền rollback.
-    require(authorities, "DOCUMENT_ROLLBACK");
-    requireRole(authorities, "MANAGER");
+        require(authorities, "DOCUMENT_ROLLBACK");
+        requireRole(authorities, "MANAGER");
 
-    DocumentWorkflow workflow = lock(workflowId);
+        DocumentWorkflow workflow = lock(workflowId);
 
-    // Chỉ cho phép rollback tài liệu đã được duyệt.
-    if (workflow.getStatus() != DocumentWorkflowStatus.APPROVED) {
-        throw conflict("Only an approved document can be rolled back.");
+        if (workflow.getStatus() != DocumentWorkflowStatus.APPROVED) {
+            throw conflict("Only an approved document can be rolled back.");
+        }
+
+        if (sourceVersion == null || sourceVersion <= 0) {
+            throw ApiException.badRequest("A valid source version is required.");
+        }
+
+        String comment = normalizeComment(reason);
+
+        if (comment == null) {
+            throw ApiException.badRequest("A rollback reason is required.");
+        }
+
+        if (workflow.getSubmittedDocumentVersion() != null
+                && sourceVersion.equals(workflow.getSubmittedDocumentVersion())) {
+            throw ApiException.badRequest(
+                    "The source version must be different from the currently approved version.");
+        }
+
+        JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
+        requireDocumentOwner(document, workflow.getOwnerUserId());
+
+        int pendingVersion = document.path("pending_version").asInt(0);
+        int currentVersion = document.path("current_version").asInt(0);
+
+        if (pendingVersion != 0
+                || currentVersion != workflow.getSubmittedDocumentVersion()) {
+            throw conflict("The document version changed. Reload and retry.");
+        }
+
+        JsonNode rollbackVersion = DocumentationGenerationService.callWithChangeLogOverride(
+                authorities, true,
+                () -> documents.rollbackDocumentVersion(
+                        actor,
+                        workflow.getOwnerUserId(),
+                        workflow.getDocumentId(),
+                        sourceVersion,
+                        comment
+                ));
+
+        int newVersion = rollbackVersion != null ? rollbackVersion.path("number").asInt(0) : 0;
+
+        if (newVersion <= 0) {
+            throw conflict("The rollback service returned an invalid version.");
+        }
+
+        DocumentWorkflowStatus previous = workflow.getStatus();
+
+        workflow.startRollbackReview(newVersion);
+
+        workflows.saveAndFlush(workflow);
+
+        String rollbackSummary = "Restored from version " + sourceVersion + ". Reason: " + comment;
+        record(
+                workflow,
+                actor,
+                "ROLLBACK_REQUESTED",
+                previous,
+                workflow.getStatus(),
+                rollbackSummary
+        );
+        recordTimeline(
+                workflow.getDocumentId(),
+                newVersion,
+                "ROLLED_BACK",
+                rollbackSummary,
+                actor,
+                authorities,
+                ChangeTriggerSource.ROLLBACK,
+                workflow.getStatus().name(),
+                "v" + sourceVersion
+        );
+
+        return toResponse(workflow);
     }
 
-    if (sourceVersion == null || sourceVersion <= 0) {
-        throw ApiException.badRequest("A valid source version is required.");
+    private void recordTimeline(
+            String documentId,
+            Integer versionNumber,
+            String action,
+            String summary,
+            String actorId,
+            Set<String> authorities,
+            ChangeTriggerSource triggerSource,
+            String status,
+            String referenceId
+    ) {
+        if (changeLogService == null) {
+            return;
+        }
+        changeLogService.recordChange(
+                documentId,
+                null,
+                versionNumber,
+                action,
+                summary,
+                actorId,
+                null,
+                authorities,
+                triggerSource,
+                status,
+                referenceId
+        );
     }
 
-    String comment = normalizeComment(reason);
-
-    if (comment == null) {
-        throw ApiException.badRequest("A rollback reason is required.");
-    }
-
-    // Không cho chọn chính phiên bản đang được duyệt.
-    if (workflow.getSubmittedDocumentVersion() != null
-            && sourceVersion.equals(workflow.getSubmittedDocumentVersion())) {
-        throw ApiException.badRequest(
-                "The source version must be different from the currently approved version.");
-    }
-
-    JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
-    requireDocumentOwner(document, workflow.getOwnerUserId());
-
-    int pendingVersion = document.path("pending_version").asInt(0);
-    int currentVersion = document.path("current_version").asInt(0);
-
-    // Không rollback nếu tài liệu đang có phiên bản chờ xử lý
-    // hoặc phiên bản hiện tại không khớp workflow.
-    if (pendingVersion != 0
-            || currentVersion != workflow.getSubmittedDocumentVersion()) {
-        throw conflict("The document version changed. Reload and retry.");
-    }
-
-    // Yêu cầu AI service tạo phiên bản mới từ phiên bản đã duyệt.
-    JsonNode rollbackVersion = documents.rollbackDocumentVersion(
-            actor,
-            workflow.getOwnerUserId(),
-            workflow.getDocumentId(),
-            sourceVersion,
-            comment
-    );
-
-    int newVersion = rollbackVersion.path("number").asInt(0);
-
-    if (newVersion <= 0) {
-        throw conflict("The rollback service returned an invalid version.");
-    }
-
-    DocumentWorkflowStatus previous = workflow.getStatus();
-
-    // Phiên bản rollback phải được Staff Review lại.
-    workflow.startRollbackReview(newVersion);
-
-    workflows.saveAndFlush(workflow);
-
-    record(
-            workflow,
-            actor,
-            "ROLLBACK_REQUESTED",
-            previous,
-            workflow.getStatus(),
-            "Restored from version " + sourceVersion + ". Reason: " + comment
-    );
-
-    return toResponse(workflow);
-}
     private DocumentWorkflow lock(UUID id) {
         try {
             return workflows.lockById(id).orElseThrow(() -> ApiException.notFound("Document workflow not found."));
@@ -513,8 +607,6 @@ public class DocumentWorkflowService {
             }
             return pending;
         }
-        // A document saved from a generation job has current_version 0 (nothing approved yet) and
-        // pending_version 1: that pending version is exactly what the owner submits for review.
         if (pending > 0) return pending;
         int current = document.path("current_version").asInt(0);
         if (current < 1) throw conflict("The document has no readable version.");
