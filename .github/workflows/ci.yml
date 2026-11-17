@@ -290,7 +290,9 @@ jobs:
 
   docker-compose-validation:
     name: Docker Compose Validation
-    runs-on: ubuntu-latest
+    # Pinned like the other Docker/Playwright jobs: ubuntu-latest is Ubuntu 26.04, where the image builds
+    # could not download the Spring Boot parent POMs from Maven Central.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       TOKEN_ENCRYPTION_KEY: "ci-validation-placeholder-only"
