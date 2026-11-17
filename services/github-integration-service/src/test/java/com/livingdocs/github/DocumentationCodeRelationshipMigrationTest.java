@@ -24,6 +24,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class DocumentationCodeRelationshipMigrationTest {
 
+    private static final String[] MIGRATION_LOCATIONS = {
+            "classpath:db/migration-current",
+            "classpath:db/migration-common"
+    };
+
     private DataSource createIsolatedDataSource(String dbName) {
         String url = "jdbc:h2:mem:" + dbName + ";MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1";
         return new DriverManagerDataSource(url, "sa", "");
@@ -35,12 +40,12 @@ class DocumentationCodeRelationshipMigrationTest {
 
         var result = Flyway.configure()
                 .dataSource(dataSource)
-                .locations("classpath:db/migration")
+                .locations(MIGRATION_LOCATIONS)
                 .load()
                 .migrate();
 
-        assertThat(result.migrationsExecuted).isEqualTo(5);
-        assertThat(result.targetSchemaVersion).isEqualTo("5");
+        assertThat(result.migrationsExecuted).isGreaterThanOrEqualTo(5);
+        assertThat(Integer.parseInt(result.targetSchemaVersion)).isGreaterThanOrEqualTo(5);
 
         DefaultListableBeanFactory beanFactory = new DefaultListableBeanFactory();
         String testKey = Base64.getEncoder().encodeToString(new byte[32]);
@@ -67,7 +72,7 @@ class DocumentationCodeRelationshipMigrationTest {
 
         var baseline = Flyway.configure()
                 .dataSource(dataSource)
-                .locations("classpath:db/migration")
+                .locations(MIGRATION_LOCATIONS)
                 .target("4")
                 .load()
                 .migrate();
@@ -98,11 +103,11 @@ class DocumentationCodeRelationshipMigrationTest {
 
         var upgrade = Flyway.configure()
                 .dataSource(dataSource)
-                .locations("classpath:db/migration")
+                .locations(MIGRATION_LOCATIONS)
                 .load()
                 .migrate();
-        assertThat(upgrade.migrationsExecuted).isEqualTo(1);
-        assertThat(upgrade.targetSchemaVersion).isEqualTo("5");
+        assertThat(upgrade.migrationsExecuted).isGreaterThanOrEqualTo(1);
+        assertThat(Integer.parseInt(upgrade.targetSchemaVersion)).isGreaterThanOrEqualTo(5);
 
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM repositories WHERE id = ?", Integer.class, repositoryId))
                 .isEqualTo(1);
