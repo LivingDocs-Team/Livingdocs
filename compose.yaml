@@ -48,10 +48,11 @@
       DB_URL: jdbc:postgresql://backend-db:5432/cnpm
       DB_USERNAME: livingdocs
       DB_PASSWORD: livingdocs
-      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID: ${SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID:-local-placeholder}
-      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_SECRET: ${SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_SECRET:-local-placeholder}
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID: ${SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID:?Set the LivingDocs sign-in GitHub OAuth App client ID in the project .env}
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_SECRET: ${SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_SECRET:?Set the LivingDocs sign-in GitHub OAuth App client secret in the project .env}
       GITHUB_INTEGRATION_BASE_URL: http://github-integration:8082
       GITHUB_INTEGRATION_INTERNAL_SECRET: ${GITHUB_INTEGRATION_INTERNAL_SECRET:?GITHUB_INTEGRATION_INTERNAL_SECRET must be set in .env}
+      ADMIN_USER_AUDIT_RETENTION_DAYS: ${ADMIN_USER_AUDIT_RETENTION_DAYS:-0}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
     depends_on:
       backend-db:
@@ -101,6 +102,11 @@
       context: .
       dockerfile: code-analyzer/Dockerfile
     image: livingdocs-code-analyzer:local
+    environment:
+      # LD-402: evidences and submissions (PR #108) survive restarts (named volume below)
+      SUBMISSIONS_FILE: /app/data/submissions.json
+    volumes:
+      - analyzer-data:/app/data
     ports:
       # Optional local debugging access; service-to-service traffic uses analysis-internal.
       - "127.0.0.1:8000:8000"
@@ -136,6 +142,7 @@
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-livingdocs-dev-hai}
       GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-http://localhost:8082/api/github/callback}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       CODE_ANALYZER_BASE_URL: http://code-analyzer:8000
       AI_SERVICE_BASE_URL: http://ai-service:8001
@@ -181,6 +188,7 @@ volumes:
   backend-db-data:
   github-db-data:
   ai-templates:
+  analyzer-data:
 
 networks:
   backend-network:

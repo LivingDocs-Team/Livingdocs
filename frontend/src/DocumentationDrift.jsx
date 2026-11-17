@@ -3,10 +3,103 @@ import { githubApi, githubApiText } from './githubApi';
 
 // LD-159 Display drift severity: run a drift check for a pull request and show every finding
 // with its severity level, why it has that level (rules and evidence) and the evidence itself.
+// LD-346: the AI's review of each finding (verdict, explanation citing the evidence, suggested
+// documentation update) and its resolution (acknowledge, resolve, dismiss with a reason, reopen).
 
 const LEVELS = ['critical', 'high', 'medium', 'low'];
 const LEVEL_LABEL = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' };
 const TYPE_LABEL = { referential: 'Referential', signature: 'Signature', semantic: 'Semantic' };
+const VERDICT_LABEL = {
+  confirmed: 'AI confirmed', disputed: 'AI disputed', uncertain: 'AI uncertain', not_reviewed: 'Rule-based explanation',
+};
+const RESOLUTION_LABEL = { open: 'Open', acknowledged: 'Acknowledged', resolved: 'Resolved', dismissed: 'Dismissed' };
+
+function reviewProgress(findings) {
+  const counts = { open: 0, acknowledged: 0, resolved: 0, dismissed: 0 };
+  findings.forEach((finding) => { counts[finding.resolution?.status || 'open'] += 1; });
+  let status = 'not_required';
+  if (findings.length) {
+    if (counts.open === findings.length) status = 'pending';
+    else if (counts.open + counts.acknowledged === 0) status = 'completed';
+    else status = 'in_progress';
+  }
+  return { ...counts, status };
+}
+
+function AIReview({ review }) {
+  if (!review) return null;
+  return (
+    <div className={`drift-ai drift-ai-${review.verdict}`} aria-label="AI review">
+      <p>
+        <span className="drift-ai-verdict" data-verdict={review.verdict}>{VERDICT_LABEL[review.verdict] || review.verdict}</span>
+        {' '}{review.explanation}
+      </p>
+      {review.suggested_update && (
+        <>
+          <h4>Suggested documentation update</h4>
+          <pre className="drift-suggestion">{review.suggested_update}</pre>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Resolution({ finding, onResolve }) {
+  const [reason, setReason] = useState('');
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const current = finding.resolution?.status || 'open';
+
+  async function change(status, note) {
+    setBusy(true);
+    setError('');
+    try {
+      await onResolve(finding.id, status, note);
+      setAsking(false);
+      setReason('');
+    } catch (requestError) {
+      setError(requestError.message || 'Could not update the finding.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="drift-resolution" aria-label={`Resolution of ${finding.id}`}>
+      <span className={`drift-resolution-status drift-status-${current}`} data-status={current}>{RESOLUTION_LABEL[current]}</span>
+      {finding.resolution?.note && <span className="drift-meta"> {finding.resolution.note}</span>}
+      <div className="drift-resolution-actions">
+        {current === 'open' && <button type="button" disabled={busy} onClick={() => change('acknowledged')}>Acknowledge</button>}
+        {current !== 'resolved' && current !== 'dismissed' && (
+          <button type="button" disabled={busy} onClick={() => change('resolved')}>Mark resolved</button>
+        )}
+        {current !== 'dismissed' && current !== 'resolved' && (
+          <button type="button" disabled={busy} onClick={() => setAsking((value) => !value)}>Dismiss</button>
+        )}
+        {current !== 'open' && <button type="button" disabled={busy} onClick={() => change('open')}>Reopen</button>}
+      </div>
+      {asking && (
+        <form className="drift-dismiss" onSubmit={(event) => { event.preventDefault(); if (reason.trim()) change('dismissed', reason.trim()); }}>
+          <label htmlFor={`dismiss-${finding.id}`}>Why is this not a documentation drift?</label>
+          <input id={`dismiss-${finding.id}`} value={reason} maxLength={2000} onChange={(event) => setReason(event.target.value)} />
+          <button type="submit" disabled={busy || !reason.trim()}>Confirm dismiss</button>
+        </form>
+      )}
+      {error && <p role="alert" className="drift-error">{error}</p>}
+    </div>
+  );
+}
+
+function isDriftReport(value) {
+  return Boolean(value && typeof value === 'object'
+    && ['drift_detected', 'no_drift'].includes(value.status)
+    && value.summary && typeof value.summary === 'object'
+    && Number.isInteger(value.summary.findings)
+    && Array.isArray(value.findings)
+    && value.findings.every((finding) => finding && typeof finding === 'object')
+    && value.pull_request && typeof value.pull_request === 'object');
+}
 
 function SeverityBadge({ level, score }) {
   if (!level) return null;
@@ -33,7 +126,7 @@ function SeverityReasons({ assessment }) {
           {assessment.base_evidence?.length > 0 && <span className="drift-evidence-ref"> [{assessment.base_evidence.join(', ')}]</span>}
           <p>{assessment.base_reason}</p>
         </li>
-        {assessment.adjustments.map((step) => (
+        {(assessment.adjustments || []).map((step) => (
           <li key={step.rule}>
             <strong>{step.label}</strong>: {delta(step.delta)} level
             {step.evidence?.length > 0 && <span className="drift-evidence-ref"> [{step.evidence.join(', ')}]</span>}
@@ -47,6 +140,7 @@ function SeverityReasons({ assessment }) {
 }
 
 function Evidence({ items }) {
+  if (!items?.length) return <p className="drift-meta">No evidence was returned for this finding.</p>;
   return (
     <ul className="drift-evidence">
       {items.map((item) => (
@@ -73,9 +167,10 @@ function Evidence({ items }) {
   );
 }
 
-function Finding({ finding }) {
+function Finding({ finding, onResolve }) {
   const [open, setOpen] = useState(false);
   const part = finding.document || {};
+  const location = part.path || finding.file || 'Location unavailable';
   return (
     <article className={`drift-finding severity-border-${finding.severity}`} data-finding={finding.id}>
       <header className="drift-finding-heading">
@@ -88,12 +183,16 @@ function Finding({ finding }) {
       <p>{finding.message}</p>
       <dl className="drift-facts">
         <dt>Where</dt>
-        <dd><code>{part.path}</code>{part.document_id ? ` (saved document, v${part.version})` : ''}</dd>
+        <dd><code>{location}</code>{part.document_id ? ` (saved document, v${part.version})` : ''}</dd>
         <dt>Suggestion</dt>
         <dd>{finding.suggestion}</dd>
         <dt>Confidence</dt>
-        <dd>{Number(finding.confidence).toFixed(2)} ({finding.confidence_level})</dd>
+        <dd>{Number.isFinite(Number(finding.confidence))
+          ? `${Number(finding.confidence).toFixed(2)} (${finding.confidence_level || 'level unavailable'})`
+          : 'Not provided'}</dd>
       </dl>
+      <AIReview review={finding.ai_review} />
+      <Resolution finding={finding} onResolve={onResolve} />
       <button type="button" className="text-button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         {open ? 'Hide severity reasons and evidence' : 'Why this severity? Show evidence'}
       </button>
@@ -119,10 +218,20 @@ export default function DocumentationDrift({ userId }) {
   const [levels, setLevels] = useState([]);
   const [minSeverity, setMinSeverity] = useState('all');
   const [loadingRepositories, setLoadingRepositories] = useState(Boolean(userId));
+  const [repositoryError, setRepositoryError] = useState('');
+  const [repositoryLoadAttempt, setRepositoryLoadAttempt] = useState(0);
+  const [severityRulesError, setSeverityRulesError] = useState('');
+  const [severityRulesLoadAttempt, setSeverityRulesLoadAttempt] = useState(0);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState('');
+  const [canRetryAnalysis, setCanRetryAnalysis] = useState(false);
   const [copied, setCopied] = useState('');
   const [markdown, setMarkdown] = useState('');
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const [openingReportId, setOpeningReportId] = useState('');
+  const [failedReportId, setFailedReportId] = useState('');
 
   useEffect(() => {
     if (!userId) return undefined;
@@ -130,24 +239,53 @@ export default function DocumentationDrift({ userId }) {
     githubApi(`/api/workspaces/${encodeURIComponent(workspaceId)}/repositories`, { userId })
       .then((items) => {
         if (cancelled) return;
-        setRepositories(items || []);
+        if (!Array.isArray(items)) throw new Error('The repository list response was invalid.');
+        setRepositories(items);
         setRepositoryId((current) => items?.some((item) => String(item.id) === current)
           ? current : String(items?.[0]?.id || ''));
       })
-      .catch((requestError) => { if (!cancelled) setError(requestError.message || 'Could not load repositories.'); })
+      .catch((requestError) => {
+        if (!cancelled) setRepositoryError(requestError.message || 'Could not load repositories.');
+      })
       .finally(() => { if (!cancelled) setLoadingRepositories(false); });
-    githubApi('/api/documentation/drift/severity-rules', { userId })
-      .then((rules) => { if (!cancelled) setLevels(rules?.levels || []); })
-      .catch(() => { /* the legend is optional */ });
     return () => { cancelled = true; };
-  }, [userId, workspaceId]);
+  }, [userId, workspaceId, repositoryLoadAttempt]);
+
+  useEffect(() => {
+    if (!userId) return undefined;
+    let cancelled = false;
+    githubApi('/api/documentation/drift/severity-rules', { userId })
+      .then((rules) => {
+        if (cancelled) return;
+        if (!Array.isArray(rules?.levels)) throw new Error('The severity rules response was invalid.');
+        setLevels(rules.levels);
+      })
+      .catch((requestError) => {
+        if (!cancelled) setSeverityRulesError(requestError.message || 'Could not load severity guidance.');
+      });
+    return () => { cancelled = true; };
+  }, [userId, severityRulesLoadAttempt]);
 
   useEffect(() => {
     if (!repositoryId) return undefined;
     let cancelled = false;
     githubApi(`/api/repositories/${encodeURIComponent(repositoryId)}/drift/reports`, { userId })
-      .then((rows) => { if (!cancelled) setHistory(rows || []); })
-      .catch(() => { if (!cancelled) setHistory([]); });
+      .then((rows) => {
+        if (cancelled) return;
+        if (!Array.isArray(rows)) throw new Error('The drift history response was invalid.');
+        setHistory(rows);
+      })
+      .catch((requestError) => {
+        if (cancelled) return;
+        setHistory([]);
+        setHistoryError(requestError.message || 'Could not load previous drift checks.');
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setHistoryLoaded(true);
+          setLoadingHistory(false);
+        }
+      });
     return () => { cancelled = true; };
   }, [repositoryId, userId]);
 
@@ -155,20 +293,34 @@ export default function DocumentationDrift({ userId }) {
     const findings = report?.findings || [];
     if (minSeverity === 'all') return findings;
     const floor = LEVELS.indexOf(minSeverity);
-    return findings.filter((finding) => LEVELS.indexOf(finding.severity) <= floor);
+    return findings.filter((finding) => {
+      const index = LEVELS.indexOf(finding.severity);
+      return index >= 0 && index <= floor;
+    });
   }, [report, minSeverity]);
 
   async function refreshHistory() {
+    if (!repositoryId) return;
+    setLoadingHistory(true);
+    setHistoryError('');
     try {
-      setHistory(await githubApi(`/api/repositories/${encodeURIComponent(repositoryId)}/drift/reports`, { userId }) || []);
-    } catch {
+      const rows = await githubApi(`/api/repositories/${encodeURIComponent(repositoryId)}/drift/reports`, { userId });
+      if (!Array.isArray(rows)) throw new Error('The drift history response was invalid.');
+      setHistory(rows);
+      setHistoryLoaded(true);
+    } catch (requestError) {
       setHistory([]);
+      setHistoryError(requestError.message || 'Could not load previous drift checks.');
+    } finally {
+      setLoadingHistory(false);
     }
   }
 
   async function handleAnalyze(event) {
-    event.preventDefault();
+    event?.preventDefault();
+    if (analyzing) return;
     setError('');
+    setCanRetryAnalysis(false);
     setCopied('');
     const number = Number(pullRequest);
     if (!repositoryId) { setError('Add a repository to your workspace first.'); return; }
@@ -178,12 +330,14 @@ export default function DocumentationDrift({ userId }) {
       const result = await githubApi(`/api/repositories/${encodeURIComponent(repositoryId)}/drift/analyze`, {
         method: 'POST', userId, body: { pullRequestNumber: number, includeRepositoryDocs },
       });
+      if (!isDriftReport(result)) throw new Error('The drift analysis response was invalid. Please try again.');
       setReport(result);
       setMinSeverity('all');
       setMarkdown('');
       await refreshHistory();
     } catch (requestError) {
       setError(requestError.message || 'The drift check failed. Please try again.');
+      setCanRetryAnalysis(true);
     } finally {
       setAnalyzing(false);
     }
@@ -191,13 +345,21 @@ export default function DocumentationDrift({ userId }) {
 
   async function openReport(reportId) {
     setError('');
+    setCanRetryAnalysis(false);
+    setFailedReportId('');
     setCopied('');
+    setOpeningReportId(reportId);
     try {
-      setReport(await githubApi(`/api/repositories/${encodeURIComponent(repositoryId)}/drift/reports/${encodeURIComponent(reportId)}`, { userId }));
+      const result = await githubApi(`/api/repositories/${encodeURIComponent(repositoryId)}/drift/reports/${encodeURIComponent(reportId)}`, { userId });
+      if (!isDriftReport(result)) throw new Error('The drift report response was invalid.');
+      setReport(result);
       setMinSeverity('all');
       setMarkdown('');
     } catch (requestError) {
       setError(requestError.message || 'Could not open the drift report.');
+      setFailedReportId(reportId);
+    } finally {
+      setOpeningReportId('');
     }
   }
 
@@ -222,6 +384,22 @@ export default function DocumentationDrift({ userId }) {
   }
 
   const summary = report?.summary;
+  const progress = reviewProgress(report?.findings || []);
+
+  async function resolveFinding(findingId, status, note) {
+    const updated = await githubApi(
+      `/api/repositories/${encodeURIComponent(repositoryId)}/drift/reports/${encodeURIComponent(report.id)}/findings/${encodeURIComponent(findingId)}/resolution`,
+      { method: 'PUT', userId, body: note ? { status, note } : { status } },
+    );
+    setReport((current) => ({
+      ...current,
+      findings: current.findings.map((finding) => (finding.id === findingId ? { ...finding, ...updated } : finding)),
+    }));
+  }
+  const showHistoryLoading = loadingHistory || (Boolean(repositoryId) && !historyLoaded && !historyError);
+  const reportStatus = report?.status === 'drift_detected'
+    ? 'Drift detected'
+    : report?.status === 'no_drift' ? 'No drift detected' : report?.status;
   return (
     <section className="login-card documentation-drift-page" aria-labelledby="documentation-drift-title">
       <h1 id="documentation-drift-title">Documentation Drift</h1>
@@ -229,8 +407,25 @@ export default function DocumentationDrift({ userId }) {
 
       <form className="documentation-drift-form" onSubmit={handleAnalyze}>
         <label htmlFor="drift-repository">Repository</label>
+        {loadingRepositories && <p role="status">Loading repositories…</p>}
+        {repositoryError && <div className="drift-inline-error" role="alert">
+          <span>{repositoryError}</span>
+          <button type="button" className="text-button" onClick={() => {
+            setLoadingRepositories(true);
+            setRepositoryError('');
+            setRepositoryLoadAttempt((n) => n + 1);
+          }}>Retry loading repositories</button>
+        </div>}
         <select id="drift-repository" value={repositoryId} disabled={loadingRepositories || !repositories.length}
-          onChange={(event) => { setRepositoryId(event.target.value); setReport(null); setError(''); }}>
+          onChange={(event) => {
+            setRepositoryId(event.target.value);
+            setHistory([]);
+            setHistoryLoaded(false);
+            setHistoryError('');
+            setLoadingHistory(Boolean(event.target.value));
+            setReport(null);
+            setError('');
+          }}>
           {repositories.length === 0 && <option value="">No workspace repositories</option>}
           {repositories.map((repository) => <option key={repository.id} value={repository.id}>{repository.fullName}</option>)}
         </select>
@@ -241,12 +436,37 @@ export default function DocumentationDrift({ userId }) {
           <button type="submit" disabled={analyzing || !repositoryId}>{analyzing ? 'Checking...' : 'Check drift'}</button>
         </div>
         <label className="drift-checkbox">
-          <input type="checkbox" checked={includeRepositoryDocs} onChange={(event) => setIncludeRepositoryDocs(event.target.checked)} />
+          <input type="checkbox" checked={includeRepositoryDocs} disabled={analyzing} onChange={(event) => setIncludeRepositoryDocs(event.target.checked)} />
           Also check README and Markdown files of the repository
         </label>
       </form>
       {error && <p role="alert" className="drift-error">{error}</p>}
+      {error && failedReportId && (
+        <button type="button" className="documentation-secondary-button drift-retry" disabled={Boolean(openingReportId)} onClick={() => openReport(failedReportId)}>
+          Retry opening report
+        </button>
+      )}
+      {analyzing && <p className="drift-loading" role="status" aria-live="polite">Analyzing Pull Request drift...</p>}
+      {!loadingRepositories && !repositoryError && repositories.length === 0 && (
+        <div className="drift-empty" role="status">
+          <h2>No repositories available</h2>
+          <p>Connect a repository in Repository Management before checking documentation drift.</p>
+        </div>
+      )}
+      {error && canRetryAnalysis && repositoryId && Number.isInteger(Number(pullRequest)) && Number(pullRequest) > 0 && (
+        <button type="button" className="documentation-secondary-button drift-retry" disabled={analyzing} onClick={handleAnalyze}>
+          Retry drift analysis
+        </button>
+      )}
 
+      {severityRulesError && <div className="drift-inline-error" role="alert">
+        <span>{severityRulesError}</span>
+        <button type="button" className="text-button" onClick={() => {
+          setLevels([]);
+          setSeverityRulesError('');
+          setSeverityRulesLoadAttempt((n) => n + 1);
+        }}>Retry severity guidance</button>
+      </div>}
       {levels.length > 0 && (
         <details className="drift-legend">
           <summary>Severity levels</summary>
@@ -263,6 +483,14 @@ export default function DocumentationDrift({ userId }) {
 
       {report && (
         <div className="drift-report" aria-live="polite">
+          <div className="drift-report-meta" aria-label="Analysis details">
+            <span className={`drift-status drift-status-${report.status || 'unknown'}`} data-analysis-status={report.status || 'unknown'}>
+              {reportStatus || 'Analysis status unavailable'}
+            </span>
+            <span><strong>Repository:</strong> {report.repository || repositories.find((item) => String(item.id) === repositoryId)?.fullName || 'Unavailable'}</span>
+            {report.pull_request?.number != null && <span><strong>Pull Request:</strong> #{report.pull_request.number}{report.pull_request.title ? ` · ${report.pull_request.title}` : ''}</span>}
+            {report.created_at && <span><strong>Analyzed:</strong> {new Date(report.created_at).toLocaleString()}</span>}
+          </div>
           <div className={`drift-overall severity-border-${summary?.highest_severity || 'none'}`}>
             {summary?.highest_severity ? (
               <>
@@ -272,13 +500,24 @@ export default function DocumentationDrift({ userId }) {
                 </div>
                 <p className="drift-recommendation">{summary.recommendation}</p>
               </>
-            ) : (
+            ) : report.status === 'no_drift' && report.findings.length === 0 ? (
               <p className="drift-recommendation">No documentation drift: the checked documentation matches the code.</p>
+            ) : report.status === 'drift_detected' ? (
+              <p className="drift-recommendation">Drift was detected, but severity details are unavailable in this report.</p>
+            ) : (
+              <p className="drift-recommendation">The analysis did not return enough information to determine drift status.</p>
             )}
             <p className="drift-meta">
               PR #{report.pull_request?.number}{report.pull_request?.title ? ` · ${report.pull_request.title}` : ''}
               {' · '}{summary?.findings || 0} finding(s) · {summary?.breaking || 0} breaking · {summary?.affected_documents || 0} document(s)
             </p>
+            {summary?.findings > 0 && (
+              <p className="drift-meta drift-review-progress" data-review={progress.status}>
+                Review {progress.status.replace('_', ' ')}: {progress.open} open · {progress.acknowledged} acknowledged
+                {' · '}{progress.resolved} resolved · {progress.dismissed} dismissed
+                {' · '}{report.review?.ai_mode === 'ai' ? 'AI review on' : 'AI review offline (rule-based explanations)'}
+              </p>
+            )}
           </div>
 
           {summary?.findings > 0 && (
@@ -311,7 +550,7 @@ export default function DocumentationDrift({ userId }) {
           )}
 
           <div className="drift-findings">
-            {shownFindings.map((finding) => <Finding key={finding.id} finding={finding} />)}
+            {shownFindings.map((finding) => <Finding key={finding.id} finding={finding} onResolve={resolveFinding} />)}
           </div>
 
           {report.warnings?.length > 0 && (
@@ -322,22 +561,37 @@ export default function DocumentationDrift({ userId }) {
         </div>
       )}
 
-      {history.length > 0 && (
-        <div className="drift-history">
-          <h2>Previous checks</h2>
+      {report && summary?.findings > 0 && shownFindings.length === 0 && (
+        <p className="drift-empty" role="status">No findings match the selected severity filter.</p>
+      )}
+
+      <section className="drift-history" aria-labelledby="drift-history-heading">
+        <h2 id="drift-history-heading">Previous checks</h2>
+        {openingReportId && <p role="status">Opening selected report...</p>}
+        {showHistoryLoading && <p role="status">Loading previous checks...</p>}
+        {!showHistoryLoading && historyError && <div className="drift-inline-error" role="alert">
+          <span>{historyError}</span>
+          <button type="button" className="text-button" onClick={() => void refreshHistory()}>Retry loading history</button>
+        </div>}
+        {!showHistoryLoading && !historyError && historyLoaded && history.length === 0 && (
+          <p className="drift-empty" role="status">No previous drift checks for this repository.</p>
+        )}
+        {!showHistoryLoading && !historyError && history.length > 0 && (
           <ul>
             {history.map((row) => (
               <li key={row.id}>
-                <button type="button" className="text-button" onClick={() => openReport(row.id)}>
-                  PR #{row.pull_request_number}{row.pull_request_title ? ` · ${row.pull_request_title}` : ''}
+                <button type="button" className="text-button" disabled={analyzing || Boolean(openingReportId)} onClick={() => openReport(row.id)}>
+                  PR #{row.pull_request_number}{row.pull_request_title ? ` - ${row.pull_request_title}` : ''}
                 </button>
+                <span className={`drift-status drift-status-${row.status || 'unknown'}`}>{row.status || 'Status unavailable'}</span>
                 <SeverityBadge level={row.summary?.highest_severity} />
-                <span className="drift-meta"> {row.summary?.findings || 0} finding(s)</span>
+                <span className="drift-meta">{row.summary?.findings || 0} finding(s)</span>
+                {row.created_at && <time className="drift-meta" dateTime={row.created_at}>{new Date(row.created_at).toLocaleString()}</time>}
               </li>
             ))}
           </ul>
-        </div>
-      )}
+        )}
+      </section>
     </section>
   );
 }

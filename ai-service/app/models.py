@@ -252,7 +252,7 @@ class ConfidenceLevel(str, Enum):
 class EntityReport(BaseModel):
     kind: str                                 # class | method | function | endpoint
     name: str
-    confidence: float
+    confidence: float = Field(ge=0.0, le=1.0)          # LD-356: bounded, see app/confidence.py
     level: ConfidenceLevel
     evidence: List[Evidence] = Field(default_factory=list)
     factors: Dict[str, float] = Field(default_factory=dict)
@@ -261,7 +261,7 @@ class EntityReport(BaseModel):
 class FileReport(BaseModel):
     path: str
     status: FileResultStatus
-    confidence: Optional[float] = None
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     level: Optional[ConfidenceLevel] = None
     entities: List[EntityReport] = Field(default_factory=list)
     context_used: List[Evidence] = Field(default_factory=list)  # retrieved C/D items cited
@@ -275,7 +275,7 @@ class JobReport(BaseModel):
     # Snapshot of the template used when the document was generated.
     template_instructions: Optional[str] = None
     template_sections: List[str] = Field(default_factory=list)
-    confidence: Optional[float] = None
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     level: Optional[ConfidenceLevel] = None
     method: str = ""
     files: List[FileReport] = Field(default_factory=list)
@@ -304,3 +304,36 @@ class Job(BaseModel):
     error: Optional[str] = None
     created_at: datetime = Field(default_factory=now)
     updated_at: datetime = Field(default_factory=now)
+
+
+# ---------- Retrieval preview (LD-335): what the index holds and what each file retrieves ----------
+
+class RetrievalHit(BaseModel):
+    ref: str                                  # C1.. / D1.. as the prompt would cite it
+    kind: str                                 # code | doc
+    entity: str                               # class | method | function | endpoint | section
+    path: str
+    name: str
+    section: Optional[str] = None             # doc passages: heading path "Shop > Cart"
+    line_start: Optional[int] = None
+    line_end: Optional[int] = None
+    score: float
+    excerpt: str
+
+
+class FileRetrieval(BaseModel):
+    path: str
+    code: List[RetrievalHit] = Field(default_factory=list)
+    docs: List[RetrievalHit] = Field(default_factory=list)
+
+
+class IndexSummary(BaseModel):
+    files: int                                # analysed files with status ok
+    documents: int                            # context documents
+    chunks: Dict[str, int]                    # indexed items per entity kind
+    vocabulary: int                           # distinct terms
+
+
+class RetrievalPreview(BaseModel):
+    index: IndexSummary
+    files: List[FileRetrieval]

@@ -1,5 +1,6 @@
 """LivingDocs AI service - AI-assisted documentation generation (LD-90, LD-340), versioned
-documentation (LD-195) and documentation drift detection (LD-145).
+documentation (LD-195), documentation drift detection (LD-145) and AI-based drift analysis
+with review and resolution (LD-346).
 
 Run:  uvicorn main:app --reload --port 8001
 Docs: http://localhost:8001/docs
@@ -8,33 +9,64 @@ from typing import List, Optional
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import PlainTextResponse
+from pydantic import AwareDatetime
 
+from app.change_context import ChangeContextReport, ChangeContextRequest, change_context
 from app.drift import analyze as analyze_drift
 from app.drift import drift_reports
 from app.drift_changes import analyze_pull_request
 from app.drift_markdown import at_least, render as render_drift_markdown
+from app.drift_models import (DriftAnalyzeRequest, DriftFinding, DriftReport, DriftReportSummary,
+                              PullRequestAnalysis, ResolutionUpdate, Severity)
+from app.drift_review import ResolutionError
 from app.drift_models import (DriftAnalyzeRequest, DriftReport, DriftReportSummary,
                               PullRequestAnalysis, Severity)
+from app.suggestion_api import router as suggestion_router
 from app.drift_severity import CAPS, SCORE_BANDS, SEVERITY_LEVELS, rules_table
 from app.generator import get_generator
 from app.jobs import jobs, run_job
-from app.models import (SECTION_KINDS, SECTION_NAMES, GenerateRequest, Job, JobReport,
+from app.models import (SECTION_KINDS, SECTION_NAMES, FileRetrieval, GenerateRequest, IndexSummary,
+                        Job, JobReport, RetrievalHit, RetrievalPreview,
                         JobStatus, ReviewEvidenceResponse, Template, TemplateIn,
                         TemplateSections)
+from app.normalize import normalize
+from app.retrieval import build_index, retrieve
 from app.templates import TemplateNameTaken, templates
 from app.version_models import (Document, DocumentContentEdit, DocumentCreate, DocumentVersion,
                                 HistoryEvent, InternalDocumentCreate, InternalVersionDecision,
                                 InternalRollbackRequest, VersionComparison,
                                 VersionSummary)
 from app.versions import VersionError, documents
-from app.internal_auth import require_internal_service
+from app.internal_auth import require_internal_service, require_service_credential_when_configured
+from app.source_change_impact import (AffectedDocumentsRequest, AffectedDocumentsResult,
+                                      find_for_source_change)
 
-app = FastAPI(title="LivingDocs AI Service", version="0.1.0")
+app = FastAPI(title="LivingDocs AI Service", version="0.1.0",
+              dependencies=[Depends(require_service_credential_when_configured)])
 
 
 @app.get("/health")
 def health():
     return {"status": "ok", "generator": get_generator().mode}
+
+
+@app.get("/internal/system-analytics", dependencies=[Depends(require_internal_service)])
+def system_analytics(start: AwareDatetime = Query(alias="from"),
+                     end: AwareDatetime = Query(alias="to")):
+    if start >= end:
+        raise HTTPException(400, "from must be earlier than to")
+    created, audit = documents.count_activity(start, end)
+    completed, failed = jobs.count_outcomes(start, end)
+    return {
+        "documentsCreated": created,
+        "documentVersionAuditEvents": audit,
+        "aiJobs": {
+            "completed": completed,
+            "failed": failed,
+            "observedSince": jobs.observed_since,
+            "scope": "CURRENT_AI_PROCESS",
+        },
+    }
 
 
 # ---------- Documentation generation ----------
@@ -49,6 +81,34 @@ def generate(req: GenerateRequest, background: BackgroundTasks):
     # the job keeps the template as it was now: editing or deleting it later does not change this job
     background.add_task(run_job, job.id, req, None, tpl)
     return job
+
+
+@app.post("/retrieval/preview", response_model=RetrievalPreview)
+def retrieval_preview(req: GenerateRequest):
+    """LD-335: show what the retrieval index holds and which related code (C) and documentation
+    passages (D) each file would receive in its prompt. Nothing is generated or stored."""
+    files = [f.model_copy(deep=True) for f in req.files]
+    for f in files:
+        normalize(f)
+    req = req.model_copy(update={"files": files})
+    index = build_index(req)
+    st = index.stats()
+
+    def hit(c) -> RetrievalHit:
+        return RetrievalHit(ref=c.ref, kind=c.kind, entity=c.entity, path=c.path, name=c.name,
+                            section=c.section or None, line_start=c.line_start, line_end=c.line_end,
+                            score=c.score, excerpt=c.excerpt)
+
+    out = []
+    for f in files:
+        if f.status.value != "ok":
+            continue
+        got = retrieve(index, f)
+        out.append(FileRetrieval(path=f.path, code=[hit(c) for c in got.code],
+                                 docs=[hit(c) for c in got.docs]))
+    return RetrievalPreview(index=IndexSummary(files=st.files, documents=st.documents,
+                                               chunks=st.chunks, vocabulary=st.vocabulary),
+                            files=out)
 
 
 @app.get("/jobs", response_model=List[Job])
@@ -353,12 +413,28 @@ def drift_changes(req: DriftAnalyzeRequest):
     return analyze_pull_request(req.pull_request, req.files, req.repository)
 
 
+@app.post("/drift/context", response_model=ChangeContextReport)
+def drift_context(req: ChangeContextRequest):
+    """LD-338: for every code entity the Pull Request changes, the context needed to update its
+    documentation: the diff (X1), related code at the head commit (C: callers, callees, similar)
+    and documentation (D: passages naming the entity first, then related ones), plus a prompt
+    text citing them. Nothing is stored and no AI is called."""
+    return change_context(req, documents)
+
+
+app.include_router(suggestion_router)   # LD-353 documentation update suggestions
+
+
 @app.post("/drift/analyze", response_model=DriftReport, status_code=201)
 def drift_analyze(req: DriftAnalyzeRequest):
     """LD-147/148/149: findings (Referential / Signature / Semantic, severity, confidence) for
     every saved document section and repository Markdown file that describes changed code,
     each with its evidence (code diff, documentation passage, commit, ticket). The report is
-    kept and can be read again from /drift/reports/{id}."""
+    kept and can be read again from /drift/reports/{id}.
+
+    LD-346: every finding also gets `ai_review` (AI verdict, explanation citing its evidence ids,
+    suggested documentation update; offline explanation without an API key; `ai_review: false`
+    skips the AI) and `resolution` (open until a reviewer handles it)."""
     return drift_reports.add(analyze_drift(req, documents))
 
 
@@ -390,6 +466,25 @@ def get_drift_report_markdown(report_id: str, min_severity: Optional[Severity] =
     """LD-159: the report as Markdown grouped by severity, e.g. for a Pull Request comment."""
     return PlainTextResponse(render_drift_markdown(_drift_report(report_id), min_severity),
                              media_type="text/markdown")
+
+
+@app.put("/drift/reports/{report_id}/findings/{finding_id}/resolution", response_model=DriftFinding)
+def resolve_drift_finding(report_id: str, finding_id: str, update: ResolutionUpdate):
+    """LD-346: review and resolution of one finding: open, acknowledged, resolved or dismissed
+    (dismissing needs a `note` with the reason). Every change is kept in `resolution.history`."""
+    try:
+        finding = drift_reports.resolve(report_id, finding_id, update)
+    except ResolutionError as e:
+        raise HTTPException(e.status, e.message)
+    if finding is None:
+        raise HTTPException(404, "Drift report not found")
+    return finding
+@app.post("/internal/affected-documents", response_model=AffectedDocumentsResult,
+          dependencies=[Depends(require_internal_service)])
+def affected_documents(req: AffectedDocumentsRequest):
+    """LD-122: parts of the given saved documents that a source change (LD-116) may have made
+    outdated, each `direct` (documents a changed file) or `dependent` (refers to changed code)."""
+    return find_for_source_change(req, documents)
 
 
 @app.get("/drift/severity-rules")
