@@ -201,7 +201,8 @@ jobs:
 
   ai-service-test:
     name: AI Service Build and Test
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest is Ubuntu 26.04, which Playwright 1.56 cannot install Chromium on.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -230,7 +231,7 @@ jobs:
 
   ai-service-integration:
     name: AI Service Integration Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
