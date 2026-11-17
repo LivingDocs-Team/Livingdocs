@@ -417,9 +417,11 @@ def test_developer_role_gets_no_workflow_actions(page: Page):
     backend.login_as("developer")
     open_documentation(page, backend)
 
+    # Matrix row #10: a Developer only reads review feedback, so neither queue panel is offered
+    # (the backend would answer 403 for the Staff queue).
     expect(page.get_by_role("button", name="Open Manager Approval")).to_have_count(0)
-    page.get_by_role("button", name="Open Staff Review Queue").click()
-    expect(page.get_by_role("alert").filter(has_text="not authorized to view the Staff review queue")).to_be_visible()
+    expect(page.get_by_role("button", name="Open Staff Review Queue")).to_have_count(0)
+    assert not any(path.endswith("/staff/queue") for _, path, _ in backend.requests)
     for name in ("Claim review", "Release claim", "Submit review", "Approve document", "Reject document"):
         expect(page.get_by_role("button", name=name)).to_have_count(0)
     assert backend.mutating_posts() == []
