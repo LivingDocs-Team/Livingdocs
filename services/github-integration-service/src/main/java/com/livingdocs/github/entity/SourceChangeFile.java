@@ -81,4 +81,3 @@ public class SourceChangeFile {
 
     public List<SourceChangeEntity> getEntities() { return entities; }
 }
-

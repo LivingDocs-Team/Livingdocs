@@ -188,4 +188,3 @@ public class DocumentationSearchService {
 
     private record CachedAnalysis(String commit, JsonNode analysis) { }
 }
-

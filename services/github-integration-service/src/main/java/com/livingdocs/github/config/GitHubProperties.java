@@ -21,4 +21,3 @@ public record GitHubProperties(
         String oauthBaseUrl,
         String apiBaseUrl) {
 }
-

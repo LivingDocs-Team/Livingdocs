@@ -5,4 +5,3 @@ import os
 os.environ["TEMPLATES_FILE"] = ""
 # Same for versioned documents (never write data/documents.json).
 os.environ["DOCUMENTS_FILE"] = ""
-

@@ -26,4 +26,3 @@ public record PullRequestResponse(
                 p.getCreatedAt(), p.getUpdatedAt(), p.getMergedAt(), p.getSource().name());
     }
 }
-

@@ -73,4 +73,3 @@ class GitHubRepositoryFetcherLiveTest {
         return value == null || value.isBlank() ? fallback : value;
     }
 }
-

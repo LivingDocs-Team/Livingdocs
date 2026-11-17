@@ -218,4 +218,3 @@ public class DocumentWorkflowController {
                 .collect(Collectors.toUnmodifiableSet());
     }
 }
-

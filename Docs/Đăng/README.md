@@ -64,4 +64,3 @@ Không phải chức năng mới nên không có file FR riêng:
 - `services/github-integration-service/docs/repository-sync-contract.md`: contract của API đồng bộ.
 - `services/github-integration-service/docs/frontend-api-guide.md`: hướng dẫn gọi API cho frontend.
 - `services/github-integration-service/docs/samples/`: file JSON mẫu của kết quả đồng bộ, lỗi và dữ liệu cho phân tích.
-

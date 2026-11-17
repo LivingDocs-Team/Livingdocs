@@ -337,4 +337,3 @@ class IndexSummary(BaseModel):
 class RetrievalPreview(BaseModel):
     index: IndexSummary
     files: List[FileRetrieval]
-

@@ -318,4 +318,3 @@ public class RepositoryManagementService {
                 .orElseThrow(ApiException::githubNotConnected);
     }
 }
-

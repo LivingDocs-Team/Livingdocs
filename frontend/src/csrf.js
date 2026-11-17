@@ -15,4 +15,3 @@ export async function fetchCsrfToken(apiBaseUrl = '') {
 export async function csrfHeaders(headers = {}, apiBaseUrl = '') {
   return { ...headers, 'X-XSRF-TOKEN': await fetchCsrfToken(apiBaseUrl) };
 }
-

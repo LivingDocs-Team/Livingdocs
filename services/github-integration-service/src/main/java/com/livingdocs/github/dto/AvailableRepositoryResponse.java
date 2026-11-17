@@ -8,4 +8,3 @@ public record AvailableRepositoryResponse(
         String defaultBranch,
         String htmlUrl) {
 }
-

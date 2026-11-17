@@ -437,4 +437,3 @@ class GitHubIntegrationBffControllerTest {
         return authentication;
     }
 }
-

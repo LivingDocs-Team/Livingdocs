@@ -28,4 +28,3 @@ public record AnalysisInput(String scope, String target, List<FileInput> files) 
         return new AnalysisInput("repository", snapshot.repository().fullName(), files);
     }
 }
-

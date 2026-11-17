@@ -261,4 +261,3 @@ class DocumentWorkflowControllerTest {
         verify(workflowService).history(MANAGER_ID, MANAGER_AUTHORITIES, WORKFLOW_ID);
     }
 }
-

@@ -21,4 +21,3 @@ public record GitHubChangedFile(
         Integer deletions,
         String patch) {
 }
-

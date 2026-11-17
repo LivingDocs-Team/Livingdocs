@@ -41,4 +41,3 @@ CREATE TABLE documentation_code_relationships (
 
 CREATE INDEX idx_documentation_code_entity
     ON documentation_code_relationships(code_entity_id);
-

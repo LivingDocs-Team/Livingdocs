@@ -20,4 +20,3 @@ class DependencyAnalyzer:
     def get_java_imports(tree):
         """`tree` is a tree-sitter tree (ASTAnalyzer.parse_code)."""
         return java_imports(tree)
-

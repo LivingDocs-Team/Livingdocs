@@ -12,4 +12,3 @@ public class GithubIntegrationServiceApplication {
         SpringApplication.run(GithubIntegrationServiceApplication.class, args);
     }
 }
-

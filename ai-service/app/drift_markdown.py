@@ -140,4 +140,3 @@ def render(report: DriftReport, min_severity: Optional[Severity] = None) -> str:
                     f"- **Resolution:** {_resolution(f)}", "",
                     *_evidence(f), ""]
     return "\n".join(out).rstrip() + "\n"
-

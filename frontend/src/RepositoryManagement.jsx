@@ -476,4 +476,3 @@ function RepositoryManagementForUser({ userId }) {
     </main>
   );
 }
-

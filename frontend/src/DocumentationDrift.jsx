@@ -595,4 +595,3 @@ export default function DocumentationDrift({ userId }) {
     </section>
   );
 }
-

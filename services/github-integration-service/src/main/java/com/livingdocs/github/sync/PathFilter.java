@@ -67,4 +67,3 @@ public final class PathFilter {
         return true;
     }
 }
-

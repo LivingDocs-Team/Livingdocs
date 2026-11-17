@@ -135,4 +135,3 @@ function GitHubConnection({ userId }) {
 }
 
 export default GitHubConnection;
-

@@ -25,4 +25,3 @@ public class Permission {
     public String getCode() { return code; }
     public String getDescription() { return description; }
 }
-

@@ -58,4 +58,3 @@ public class DocumentationGenerationController {
         return generationService.getReport(userId, jobId);
     }
 }
-
