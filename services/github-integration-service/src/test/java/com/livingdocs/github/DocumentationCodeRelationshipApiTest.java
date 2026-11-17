@@ -6,11 +6,11 @@ import com.livingdocs.github.entity.ConnectedRepository;
 import com.livingdocs.github.entity.ConnectionStatus;
 import com.livingdocs.github.entity.GitHubConnection;
 import com.livingdocs.github.entity.RepositoryStatus;
+import com.livingdocs.github.repository.CodeEntityRepository;
 import com.livingdocs.github.repository.ConnectedRepositoryRepository;
 import com.livingdocs.github.repository.DocumentationArtifactRepository;
-import com.livingdocs.github.repository.GitHubConnectionRepository;
-import com.livingdocs.github.repository.CodeEntityRepository;
 import com.livingdocs.github.repository.DocumentationCodeRelationshipRepository;
+import com.livingdocs.github.repository.GitHubConnectionRepository;
 import com.livingdocs.github.service.DocumentationCodeRelationshipService;
 import com.livingdocs.github.service.RepositorySyncService;
 import com.livingdocs.github.sync.RepositorySnapshot;
@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -165,10 +166,47 @@ class DocumentationCodeRelationshipApiTest {
         relationshipService.recordGeneration(USER, repositoryId, "job-next", objectMapper.readTree(refreshedAnalysis), refreshedSnapshot);
 
         var refreshed = codeEntityRepository.findById(entityId).orElseThrow();
-        org.assertj.core.api.Assertions.assertThat(refreshed.isActive()).isTrue();
-        org.assertj.core.api.Assertions.assertThat(refreshed.getLineStart()).isEqualTo(8);
-        org.assertj.core.api.Assertions.assertThat(refreshed.getSourceUrl())
+        assertThat(refreshed.isActive()).isTrue();
+        assertThat(refreshed.getLineStart()).isEqualTo(8);
+        assertThat(refreshed.getSourceUrl())
                 .isEqualTo("https://github.com/acme/sample/blob/def456/src/App.java#L8-L20");
+        mvc.perform(get("/api/documentation/{id}/code-entities", documentId).header("X-User-Id", USER))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(entityId.toString()));
+    }
+
+    @Test
+    void hidesInactiveEntitiesFromResultsAndRestoresLinksWhenEntityReappears() throws Exception {
+        relationshipService.replaceLinks(USER, documentId, List.of(entityId));
+
+        String removedEntityAnalysis = """
+                {"files":[{"path":"src/App.java","status":"ok","classes":[],"functions":[],"endpoints":[]}]}
+                """;
+        RepositorySnapshot emptySnapshot = new RepositorySnapshot(
+                new RepositorySnapshot.RepositoryInfo(202L, "acme/sample", "acme", "sample", null,
+                        false, false, "main", "https://github.com/acme/sample", "java", 1L, Instant.now()),
+                "main", new RepositorySnapshot.CommitInfo("ghi789", "remove", "A", null, Instant.now(), null),
+                Map.of(), List.of(new RepositorySnapshot.SourceFile("src/App.java", "blob3", 1,
+                        "java", "", null)), List.of(),
+                new RepositorySnapshot.SyncStats(1, 1, 1, 0, false, false), List.of(), Instant.now());
+        relationshipService.recordGeneration(USER, repositoryId, "job-removed",
+                objectMapper.readTree(removedEntityAnalysis), emptySnapshot);
+
+        assertThat(codeEntityRepository.findById(entityId).orElseThrow().isActive()).isFalse();
+        mvc.perform(get("/api/documentation/{id}/code-entities", documentId).header("X-User-Id", USER))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+
+        String restoredAnalysis = """
+                {"files":[{"path":"src/App.java","status":"ok",
+                  "classes":[{"name":"App","lineno":1,"end_lineno":5,
+                    "methods":[{"name":"run","lineno":2,"end_lineno":4},{"name":"run","lineno":2,"end_lineno":4}]}],
+                  "functions":[],"endpoints":[]}]}
+                """;
+        relationshipService.recordGeneration(USER, repositoryId, "job-restored",
+                objectMapper.readTree(restoredAnalysis), emptySnapshot);
+
+        assertThat(codeEntityRepository.findById(entityId).orElseThrow().isActive()).isTrue();
         mvc.perform(get("/api/documentation/{id}/code-entities", documentId).header("X-User-Id", USER))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(entityId.toString()));
