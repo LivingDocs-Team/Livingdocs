@@ -98,4 +98,3 @@ class GitHubConnectionControllerTest {
         return connection;
     }
 }
-

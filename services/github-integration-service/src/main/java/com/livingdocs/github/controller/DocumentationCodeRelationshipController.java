@@ -61,4 +61,3 @@ public class DocumentationCodeRelationshipController {
         return relationshipService.relatedDocuments(userId, entityId);
     }
 }
-

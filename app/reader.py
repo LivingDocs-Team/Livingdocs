@@ -67,4 +67,3 @@ class FileReader:
                 status="invalid",
                 error=f"Lỗi đọc file: {str(e)}"
             ), ""
-

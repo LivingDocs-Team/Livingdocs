@@ -12,4 +12,3 @@ import com.livingdocs.github.entity.DocumentWorkflowAudit;
 public interface DocumentWorkflowAuditRepository extends JpaRepository<DocumentWorkflowAudit, UUID> {
     List<DocumentWorkflowAudit> findByWorkflowIdOrderByCreatedAtAsc(UUID workflowId);
 }
-

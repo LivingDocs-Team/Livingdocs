@@ -116,4 +116,3 @@ class GitHubOAuth2UserServiceTest {
         return new OAuth2UserRequest(registration, token);
     }
 }
-

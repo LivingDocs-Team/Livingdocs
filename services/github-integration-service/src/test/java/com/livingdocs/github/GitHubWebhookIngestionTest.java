@@ -390,4 +390,3 @@ class GitHubWebhookIngestionTest {
         return "/api/repositories/" + repoId + "/sync";
     }
 }
-

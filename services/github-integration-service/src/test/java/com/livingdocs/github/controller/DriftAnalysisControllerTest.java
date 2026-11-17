@@ -131,4 +131,3 @@ class DriftAnalysisControllerTest {
         verify(driftService).resolveFinding("user-1", REPOSITORY_ID, "report-1", "F2", request);
     }
 }
-

@@ -18,4 +18,3 @@ public class OAuth2SuccessController {
         return new RedirectView(baseUrl + "/?oauth=success");
     }
 }
-

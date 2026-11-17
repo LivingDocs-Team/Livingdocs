@@ -178,4 +178,3 @@ public class RepositorySyncService {
         return findOwned(userId, repositoryId);
     }
 }
-

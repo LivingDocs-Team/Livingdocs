@@ -845,4 +845,3 @@ void managerCanReadAuditTrailForPendingApprovalWorkflow() {
         return workflow;
     }
 }
-

@@ -166,4 +166,3 @@ def get_generator() -> DocGenerator:
         return DocGenerator(AnthropicClient(),
                             max_attempts=int(os.getenv("LLM_MAX_ATTEMPTS", "3")))
     return DocGenerator(None)
-

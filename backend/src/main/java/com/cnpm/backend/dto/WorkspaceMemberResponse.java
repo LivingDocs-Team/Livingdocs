@@ -8,4 +8,3 @@ public record WorkspaceMemberResponse(Long userId, String username, String displ
                 (user.getFirstName() + " " + user.getLastName()).trim());
     }
 }
-

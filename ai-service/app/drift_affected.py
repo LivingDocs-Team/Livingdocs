@@ -349,4 +349,3 @@ def collect_docs(store, document_ids: Optional[List[str]], repo_docs) -> Tuple[L
             continue
         out.append(DocText(DocSource.repository, rd.path, rd.content, title=rd.title))
     return out, warnings
-

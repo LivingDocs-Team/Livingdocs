@@ -12,4 +12,3 @@ public record DocumentationArtifactResponse(UUID id, UUID repositoryId, String g
                 artifact.getGenerationJobId(), artifact.getMarkdown(), artifact.getSourceCommit(), artifact.getCreatedAt());
     }
 }
-

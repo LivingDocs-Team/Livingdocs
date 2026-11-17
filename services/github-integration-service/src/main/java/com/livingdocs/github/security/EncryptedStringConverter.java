@@ -42,4 +42,3 @@ public class EncryptedStringConverter implements AttributeConverter<String, Stri
         }
     }
 }
-

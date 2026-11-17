@@ -551,4 +551,3 @@ public class DocumentationGenerationService {
         return new ApiException(HttpStatus.BAD_GATEWAY, code, message);
     }
 }
-

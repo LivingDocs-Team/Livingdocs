@@ -88,4 +88,3 @@ export function useTemplates(userId) {
   const reload = useCallback(() => setVersion((value) => value + 1), []);
   return { ...state, reload };
 }
-

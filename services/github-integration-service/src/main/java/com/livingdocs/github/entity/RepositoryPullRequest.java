@@ -123,4 +123,3 @@ public class RepositoryPullRequest {
 
     public Instant getReceivedAt() { return receivedAt; }
 }
-

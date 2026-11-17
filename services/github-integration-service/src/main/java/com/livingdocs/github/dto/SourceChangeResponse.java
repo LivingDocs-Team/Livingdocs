@@ -82,4 +82,3 @@ public record SourceChangeResponse(
                 c.getDocumentsErrorCode(), c.getDocumentsErrorMessage(), documents);
     }
 }
-

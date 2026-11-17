@@ -7,4 +7,3 @@ package com.livingdocs.github.dto;
  */
 public record AuthorizeUrlResponse(String authorizeUrl, String installUrl, String state) {
 }
-

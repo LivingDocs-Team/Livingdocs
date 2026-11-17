@@ -14,4 +14,3 @@ public record GitHubCompare(@JsonProperty("merge_base_commit") CommitRef mergeBa
     public record CommitRef(String sha) {
     }
 }
-

@@ -169,4 +169,3 @@ class DocumentationSearchServiceTest {
         server.verify();
     }
 }
-

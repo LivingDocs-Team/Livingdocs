@@ -150,4 +150,3 @@ class DocumentationTemplateServiceTest {
         assertEquals(HttpStatus.BAD_REQUEST, noBody.getStatus());
     }
 }
-

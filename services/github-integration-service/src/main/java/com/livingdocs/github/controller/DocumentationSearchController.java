@@ -34,4 +34,3 @@ public class DocumentationSearchController {
         return searchService.search(userId, id, query, verifiedWorkspaceId);
     }
 }
-

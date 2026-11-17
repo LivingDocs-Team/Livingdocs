@@ -96,4 +96,3 @@ class RoleCatalogInitializerTest {
         return role.getPermissions().stream().map(Permission::getCode).toList();
     }
 }
-

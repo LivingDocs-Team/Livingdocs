@@ -36,4 +36,3 @@ def test_entity_extractor_async_function():
     assert "async def" in func.signature
     assert func.lineno == 1
     assert func.end_lineno == 2
-

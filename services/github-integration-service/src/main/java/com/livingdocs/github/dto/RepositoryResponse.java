@@ -23,4 +23,3 @@ public record RepositoryResponse(
                 r.getLastSyncedAt(), r.getCreatedAt());
     }
 }
-

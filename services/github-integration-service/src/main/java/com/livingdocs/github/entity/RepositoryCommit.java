@@ -97,4 +97,3 @@ public class RepositoryCommit {
 
     public Instant getReceivedAt() { return receivedAt; }
 }
-
