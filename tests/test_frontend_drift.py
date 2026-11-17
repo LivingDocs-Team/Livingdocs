@@ -166,8 +166,13 @@ def install_api(page: Page, state: dict):
             if body["status"] == "dismissed" and not body.get("note"):
                 return route.fulfill(status=400, json={"code": "DRIFT_RESOLUTION_INVALID", "message": "note"})
             current = next(f for f in REPORT["findings"] if f["id"] == fid)
+            # like the AI service: each change is added to the finding's resolution history (LD-167)
+            event = {"status": body["status"], "actor": "42", "note": body.get("note"),
+                     "accepted_update": body.get("acceptedUpdate"), "at": "2026-11-17T03:00:00Z"}
+            history = state.setdefault("history", {}).setdefault(fid, [])
+            history.append(event)
             return route.fulfill(status=200, json={**current, "resolution": {
-                "status": body["status"], "actor": "42", "note": body.get("note"), "history": [body]}})
+                **event, "history": list(history)}})
         if path == f"{BASE}/reports/report-1/markdown":
             state["markdown_queries"].append(query)
             return route.fulfill(status=200, content_type="text/markdown", body=MARKDOWN)
@@ -433,3 +438,64 @@ def test_findings_are_acknowledged_resolved_dismissed_and_reopened(page: Page):
         ("F1", {"status": "acknowledged"}), ("F1", {"status": "resolved"}),
         ("F2", {"status": "dismissed", "note": "Table is in the v1 archive section."}),
         ("F3", {"status": "resolved"}), ("F2", {"status": "open"})]
+
+
+# ---------- LD-166 / LD-172: accept or edit AI suggestions, resolution history, filter ----------
+
+def test_ai_suggestion_is_accepted_as_is_or_after_editing(page: Page):
+    state = {}
+    install_api(page, state)
+    open_drift(page)
+    run_check(page)
+
+    f1 = page.locator('[data-finding="F1"]')
+    expect(page.locator('[data-finding="F2"]').get_by_role("button", name="Accept suggestion")).to_have_count(0)
+    f1.get_by_role("button", name="Edit suggestion").click()
+    editor = f1.get_by_label("Edit the documentation update before accepting it")
+    expect(editor).to_have_value("Read a total with `GET /api/carts/:id`.")
+    editor.fill("Read a total with `GET /api/carts/:id` (currency in the query).")
+    f1.get_by_role("button", name="Accept edited update").click()
+
+    expect(f1.locator(".drift-resolution-status")).to_have_text("Resolved")
+    expect(f1.locator(".drift-accepted")).to_contain_text("Accepted documentation update (edited)")
+    expect(f1.locator(".drift-accepted pre")).to_have_text("Read a total with `GET /api/carts/:id` (currency in the query).")
+    expect(f1.get_by_role("button", name="Accept suggestion")).to_have_count(0)
+
+    f1.get_by_role("button", name="Reopen").click()
+    f1.get_by_role("button", name="Accept suggestion").click()
+    expect(f1.locator(".drift-accepted h4")).to_have_text("Accepted documentation update")
+    assert state["resolutions"] == [
+        ("F1", {"status": "resolved", "acceptedUpdate": "Read a total with `GET /api/carts/:id` (currency in the query)."}),
+        ("F1", {"status": "open"}),
+        ("F1", {"status": "resolved", "acceptedUpdate": "Read a total with `GET /api/carts/:id`."})]
+
+
+def test_resolution_history_and_filter_by_resolution(page: Page):
+    install_api(page, {})
+    open_drift(page)
+    run_check(page)
+
+    f2 = page.locator('[data-finding="F2"]')
+    f2.get_by_role("button", name="Dismiss").click()
+    f2.get_by_label("Why is this not a documentation drift?").fill("Archived v1 section.")
+    f2.get_by_role("button", name="Confirm dismiss").click()
+    f2.get_by_role("button", name="Reopen").click()
+    f2.get_by_role("button", name="Acknowledge").click()
+
+    history = f2.locator(".drift-resolution-history")
+    history.locator("summary").click()
+    expect(history.locator("summary")).to_have_text("Resolution history (3)")
+    expect(history.locator("li")).to_have_count(3)
+    expect(history.locator("li").first).to_contain_text("Dismissed by user 42")
+    expect(history.locator("li").first).to_contain_text("Archived v1 section.")
+
+    page.locator('[data-finding="F3"]').get_by_role("button", name="Mark resolved").click()
+    filters = page.get_by_role("group", name="Filter by resolution")
+    filters.get_by_role("button", name="Resolved or dismissed (1)").click()
+    expect(page.locator(".drift-finding")).to_have_count(1)
+    expect(page.locator('[data-finding="F3"]')).to_be_visible()
+    filters.get_by_role("button", name="Unresolved (2)").click()
+    expect(page.locator(".drift-finding")).to_have_count(2)
+    expect(page.locator('[data-finding="F3"]')).to_have_count(0)
+    filters.get_by_role("button", name="All (3)").click()
+    expect(page.locator(".drift-finding")).to_have_count(3)

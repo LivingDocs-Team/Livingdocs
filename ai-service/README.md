@@ -208,11 +208,18 @@ PR files (patch + analyzer result at base/head)
   history), starting `open`; reviewers acknowledge, resolve, dismiss (with a reason) or reopen it.
   The report's `review` gives the progress (`pending`, `in_progress`, `completed`, `not_required`)
   and the AI verdict counts; the Markdown report and the frontend page show both.
+- **Accept or edit the AI suggestion (LD-161)**: resolving with `accepted_update` records the
+  documentation text the reviewer accepted, the AI's `suggested_update` as is or edited (at most
+  20,000 characters, only with status `resolved`, otherwise `422`). It is kept in `resolution`
+  and in the history entry, and cleared when the finding is reopened.
 - **Manual analysis from the app:** github-integration-service `POST /api/repositories/{id}/drift/analyze`
   `{"pullRequestNumber": 7}` reads the PR from GitHub, runs the analyzer on both commits and calls
   `/drift/analyze` with the saved documents of that repository only. Details:
   [github-integration-service README](../services/github-integration-service/README.md).
-- Reports (with their resolutions) are kept in memory (last 500); persistent drift history is LD-167.
+- **Drift history (LD-167)**: reports, with each finding's resolution and its history, are saved to
+  `DRIFT_REPORTS_FILE` (default `data/drift_reports.json`, atomic writes, newest 500 kept; empty =
+  memory only), so `GET /drift/reports` still lists earlier analyses after a restart. A file that
+  cannot be read is moved aside as `drift_reports.corrupt-<time>.json`.
 - Tests (LD-150, LD-155, LD-160, LD-346, LD-347): `tests/test_drift.py`, `tests/test_drift_classification.py`,
   `tests/test_drift_severity.py`, `tests/test_drift_cases.py`, `tests/test_drift_review.py`, `tests/test_drift_api.py`,
   `tests/integration/test_drift_integration.py`, live: `test_live_pipeline.py`; UI:

@@ -14,6 +14,11 @@ const VERDICT_LABEL = {
 };
 const RESOLUTION_LABEL = { open: 'Open', acknowledged: 'Acknowledged', resolved: 'Resolved', dismissed: 'Dismissed' };
 
+// LD-167: resolved or dismissed findings are handled; open or acknowledged ones are not yet.
+function isHandled(finding) {
+  return ['resolved', 'dismissed'].includes(finding.resolution?.status);
+}
+
 function reviewProgress(findings) {
   const counts = { open: 0, acknowledged: 0, resolved: 0, dismissed: 0 };
   findings.forEach((finding) => { counts[finding.resolution?.status || 'open'] += 1; });
@@ -44,19 +49,45 @@ function AIReview({ review }) {
   );
 }
 
+function ResolutionHistory({ events }) {
+  if (!events?.length) return null;
+  return (
+    <details className="drift-resolution-history">
+      <summary>Resolution history ({events.length})</summary>
+      <ol>
+        {events.map((event, index) => (
+          <li key={`${event.at}-${index}`}>
+            <strong>{RESOLUTION_LABEL[event.status] || event.status}</strong>
+            {event.actor && ` by user ${event.actor}`}
+            {event.at && <> · <time dateTime={event.at}>{new Date(event.at).toLocaleString()}</time></>}
+            {event.note && ` · ${event.note}`}
+            {event.accepted_update && ' · documentation update accepted'}
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
 function Resolution({ finding, onResolve }) {
   const [reason, setReason] = useState('');
   const [asking, setAsking] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const current = finding.resolution?.status || 'open';
+  const suggestion = finding.ai_review?.suggested_update;
+  const accepted = finding.resolution?.accepted_update;
+  const canAccept = Boolean(suggestion) && current !== 'resolved' && current !== 'dismissed';
 
-  async function change(status, note) {
+  async function change(status, note, acceptedUpdate) {
     setBusy(true);
     setError('');
     try {
-      await onResolve(finding.id, status, note);
+      await onResolve(finding.id, status, note, acceptedUpdate);
       setAsking(false);
+      setEditing(false);
       setReason('');
     } catch (requestError) {
       setError(requestError.message || 'Could not update the finding.');
@@ -69,7 +100,20 @@ function Resolution({ finding, onResolve }) {
     <div className="drift-resolution" aria-label={`Resolution of ${finding.id}`}>
       <span className={`drift-resolution-status drift-status-${current}`} data-status={current}>{RESOLUTION_LABEL[current]}</span>
       {finding.resolution?.note && <span className="drift-meta"> {finding.resolution.note}</span>}
+      {accepted && (
+        <div className="drift-accepted">
+          <h4>Accepted documentation update{accepted !== suggestion ? ' (edited)' : ''}</h4>
+          <pre className="drift-suggestion">{accepted}</pre>
+        </div>
+      )}
       <div className="drift-resolution-actions">
+        {canAccept && (
+          <>
+            <button type="button" disabled={busy} onClick={() => change('resolved', undefined, suggestion)}>Accept suggestion</button>
+            <button type="button" disabled={busy} aria-expanded={editing}
+              onClick={() => { setDraft(suggestion); setEditing((value) => !value); }}>Edit suggestion</button>
+          </>
+        )}
         {current === 'open' && <button type="button" disabled={busy} onClick={() => change('acknowledged')}>Acknowledge</button>}
         {current !== 'resolved' && current !== 'dismissed' && (
           <button type="button" disabled={busy} onClick={() => change('resolved')}>Mark resolved</button>
@@ -86,7 +130,15 @@ function Resolution({ finding, onResolve }) {
           <button type="submit" disabled={busy || !reason.trim()}>Confirm dismiss</button>
         </form>
       )}
+      {editing && (
+        <form className="drift-edit-suggestion" onSubmit={(event) => { event.preventDefault(); if (draft.trim()) change('resolved', undefined, draft.trim()); }}>
+          <label htmlFor={`edit-${finding.id}`}>Edit the documentation update before accepting it</label>
+          <textarea id={`edit-${finding.id}`} rows={6} value={draft} maxLength={20000} onChange={(event) => setDraft(event.target.value)} />
+          <button type="submit" disabled={busy || !draft.trim()}>Accept edited update</button>
+        </form>
+      )}
       {error && <p role="alert" className="drift-error">{error}</p>}
+      <ResolutionHistory events={finding.resolution?.history} />
     </div>
   );
 }
@@ -217,6 +269,7 @@ export default function DocumentationDrift({ userId }) {
   const [history, setHistory] = useState([]);
   const [levels, setLevels] = useState([]);
   const [minSeverity, setMinSeverity] = useState('all');
+  const [resolutionFilter, setResolutionFilter] = useState('all');
   const [loadingRepositories, setLoadingRepositories] = useState(Boolean(userId));
   const [repositoryError, setRepositoryError] = useState('');
   const [repositoryLoadAttempt, setRepositoryLoadAttempt] = useState(0);
@@ -290,14 +343,15 @@ export default function DocumentationDrift({ userId }) {
   }, [repositoryId, userId]);
 
   const shownFindings = useMemo(() => {
-    const findings = report?.findings || [];
+    const findings = (report?.findings || []).filter((finding) => resolutionFilter === 'all'
+      || isHandled(finding) === (resolutionFilter === 'handled'));
     if (minSeverity === 'all') return findings;
     const floor = LEVELS.indexOf(minSeverity);
     return findings.filter((finding) => {
       const index = LEVELS.indexOf(finding.severity);
       return index >= 0 && index <= floor;
     });
-  }, [report, minSeverity]);
+  }, [report, minSeverity, resolutionFilter]);
 
   async function refreshHistory() {
     if (!repositoryId) return;
@@ -386,10 +440,13 @@ export default function DocumentationDrift({ userId }) {
   const summary = report?.summary;
   const progress = reviewProgress(report?.findings || []);
 
-  async function resolveFinding(findingId, status, note) {
+  async function resolveFinding(findingId, status, note, acceptedUpdate) {
+    const body = { status };
+    if (note) body.note = note;
+    if (acceptedUpdate) body.acceptedUpdate = acceptedUpdate;
     const updated = await githubApi(
       `/api/repositories/${encodeURIComponent(repositoryId)}/drift/reports/${encodeURIComponent(report.id)}/findings/${encodeURIComponent(findingId)}/resolution`,
-      { method: 'PUT', userId, body: note ? { status, note } : { status } },
+      { method: 'PUT', userId, body },
     );
     setReport((current) => ({
       ...current,
@@ -534,6 +591,17 @@ export default function DocumentationDrift({ userId }) {
               <button type="button" className="drift-copy" onClick={copyMarkdown}>Copy as PR comment</button>
             </div>
           )}
+          {summary?.findings > 0 && (
+            <div className="drift-filter" role="group" aria-label="Filter by resolution">
+              {[['all', 'All'], ['unresolved', 'Unresolved'], ['handled', 'Resolved or dismissed']].map(([value, label]) => (
+                <button key={value} type="button" className={resolutionFilter === value ? 'active' : ''}
+                  aria-pressed={resolutionFilter === value} onClick={() => setResolutionFilter(value)}>
+                  {label} ({value === 'all' ? report.findings.length
+                    : report.findings.filter((finding) => isHandled(finding) === (value === 'handled')).length})
+                </button>
+              ))}
+            </div>
+          )}
           {minSeverity !== 'all' && <p className="drift-meta">Showing {LEVEL_LABEL[minSeverity]} and above: {shownFindings.length} of {summary.findings}.</p>}
           {copied && <p role="status" className="drift-meta">{copied}</p>}
           {markdown && <textarea className="drift-markdown" readOnly value={markdown} aria-label="Report as Markdown" rows={10} />}
@@ -562,7 +630,7 @@ export default function DocumentationDrift({ userId }) {
       )}
 
       {report && summary?.findings > 0 && shownFindings.length === 0 && (
-        <p className="drift-empty" role="status">No findings match the selected severity filter.</p>
+        <p className="drift-empty" role="status">No findings match the selected filters.</p>
       )}
 
       <section className="drift-history" aria-labelledby="drift-history-heading">

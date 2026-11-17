@@ -358,6 +358,33 @@ class DriftAnalysisServiceTest {
     }
 
     @Test
+    void acceptedSuggestionIsForwardedOnlyWhenResolving() {   // LD-161 / LD-166
+        stubGitHub();
+        expectAnalyzer(ANALYSIS_BEFORE, ANALYSIS_AFTER);
+        expectDocuments();
+        aiServiceServer.expect(requestTo("http://ai.test/drift/analyze"))
+                .andRespond(withStatus(HttpStatus.CREATED).contentType(MediaType.APPLICATION_JSON).body(REPORT));
+        aiServiceServer.expect(requestTo("http://ai.test/drift/reports/report-1/findings/F1/resolution"))
+                .andExpect(method(PUT))
+                .andExpect(content().json("""
+                        {"status":"resolved","actor":"%s","accepted_update":"Use GET /api/carts/{id}."}
+                        """.formatted(USER_ID), true))
+                .andRespond(withSuccess("""
+                        {"id":"F1","resolution":{"status":"resolved","accepted_update":"Use GET /api/carts/{id}."}}
+                        """, MediaType.APPLICATION_JSON));
+
+        driftService.analyzePullRequest(USER_ID, REPOSITORY_ID, new DriftAnalysisRequest(7, null, false));
+        ApiException notResolving = assertThrows(ApiException.class, () -> driftService.resolveFinding(
+                USER_ID, REPOSITORY_ID, "report-1", "F1", new DriftResolutionRequest("acknowledged", null, "text")));
+        JsonNode finding = driftService.resolveFinding(USER_ID, REPOSITORY_ID, "report-1", "F1",
+                new DriftResolutionRequest("resolved", " ", "  Use GET /api/carts/{id}.  "));
+
+        assertEquals(HttpStatus.BAD_REQUEST, notResolving.getStatus());
+        assertEquals("Use GET /api/carts/{id}.", finding.path("resolution").path("accepted_update").asText());
+        aiServiceServer.verify();
+    }
+
+    @Test
     void findingResolutionIsValidatedAndOwned() {
         stubGitHub();
         expectAnalyzer(ANALYSIS_BEFORE, ANALYSIS_AFTER);

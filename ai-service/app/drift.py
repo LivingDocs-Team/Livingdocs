@@ -40,9 +40,14 @@ Confidence (0-1, same levels as LD-340: high >= 0.75, medium >= 0.50):
 Scores are bounded to 0-1 and rounded half-up (confidence.bounded); the level comes from the
 rounded score with the thresholds of confidence.py, the same ones severity uses.
 """
+import json
+import logging
+import os
+import pathlib
 import threading
 import uuid
 from collections import Counter, OrderedDict
+from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
 from . import drift_referential, drift_semantic, drift_severity, drift_signature
@@ -222,19 +227,54 @@ def analyze(req: DriftAnalyzeRequest, store, reviewer: Optional[DriftReviewer] =
     return (reviewer or get_reviewer()).review(report)
 
 
-# ---------- report store (in memory; drift history with resolution is LD-167) ----------
+# ---------- report store (LD-167: history of analyses and resolutions) ----------
+
+log = logging.getLogger(__name__)
+DEFAULT_REPORTS_FILE = "data/drift_reports.json"
+
 
 class DriftReportStore:
-    def __init__(self, limit: int = 500) -> None:
+    """Newest `limit` reports. Saved to a JSON file (DRIFT_REPORTS_FILE, default
+    data/drift_reports.json, written atomically) so analyses and their resolution history
+    survive a restart; DRIFT_REPORTS_FILE= (empty) keeps them in memory only."""
+
+    def __init__(self, limit: int = 500, path: Optional[str] = None) -> None:
         self._lock = threading.Lock()
         self._reports: "OrderedDict[str, DriftReport]" = OrderedDict()
         self.limit = limit
+        self.path = pathlib.Path(path) if path else None
+        self._load()
+
+    def _load(self) -> None:
+        if self.path is None or not self.path.exists():
+            return
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            reports = [DriftReport.model_validate(r) for r in raw.get("reports", [])]
+        except Exception as exc:  # corrupt file: keep it for inspection, start clean
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+            backup = self.path.with_suffix(f".corrupt-{stamp}.json")
+            self.path.rename(backup)
+            log.error("Could not read %s (%s); moved it to %s", self.path, exc, backup.name)
+            return
+        for r in reports[-self.limit:]:
+            self._reports[r.id] = r
+
+    def _save(self) -> None:
+        if self.path is None:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        data = {"reports": [r.model_dump(mode="json") for r in self._reports.values()]}
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, self.path)  # atomic: a crash never leaves a half-written file
 
     def add(self, report: DriftReport) -> DriftReport:
         with self._lock:
             self._reports[report.id] = report
             while len(self._reports) > self.limit:
                 self._reports.popitem(last=False)   # oldest first
+            self._save()
         return report
 
     def get(self, report_id: str) -> Optional[DriftReport]:
@@ -246,7 +286,9 @@ class DriftReportStore:
             report = self._reports.get(report_id)
             if report is None:
                 return None
-            return resolve(report, finding_id, update)
+            finding = resolve(report, finding_id, update)
+            self._save()
+            return finding
 
     def list(self, repository: Optional[str] = None,
              pull_request: Optional[int] = None) -> List[DriftReportSummary]:
@@ -264,4 +306,4 @@ class DriftReportStore:
         return rows
 
 
-drift_reports = DriftReportStore()
+drift_reports = DriftReportStore(path=os.getenv("DRIFT_REPORTS_FILE", DEFAULT_REPORTS_FILE) or None)
