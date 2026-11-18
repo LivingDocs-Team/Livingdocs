@@ -85,6 +85,19 @@ public final class ApiRoutePermissions {
         rule("POST", "/api/documentation/jobs/{}/document", need("documentation", 'C'), need("workflowSubmission", 'C'));
         rule("GET", "/api/documentation/code-entities/{}/documents", need("documentation", 'R'), need("knowledgeBase", 'R'));
 
+        // ---- Documentation collections and assigned ownership (#21) ----
+        String collections = "/api/workspaces/{}/collections";
+        rule("GET", collections, need("collections", 'R'));
+        rule("GET", collections + "/{}/documents", need("collections", 'R'));
+        rule("GET", collections + "/{}/document-candidates", need("collections", 'U'));
+        rule("POST", collections, need("collections", 'C'));
+        rule("PUT", collections + "/{}", need("collections", 'U'));
+        rule("DELETE", collections + "/{}", need("collections", 'D'));
+        rule("PUT", collections + "/{}/documents/{}", need("collections", 'U'));
+        rule("DELETE", collections + "/{}/documents/{}", need("collections", 'U'));
+        rule("PUT", collections + "/{}/documents/{}/owner/{}", need("collections", 'U'));
+        rule("DELETE", collections + "/{}/documents/{}/owner", need("collections", 'U'));
+
         // ---- Documentation templates (#22); the generation screen only reads them ----
         rule("GET", "/api/documentation/templates", need("templates", 'R'), need("documentation", 'R'));
         rule("GET", "/api/documentation/templates/sections", need("templates", 'R'), need("documentation", 'R'));

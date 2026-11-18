@@ -14,7 +14,7 @@ const OFFICIAL_MENUS = {
     'Documentation Generation': ['Coverage Gaps', 'Generated Documents',
       ['Preview & Editor', 'Grounding Evidence', 'Submit for Review', 'Review Feedback']],
     'Versions & Change Log': ['Version History', ['Version Comparison', 'Document Rollback'], 'Change Log'],
-    'Knowledge Base': ['Knowledge Search', ['Search Results', 'Doc-to-Code Relationships'], 'Template Library'],
+    'Knowledge Base': ['Documentation Collections', 'Knowledge Search', ['Search Results', 'Doc-to-Code Relationships'], 'Template Library'],
   },
   STAFF: {
     'Account Management': ['Profile & Settings', ['Profile', 'Notification Preferences']],

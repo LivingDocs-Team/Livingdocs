@@ -8,7 +8,7 @@ Tài liệu này mô tả cách frontend hiển thị menu, màn hình và nút 
 
 | Thành phần | File | Vai trò |
 |---|---|---|
-| Ma trận quyền (single source of truth) | `rbac/permissions.js` | 23 dòng Screen × 5 role (giữ số dòng gốc; #4, #14, #15, #16, #21 đã xoá) → tập action `C R U D A E`. Hàm `can(role, screenKey, action)`, `canAccess()`, `allowedActions()`. |
+| Ma trận quyền (single source of truth) | `rbac/permissions.js` | 24 dòng Screen × 5 role (giữ số dòng gốc; #4, #14, #15 và #16 đã xoá) → tập action `C R U D A E`. Hàm `can(role, screenKey, action)`, `canAccess()`, `allowedActions()`. |
 | Vai trò | `rbac/roles.js` | Tên role, nhãn, `normalizeRole()` (legacy `ADMIN` → `ADMINISTRATOR`). |
 | Screen flow | `rbac/flows/*.flow.js` | Mỗi role một cây Module → Screen → Sub-screen. Node có `key`, `label`, `path`, `permissionKey`, `status`. |
 | Route guard | `rbac/guard.js` | `resolveRoute({ path, role, isAuthenticated })` → public / redirect / screen / forbidden / no-role. Hàm thuần, có test. |
@@ -79,7 +79,8 @@ Sub-screen ghi "(phần của …)" là một phần của trang có sẵn; mở
 | Versions & Change Log | Version History → Version Comparison | #18 | implemented (phần của DocumentationManagement) |
 | | → Document Rollback | #19 | implemented (Restore this version) |
 | | Change Log | #18 | placeholder |
-| Knowledge Base | Knowledge Search → Search Results, Doc-to-Code Relationships | #20 | implemented (DocumentationSearch) |
+| Knowledge Base | Documentation Collections | #21 | implemented (DocumentationCollections, đọc) |
+| | Knowledge Search → Search Results, Doc-to-Code Relationships | #20 | implemented (DocumentationSearch) |
 | | Template Library | #22 | placeholder |
 
 ### Staff (flow chính thức)
@@ -109,7 +110,7 @@ Sub-screen ghi "(phần của …)" là một phần của trang có sẵn; mở
 Nhóm chưa có screen flow cho 2 role này. `technicalLead.flow.js` và `administrator.flow.js` có `provisional: true` và comment `// TODO: thay bằng screen flow chính thức của nhóm`. Hai flow được dựng **chỉ** từ các dòng ma trận mà role có quyền (mỗi dòng một màn hình, gom theo module), giao diện hiển thị badge "Provisional flow".
 
 Chỉ gắn component có sẵn khi component đó không có hành động vượt quyền của role:
-- Technical Lead: Profile, Notification Preferences, Knowledge Search (#20, DocumentationSearch), Documentation Templates (#22, CRUD → `TemplateLibrary` dùng lại TemplateManager). Mọi màn hình khác là placeholder (ví dụ Documentation #8 chỉ R trong khi trang Documentation Management có nút tạo).
+- Technical Lead: Profile, Notification Preferences, Documentation Collections (#21, CRUD và phân công), Knowledge Search (#20, DocumentationSearch), Documentation Templates (#22, CRUD → `TemplateLibrary` dùng lại TemplateManager). Mọi màn hình khác là placeholder (ví dụ Documentation #8 chỉ R trong khi trang Documentation Management có nút tạo).
 - Administrator: Profile, Notification Preferences. Repository Management (#6) là placeholder vì trang Repository Management hiện có cũng hiển thị PR/commit (#7) mà Administrator không có quyền.
 
 ## 5. Điểm chưa khớp (để nhóm quyết định)
@@ -118,8 +119,16 @@ Chỉ gắn component có sẵn khi component đó không có hành động vư�
 - Bỏ quyền ở các dòng mà flow chính thức của role không có màn hình nào, nên role không thấy và không dùng được ở bất kỳ đâu (kể cả trong trang dùng chung):
   Developer #11; Staff #7, #9, #11, #15, #16; Manager #7, #8, #9, #15, #16, #18.
 - Dòng #8 thêm action **E** (nút "Export Markdown" trong trình soạn tài liệu), chỉ cho **Developer** (người tạo/chỉnh tài liệu, màn hình Preview & Editor). Staff (Document Editor, #8 R-U) không thấy nút này.
-- **Xoá khỏi web cho mọi role (2026-11-17):** #4 Dashboard / Health views, #14 Auto-Update Settings & Policies, #15 Auto-Update Review, #16 Drift Alerts & Review, #21 Documentation Collections & Ownership. Các dòng này bị bỏ khỏi `permissions.js` (các dòng còn lại giữ số gốc), các màn hình liên quan bị bỏ khỏi mọi flow; URL cũ (`#/dashboard`, `#/auto-update/*`, `#/drift/alerts|analysis|history`, `#/knowledge/collections`) giờ là trang không tồn tại và chuyển về landing page. Trang Documentation Drift (`DocumentationDrift.jsx`), CSS riêng của nó và test `tests/test_frontend_drift.py` đã bị xoá; API drift ở backend/AI service không đổi. Technical Lead vẫn giữ Drift Policies & Thresholds (#17).
+- **Xoá khỏi web cho mọi role (2026-11-17):** #4 Dashboard / Health views, #14 Auto-Update Settings & Policies, #15 Auto-Update Review, #16 Drift Alerts & Review. Các dòng này bị bỏ khỏi `permissions.js` (các dòng còn lại giữ số gốc), các màn hình liên quan bị bỏ khỏi mọi flow; URL cũ (`#/dashboard`, `#/auto-update/*`, `#/drift/alerts|analysis|history`) giờ là trang không tồn tại và chuyển về landing page. Trang Documentation Drift (`DocumentationDrift.jsx`), CSS riêng của nó và test `tests/test_frontend_drift.py` đã bị xoá; API drift ở backend/AI service không đổi. Technical Lead vẫn giữ Drift Policies & Thresholds (#17).
 - Test `flows.test.js` giờ kiểm tra cả 5 role: mỗi dòng role có quyền phải có ít nhất một màn hình trong flow, và ngược lại.
+
+**Documentation Collections & Ownership (#21)**
+
+- Knowledge Base → Documentation Collections (`#/knowledge/collections`). Developer có quyền đọc. Technical Lead có quyền tạo, sửa, xóa collection, thêm hoặc gỡ tài liệu và phân công người phụ trách.
+- Collection thuộc một workspace và có thể liên kết với một repository trong workspace đó. Khi đổi liên kết, các mục thuộc repository cũ được gỡ khỏi collection. Nếu repository được chuyển workspace hoặc ngắt kết nối, tài liệu của repository không còn xuất hiện trong collection.
+- API `/api/workspaces/{workspaceId}/collections` kiểm tra cả quyền theo vai trò và quyền truy cập workspace. Technical Lead là thành viên có thể quản lý collection trong workspace chung. Người phụ trách phải là tài khoản đang hoạt động và có quyền truy cập cùng workspace tại lúc phân công.
+- Mỗi tài liệu có tối đa một người phụ trách trong một workspace. Phân công dùng chung giữa các collection và tách khỏi chủ sở hữu phục vụ kiểm tra quyền chỉnh sửa, review và phê duyệt. Màn hình hiển thị tiêu đề từ tài liệu đã lập chỉ mục và mã tài khoản được phân công.
+- Migration Flyway `V12__documentation_collections.sql` nằm trong thư mục migration dùng chung. Kiểm thử tích hợp `DocumentationCollectionsPostgresTest` dùng một cơ sở dữ liệu PostgreSQL rỗng qua các biến `COLLECTIONS_TEST_DB_URL`, `COLLECTIONS_TEST_DB_USER` và `COLLECTIONS_TEST_DB_PASSWORD`.
 
 **Ánh xạ screen → dòng là lựa chọn (đặc tả không ghi rõ), cần nhóm xác nhận**
 - Developer: Coverage Gaps → #8; Review Feedback → #10.
@@ -149,7 +158,7 @@ Lỗi backend đã sửa (2026-11-18): `GET /api/admin/users` không có tham s�
 
 ## 7. Kiểm thử
 
-- `cd frontend && npm test` — `node --test`: `can()` với toàn bộ ma trận (23 dòng × 5 role × 6 action, và các dòng đã xoá không role nào truy cập được), cấu trúc flow, menu 3 flow chính thức, độ phủ của 2 flow tạm, route guard cho mọi role × mọi đường dẫn nội bộ.
+- `cd frontend && npm test` — `node --test`: `can()` với toàn bộ ma trận (24 dòng × 5 role × 6 action, và các dòng đã xoá không role nào truy cập được), cấu trúc flow, menu 3 flow chính thức, độ phủ của 2 flow tạm, route guard cho mọi role × mọi đường dẫn nội bộ.
 - `python -m pytest -v tests/test_rbac_screen_flow.py` — E2E Playwright: màn hình công khai, chuyển về Login, menu từng role, chặn URL trực tiếp (403), placeholder, Register chỉ Developer, nút theo `can()`.
 - Backend: `mvnw test` (xem mục 9).
 
@@ -174,7 +183,7 @@ Mọi request của trình duyệt tới `/api/github|workspaces|repositories|do
 
 | Thành phần | File | Vai trò |
 |---|---|---|
-| Ma trận | `backend/.../security/ScreenPermissions.java` | Bản Java của `permissions.js` (23 dòng × 5 role). `ADMIN` (cũ) = `ADMINISTRATOR`. |
+| Ma trận | `backend/.../security/ScreenPermissions.java` | Bản Java của `permissions.js` (24 dòng × 5 role). `ADMIN` (cũ) = `ADMINISTRATOR`. |
 | Quy tắc route | `backend/.../security/ApiRoutePermissions.java` | Mỗi (method, đường dẫn) cần **ít nhất một** cặp (dòng ma trận, action). Route chưa có quy tắc bị từ chối (deny by default), nên route mới phải được thêm vào đây. |
 | Gắn vào BFF | `GitHubIntegrationBffController.proxy()` | Chạy sau khi xác định người dùng, trước kiểm tra workspace. |
 
@@ -183,5 +192,5 @@ Mọi request của trình duyệt tới `/api/github|workspaces|repositories|do
 - Các route drift (`/api/repositories/{id}/drift/**`) bị từ chối với mọi role vì dòng #16 đã bị gỡ; `GET /api/documentation/drift/severity-rules` cần #17 R (Technical Lead). Reassign review cần #24 U (Administrator) và `DOCUMENT_REASSIGN` như trước.
 - `/api/admin/**` giữ nguyên: chỉ ADMIN/ADMINISTRATOR và `@PreAuthorize` theo quyền (khớp các dòng #24, #27, #28 chỉ có Administrator).
 - **Chưa theo ma trận (cố ý):** `/api/managed-workspaces/**` (`WorkspaceController`) và `/api/profile/**` kiểm tra theo chủ sở hữu/thành viên, không theo role. Dòng #25 chỉ cho Administrator, nhưng Developer đang dùng workspace tự quản trong trang Repository; áp dụng #25 sẽ làm hỏng chức năng đó nên cần nhóm quyết định. Các quyền đọc của Technical Lead (#7–#11, #13) đã được BFF cho phép nhưng GitHub Integration chưa cấp quyền `DOCUMENT_*` tương ứng cho role này; sẽ nối khi màn hình của Technical Lead được xây.
-- **Giữ ma trận hai nơi đồng bộ:** `ScreenPermissionsParityTest` đọc `frontend/src/rbac/permissions.js` và `roles.js` rồi so với bản Java; đổi quyền ở một nơi mà quên nơi kia sẽ làm test fail. `ApiRoutePermissionsTest` kiểm tra 49 route × 5 role theo bảng viết tay từ ma trận.
+- **Giữ ma trận hai nơi đồng bộ:** `ScreenPermissionsParityTest` đọc `frontend/src/rbac/permissions.js` và `roles.js` rồi so với bản Java; đổi quyền ở một nơi mà quên nơi kia sẽ làm test fail. `ApiRoutePermissionsTest` kiểm tra các route đại diện với cả 5 role theo bảng viết tay từ ma trận.
 - Frontend: khung "Staff Review Queue" nhúng trong trang Documentation chỉ hiện cho role có #10 U (Staff); Developer chỉ đọc phản hồi duyệt (#10 R) nên không còn thấy khung này (trước đó bấm vào sẽ báo 403).

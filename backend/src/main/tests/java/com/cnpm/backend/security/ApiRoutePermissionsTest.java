@@ -16,6 +16,9 @@ class ApiRoutePermissionsTest {
     private static final String ID = "11111111-1111-4111-8111-111111111111";
     private static final String WS = "ws-42";
 
+    private static final String COLLECTIONS = "/api/workspaces/" + WS + "/collections";
+    private static final String DOCUMENTS = COLLECTIONS + "/" + ID + "/documents";
+
     /** route -> roles that may use it, written from the matrix (not computed from the rules). */
     private static final Map<String, List<String>> ALLOWED = Map.ofEntries(
             // GitHub connection (#5) and repositories (#6)
@@ -50,6 +53,17 @@ class ApiRoutePermissionsTest {
             Map.entry("GET /api/documentation/" + ID, List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD")),
             Map.entry("GET /api/documentation/" + ID + "/code-entities", List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD")),
             Map.entry("PUT /api/documentation/" + ID + "/code-entities", List.of("DEVELOPER", "STAFF")),
+            // collections (#21)
+            Map.entry("GET " + COLLECTIONS, List.of("DEVELOPER", "TECHNICAL_LEAD")),
+            Map.entry("GET " + DOCUMENTS, List.of("DEVELOPER", "TECHNICAL_LEAD")),
+            Map.entry("GET " + COLLECTIONS + "/" + ID + "/document-candidates", List.of("TECHNICAL_LEAD")),
+            Map.entry("POST " + COLLECTIONS, List.of("TECHNICAL_LEAD")),
+            Map.entry("PUT " + COLLECTIONS + "/" + ID, List.of("TECHNICAL_LEAD")),
+            Map.entry("DELETE " + COLLECTIONS + "/" + ID, List.of("TECHNICAL_LEAD")),
+            Map.entry("PUT " + DOCUMENTS + "/" + ID, List.of("TECHNICAL_LEAD")),
+            Map.entry("DELETE " + DOCUMENTS + "/" + ID, List.of("TECHNICAL_LEAD")),
+            Map.entry("PUT " + DOCUMENTS + "/" + ID + "/owner/80", List.of("TECHNICAL_LEAD")),
+            Map.entry("DELETE " + DOCUMENTS + "/" + ID + "/owner", List.of("TECHNICAL_LEAD")),
             // templates (#22)
             Map.entry("GET /api/documentation/templates", List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD")),
             Map.entry("POST /api/documentation/templates", List.of("TECHNICAL_LEAD")),
