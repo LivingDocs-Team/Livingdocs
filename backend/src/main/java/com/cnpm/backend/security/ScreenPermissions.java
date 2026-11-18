@@ -45,6 +45,7 @@ public final class ScreenPermissions {
         row(18, "versionHistory",           "R",    "R",    "",     "R",    "");
         row(19, "documentRollback",         "U",    "",     "U",    "U",    "");
         row(20, "knowledgeBase",            "R",    "",     "",     "R",    "");
+        row(21, "collections",              "R",    "",     "",     "CRUD", "");
         row(22, "templates",                "R",    "R",    "",     "CRUD", "");
         row(23, "healthReports",            "",     "",     "",     "RE",   "");
         row(24, "userManagement",           "",     "",     "",     "",     "CRUD");

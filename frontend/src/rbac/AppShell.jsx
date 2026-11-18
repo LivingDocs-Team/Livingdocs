@@ -1,5 +1,6 @@
 // Screen 2 (signed in): sidebar and breadcrumb rendered from the role's screen flow, and the
 // current screen rendered from the registry below. No role-specific if/else lives here.
+import DocumentationCollections from '../DocumentationCollections';
 import DocumentationManagement from '../DocumentationManagement';
 import DocumentationSearch from '../DocumentationSearch';
 import GitHubConnection from '../GitHubConnection';
@@ -49,6 +50,7 @@ const SCREENS = {
   NotificationPreferences: { Component: NotificationPreferences },
   GitHubConnection: { Component: GitHubConnection },
   RepositoryManagement: { Component: RepositoryManagement },
+  DocumentationCollections: { Component: DocumentationCollections },
   DocumentationManagement: { Component: DocumentationManagement },
   DocumentationSearch: { Component: DocumentationSearch },
   TemplateLibrary: { Component: TemplateLibrary },

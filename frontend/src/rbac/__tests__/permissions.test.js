@@ -1,8 +1,8 @@
-// can() against the whole Screen Authorization matrix (23 rows x 5 roles x 6 actions).
+// can() against the whole Screen Authorization matrix (24 rows x 5 roles x 6 actions).
 // The expected table is copied from the team's specification in its original notation, so it is an
 // independent oracle for permissions.js. Cells changed by the team decision of 2026-11-17 (rows without
 // a screen in the role's flow removed; #8 gains E for Developer) are marked `// decided`; rows #4, #14,
-// #15, #16 and #21 were removed from the web for every role and are listed in REMOVED.
+// #15 and #16 were removed from the web for every role and are listed in REMOVED.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ACTIONS, allowedActions, can, canAccess, PERMISSIONS, SCREEN_KEYS } from '../permissions.js';
@@ -26,6 +26,7 @@ const SPEC = [
   [18, 'versionHistory', 'R', 'R', 'R', '-', 'R', '-'], // decided
   [19, 'documentRollback', 'U', 'U', '-', 'U', 'U', '-'],
   [20, 'knowledgeBase', 'R', 'R', '-', '-', 'R', '-'],
+  [21, 'collections', 'C-R-U-D', 'R', '-', '-', 'C-R-U-D', '-'],
   [22, 'templates', 'C-R-U-D', 'R', 'R', '-', 'C-R-U-D', '-'],
   [23, 'healthReports', 'R-E', '-', '-', '-', 'R-E', '-'],
   [24, 'userManagement', 'C-R-U-D', '-', '-', '-', '-', 'C-R-U-D'],
@@ -40,15 +41,15 @@ function parse(cell, typical) {
   return (cell === '✓' ? typical : cell).split('-');
 }
 
-const REMOVED = ['dashboard', 'autoUpdateSettings', 'autoUpdateReview', 'driftAlerts', 'collections'];
+const REMOVED = ['dashboard', 'autoUpdateSettings', 'autoUpdateReview', 'driftAlerts'];
 
 test('the matrix has the specified rows in order, keeping their original numbers', () => {
-  assert.equal(SCREEN_KEYS.length, 23);
+  assert.equal(SCREEN_KEYS.length, 24);
   assert.deepEqual(SCREEN_KEYS, SPEC.map(([, key]) => key));
   SPEC.forEach(([row, key]) => assert.equal(PERMISSIONS[key].row, row));
 });
 
-test('rows #4, #14, #15, #16 and #21 are not available to any role', () => {
+test('rows #4, #14, #15 and #16 are not available to any role', () => {
   for (const key of REMOVED) {
     assert.equal(PERMISSIONS[key], undefined);
     for (const role of ROLE_ORDER) assert.equal(canAccess(role, key), false, `${role} ${key}`);
