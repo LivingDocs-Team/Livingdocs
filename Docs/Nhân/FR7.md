@@ -26,6 +26,18 @@ Workspace tập hợp repository và thành viên. Quyền theo membership chi p
 
 Backend dùng `/api/managed-workspaces` để tạo và liệt kê, `GET` và `PUT` trên `/{workspaceId}` để xem và sửa. Dùng `GET` và `POST` trên `/{workspaceId}/members` và `DELETE` trên `/{workspaceId}/members/{userId}` để quản lý thành viên. Luồng chuyển repository kiểm tra quyền trước khi thay đổi liên kết.
 
+### Quyền và luồng API
+
+| Thao tác | Chủ workspace | Thành viên |
+|---|---|---|
+| Tạo workspace | Người dùng đã xác thực có thể tạo và trở thành `OWNER`. | Người dùng có thể tạo workspace riêng. |
+| Đọc workspace | Có trong danh sách và truy cập được chi tiết. | Có trong danh sách và truy cập được chi tiết với `accessRole=MEMBER`. |
+| Sửa metadata hoặc thêm/gỡ thành viên | Kiểm tra chủ workspace trước khi ghi. | Không được thực hiện. |
+
+- **FR-WORKSPACE.4 — Validate metadata.** `POST /api/managed-workspaces` và `PUT /api/managed-workspaces/{workspaceId}` nhận `name` khác rỗng, tối đa 100 ký tự và `description` tùy chọn tối đa 1000 ký tự. Tạo thành công trả `201`. Phản hồi gồm `id`, `name`, `description`, `ownerId`, `createdAt`, `updatedAt`, `accessRole`; `ownerId` là null khi gọi với tư cách thành viên.
+- **FR-WORKSPACE.5 — Validate thành viên.** `POST /api/managed-workspaces/{workspaceId}/members` nhận `{"userId":42}` với ID dương, trả `201`. ID không tồn tại trả `404`; thêm chủ sở hữu trả `400`; thêm membership đã có trả `409`. Gỡ thành viên hợp lệ trả `204`.
+- **FR-WORKSPACE.6 — Chuyển repository.** `PUT /api/workspaces/{workspaceId}/repositories/{id}` dùng `workspaceId` làm đích và `id` làm ID liên kết repository hiện có. Xác minh quyền sở hữu với cả nguồn lẫn đích, kiểm tra trùng và cập nhật liên kết hiện có khi hợp lệ.
+
 ## 4. Luồng lỗi
 
 Từ chối thao tác quản trị khi thiếu quyền và từ chối liên kết trùng.
@@ -35,6 +47,12 @@ Từ chối thao tác quản trị khi thiếu quyền và từ chối liên k�
 - **AC-WORKSPACE.1:** OWNER có thể quản lý thành viên trong workspace của mình.
 - **AC-WORKSPACE.2:** MEMBER không thực hiện được thao tác dành riêng cho OWNER.
 - **AC-WORKSPACE.3:** Một lần chuyển hợp lệ cập nhật liên kết; lần chuyển không hợp lệ giữ liên kết cũ.
+
+| Ca chấp nhận | Thiết lập và thao tác | Kết quả quan sát |
+|---|---|---|
+| AC-WORKSPACE.4 | Owner thêm user B, rồi B đọc workspace. | B nhận `accessRole=MEMBER` và `ownerId=null`; OWNER vẫn đọc được với quyền sở hữu. |
+| AC-WORKSPACE.5 | Thêm B lần hai hoặc yêu cầu thêm chính owner. | Trả lần lượt `409`, `400`; danh sách thành viên chỉ có một bản ghi B. |
+| AC-WORKSPACE.6 | Người gọi sở hữu nguồn nhưng chỉ là thành viên ở đích. | Chuyển repository bị từ chối; đọc lại nguồn vẫn thấy liên kết. |
 
 ## 6. Kiểm thử và PR
 
