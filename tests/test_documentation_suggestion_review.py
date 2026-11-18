@@ -5,6 +5,8 @@ import os
 
 from playwright.sync_api import Page, expect
 
+from rbac_nav import open_screen
+
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 USER_ID = "42"
 WORKSPACE_ID = f"ws-{USER_ID}"
@@ -91,8 +93,9 @@ def review_evidence():
 
 class FakeApi:
     def __init__(self, item, comparison_status=200, edit_status=200, workflow_status=200,
-                 workflow_response=None):
+                 workflow_response=None, role="STAFF"):
         self.item = item
+        self.role = role
         self.comparison_status = comparison_status
         self.edit_status = edit_status
         self.workflow_status = workflow_status
@@ -107,7 +110,7 @@ class FakeApi:
         self.requests.append((request.method, path, body))
 
         if (request.method, path) == ("GET", "/api/auth/me"):
-            return route.fulfill(status=200, json={"id": int(USER_ID), "email": "reviewer@example.test"})
+            return route.fulfill(status=200, json={"id": int(USER_ID), "email": "reviewer@example.test", "role": self.role})
         if (request.method, path) == ("GET", "/api/auth/csrf"):
             return route.fulfill(status=200, json={"token": "csrf-ld312"})
         if (request.method, path) == ("GET", f"/api/workspaces/{WORKSPACE_ID}/repositories"):
@@ -160,7 +163,13 @@ class FakeApi:
 def open_documentation(page: Page, api: FakeApi):
     page.route("**/api/**", api.handle)
     page.goto(FRONTEND_URL)
-    page.get_by_role("button", name="Documentation Management").first.click()
+    # Staff edit proposals from Document Review > Document Editor (a link on the Review Queue page);
+    # owners use Generated Documents.
+    if api.role == "STAFF":
+        open_screen(page, "Review Queue")
+        page.get_by_role("link", name="Document Editor").click()
+    else:
+        open_screen(page, "Generated Documents")
     expect(page.get_by_role("heading", name="Documentation Management")).to_be_visible()
     expect(page.get_by_role("heading", name="AI Suggestion Review")).to_be_visible()
 
@@ -198,7 +207,7 @@ def test_assigned_staff_can_review_backend_comparison_and_evidence(page: Page):
 def test_owner_can_edit_only_after_changes_requested_and_backend_confirms(page: Page):
     item = workflow("CHANGES_REQUESTED")
     item["ownerUserId"] = USER_ID
-    api = FakeApi(item)
+    api = FakeApi(item, role="DEVELOPER")
     open_documentation(page, api)
     page.get_by_label("AI suggestion list").get_by_role("button", name="Shop API Guide").click()
 
@@ -219,7 +228,7 @@ def test_owner_can_edit_only_after_changes_requested_and_backend_confirms(page: 
 def test_edit_conflict_is_shown_without_success_message(page: Page):
     item = workflow("CHANGES_REQUESTED")
     item["ownerUserId"] = USER_ID
-    api = FakeApi(item, edit_status=409)
+    api = FakeApi(item, edit_status=409, role="DEVELOPER")
     open_documentation(page, api)
     page.get_by_label("AI suggestion list").get_by_role("button", name="Shop API Guide").click()
     page.get_by_role("button", name="Edit proposal").click()
