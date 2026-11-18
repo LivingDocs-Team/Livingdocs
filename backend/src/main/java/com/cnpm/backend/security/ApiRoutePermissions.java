@@ -114,7 +114,8 @@ public final class ApiRoutePermissions {
         rule("GET", "/api/document-workflows/manager/queue", need("managerApproval", 'R'));
         rule("GET", "/api/document-workflows/history-accessible", need("workflowSubmission", 'R'),
                 need("staffReview", 'R'), need("managerApproval", 'R'), need("approvalAudit", 'R'));
-        for (String view : new String[] {"", "/document", "/evidence", "/review-evidence", "/review-comparison", "/history"}) {
+        for (String view : new String[] {"", "/document", "/evidence", "/review-evidence", "/review-comparison",
+                "/history", "/comments", "/change-requests"}) {
             rule("GET", "/api/document-workflows/{}" + view, need("workflowSubmission", 'R'),
                     need("staffReview", 'R'), need("managerApproval", 'R'), need("approvalAudit", 'R'));
         }
@@ -122,6 +123,7 @@ public final class ApiRoutePermissions {
         rule("POST", "/api/document-workflows/{}/claim", need("staffReview", 'U'));
         rule("POST", "/api/document-workflows/{}/release", need("staffReview", 'U'));
         rule("POST", "/api/document-workflows/{}/staff-review", need("staffReview", 'A'));
+        rule("POST", "/api/document-workflows/{}/comments", need("staffReview", 'A'));
         rule("PUT", "/api/document-workflows/{}/document", need("documentation", 'U'));
         rule("POST", "/api/document-workflows/{}/approve", need("managerApproval", 'A'));
         rule("POST", "/api/document-workflows/{}/reject", need("managerApproval", 'A'));

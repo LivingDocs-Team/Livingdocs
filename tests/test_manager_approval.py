@@ -484,7 +484,7 @@ def test_full_ld310_submit_to_staff_to_manager_approval_history(page: Page):
     page.get_by_role("button", name="Claim review").click()
     expect(page.get_by_role("heading", name="Submit Staff review")).to_be_visible()
     page.get_by_label("Decision").select_option("PASSED")
-    page.get_by_label("Review comment").fill("Evidence is sufficient for approval.")
+    page.get_by_label("Review comment", exact=True).fill("Evidence is sufficient for approval.")
     page.get_by_role("button", name="Submit review").click()
     expect(page.get_by_label("Submitted Staff review result")).to_contain_text("PENDING_MANAGER_APPROVAL")
 

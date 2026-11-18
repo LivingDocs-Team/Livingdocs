@@ -4,6 +4,7 @@ import { githubApi, githubApiText } from './githubApi';
 import { TemplateManager, TemplatePicker } from './DocumentationTemplates';
 import { useTemplates } from './templateApi';
 import DocumentationSuggestionReview from './DocumentationSuggestionReview';
+import DocumentationRevision from './DocumentationRevision';
 import StaffReviewQueue from './StaffReviewQueue';
 import ManagerApprovalQueue from './ManagerApprovalQueue';
 import Can from './rbac/Can';
@@ -356,6 +357,7 @@ export default function DocumentationManagement({ userId }) {
   const [history, setHistory] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [historyError, setHistoryError] = useState('');
+  const [revisionNotice, setRevisionNotice] = useState('');
 
   useEffect(() => {
     if (!userId) {
@@ -457,7 +459,7 @@ export default function DocumentationManagement({ userId }) {
       });
 
     return () => { cancelled = true; };
-  }, [userId, selectedWorkflowId]);
+  }, [userId, selectedWorkflowId, workflowsRefresh]);
 
   const selectedWorkflow = workflowPage.content.find(
     (workflow) => String(workflow.id) === selectedWorkflowId
@@ -1197,6 +1199,17 @@ export default function DocumentationManagement({ userId }) {
           )}
 
         </section>
+
+        {revisionNotice && <p role="status">{revisionNotice}</p>}
+        {selectedWorkflow?.status === 'CHANGES_REQUESTED'
+          && String(selectedWorkflow.ownerUserId) === String(userId) && (
+          <DocumentationRevision key={`${userId}:${selectedWorkflowId}`}
+            userId={userId} workflowId={selectedWorkflowId}
+            onSubmitted={(message) => {
+              setRevisionNotice(message);
+              setWorkflowsRefresh((value) => value + 1);
+            }} />
+        )}
 
         <DocumentationSuggestionReview
           workflows={workflowPage.content}
