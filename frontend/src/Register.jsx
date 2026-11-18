@@ -1,6 +1,8 @@
 
 import { useState } from 'react';
+import AuthField from './AuthField';
 import { csrfHeaders } from './csrf';
+import Icon from './icons';
 
 function Register() {
   const [username, setUsername] = useState('');
@@ -69,55 +71,62 @@ function Register() {
   }
 
   return (
-    <main className="page">
-      <section className="login-card">
-        <h1>Create account</h1>
-        <p className="subtitle">Join LivingDocs</p>
+    <section aria-labelledby="register-title">
+      <div className="auth-icon"><Icon name="user" size={17} /></div>
+      <h2 id="register-title">Create your account</h2>
+      <p className="auth-sub">Registration creates a Developer account. Other roles are assigned by an Administrator.</p>
 
-        <form onSubmit={handleSubmit}>
-          <label htmlFor="register-username">Username</label>
-          <input
-            id="register-username"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            minLength={3}
-            maxLength={50}
-            placeholder="Choose a username"
-            required
-          />
-
-          <label htmlFor="register-email">Email</label>
-          <input
-            id="register-email"
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            maxLength={255}
-            placeholder="you@example.com"
-            required
-          />
-
-          <label htmlFor="register-first-name">First name</label>
-          <input
+      <form onSubmit={handleSubmit}>
+        <div className="auth-pair">
+          <AuthField
             id="register-first-name"
+            label="First name"
             value={firstName}
             onChange={(event) => setFirstName(event.target.value)}
             maxLength={255}
+            placeholder="First name"
             required
           />
-
-          <label htmlFor="register-last-name">Last name</label>
-          <input
+          <AuthField
             id="register-last-name"
+            label="Last name"
             value={lastName}
             onChange={(event) => setLastName(event.target.value)}
             maxLength={255}
+            placeholder="Last name"
             required
           />
+        </div>
 
-          <label htmlFor="register-password">Password</label>
-          <input
+        <AuthField
+          id="register-username"
+          label="Username"
+          icon="user"
+          value={username}
+          onChange={(event) => setUsername(event.target.value)}
+          minLength={3}
+          maxLength={50}
+          placeholder="Choose a username"
+          required
+        />
+
+        <AuthField
+          id="register-email"
+          label="Email"
+          icon="mail"
+          type="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          maxLength={255}
+          placeholder="you@example.com"
+          required
+        />
+
+        <div className="auth-pair">
+          <AuthField
             id="register-password"
+            label="Password"
+            icon="lock"
             type="password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
@@ -126,25 +135,26 @@ function Register() {
             placeholder="At least 6 characters"
             required
           />
-
-          <label htmlFor="confirm-password">Confirm password</label>
-          <input
+          <AuthField
             id="confirm-password"
+            label="Confirm password"
+            icon="lock"
             type="password"
             value={confirmPassword}
             onChange={(event) => setConfirmPassword(event.target.value)}
             placeholder="Enter your password again"
             required
           />
+        </div>
 
-          <button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'Creating account...' : 'Create account'}
-          </button>
-        </form>
+        <button className="auth-submit" type="submit" disabled={isSubmitting}>
+          {isSubmitting ? 'Creating account...' : 'Create account'}
+          <Icon name="arrow" />
+        </button>
+      </form>
 
-        {message && <p role={hasError ? 'alert' : 'status'}>{message}</p>}
-      </section>
-    </main>
+      {message && <p className="auth-message" role={hasError ? 'alert' : 'status'}>{message}</p>}
+    </section>
   );
 }
 

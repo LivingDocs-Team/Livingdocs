@@ -7,6 +7,7 @@ import com.cnpm.backend.repository.UserRepository;
 import com.cnpm.backend.repository.RoleRepository;
 import com.cnpm.backend.repository.WorkspaceRepository;
 import com.cnpm.backend.repository.WorkspaceMembershipRepository;
+import com.cnpm.backend.security.ApiRoutePermissions;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -120,8 +121,14 @@ public class GitHubIntegrationBffController {
         }
 
         User user = authenticatedUser(authentication);
-        Set<String> authorities = currentAuthorities(user, authentication);
         String path = incoming.getRequestURI().substring(incoming.getContextPath().length());
+        // Screen Authorization matrix: the account's role must be allowed to use this route at all.
+        ApiRoutePermissions.Decision permission =
+                ApiRoutePermissions.evaluate(incoming.getMethod(), path, user.getRole());
+        if (!permission.allowed()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, permission.reason());
+        }
+        Set<String> authorities = currentAuthorities(user, authentication);
         WorkspaceAuthorization workspaceAuthorization = verifiedWorkspaceForRequest(
                 path, HttpMethod.valueOf(incoming.getMethod()), user, authorities);
         final String verifiedStaffTarget = HttpMethod.POST.matches(incoming.getMethod())
