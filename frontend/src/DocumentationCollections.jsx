@@ -74,9 +74,27 @@ function WorkspaceCollections({ workspace, personalUserId }) {
     return () => { current = false; };
   }, [path, workspacePath, workspace, canCreate, canUpdate, personalUserId]);
 
+  async function edit() {
+    setSaving(true);
+    setError('');
+    setNotice('');
+    try {
+      const items = await githubApi(path);
+      setCollections(items);
+      if (items.some((item) => item.id === openId)) {
+        setEditing(true);
+      } else {
+        setOpenId(null);
+        setError('This collection is no longer available.');
+      }
+    } catch (failure) {
+      setError(failure.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function save(body) {
-    if (selected?.repositoryId && selected.repositoryId !== body.repositoryId &&
-        !window.confirm('Changing the repository removes this collection’s document links. Continue?')) return;
     setSaving(true);
     setError('');
     setNotice('');
@@ -97,7 +115,7 @@ function WorkspaceCollections({ workspace, personalUserId }) {
   }
 
   async function remove() {
-    if (!window.confirm(`Delete “${selected.name}”? Its documents and owner assignments will be kept.`)) return;
+    if (!window.confirm(`Permanently delete “${selected.name}” and its document links? The documents and owner assignments will be kept.`)) return;
     setSaving(true);
     setError('');
     setNotice('');
@@ -163,12 +181,12 @@ function WorkspaceCollections({ workspace, personalUserId }) {
               {selected.description && <p>{selected.description}</p>}
               <div className="collection-toolbar">
                 {canUpdate && repositories && (
-                  <button type="button" disabled={saving} onClick={() => setEditing(true)}>Edit collection</button>
+                  <button type="button" disabled={saving} onClick={edit}>Edit collection</button>
                 )}
                 {canDelete && <button type="button" disabled={saving} onClick={remove}>Delete collection</button>}
               </div>
               <CollectionDocuments key={selected.id} path={`${path}/${selected.id}`}
-                canUpdate={canUpdate} owners={owners} hasRepository={Boolean(selected.repositoryId)} />
+                canUpdate={canUpdate} owners={owners} hasRepository={Boolean(selected.repositoryName)} />
             </>
           )}
         </section>
@@ -178,13 +196,17 @@ function WorkspaceCollections({ workspace, personalUserId }) {
 }
 
 function CollectionForm({ collection, repositories, saving, onSave, onCancel }) {
+  const repositoryLocked = Boolean(collection?.hasDocuments);
+  const repositoryId = collection?.repositoryId || '';
+  const repositoryUnavailable = repositoryId && !repositories.some((item) => item.id === repositoryId);
+
   function submit(event) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     onSave({
       name: form.get('name').trim(),
       description: form.get('description').trim() || null,
-      repositoryId: form.get('repository') || null,
+      repositoryId: repositoryLocked ? collection.repositoryId : form.get('repository') || null,
     });
   }
 
@@ -196,11 +218,14 @@ function CollectionForm({ collection, repositories, saving, onSave, onCancel }) 
         <label>Description <textarea name="description" maxLength={1000} defaultValue={collection?.description || ''} /></label>
         <label className="collection-field">
           Repository
-          <select name="repository" defaultValue={collection?.repositoryId || ''}>
+          <select name="repository" defaultValue={repositoryId} disabled={repositoryLocked}
+            aria-describedby={repositoryLocked ? 'collection-repository-lock' : undefined}>
             <option value="">No repository</option>
+            {repositoryUnavailable && <option value={repositoryId}>Unavailable repository</option>}
             {repositories.map((item) => <option key={item.id} value={item.id}>{item.fullName}</option>)}
           </select>
         </label>
+        {repositoryLocked && <p id="collection-repository-lock">Remove all documents from this collection to change its repository.</p>}
       </fieldset>
       <div className="collection-toolbar">
         <button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save collection'}</button>

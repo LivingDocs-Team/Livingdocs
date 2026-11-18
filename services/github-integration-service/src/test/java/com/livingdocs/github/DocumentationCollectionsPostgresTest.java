@@ -40,6 +40,48 @@ class DocumentationCollectionsPostgresTest {
     }
 
     @Test
+    void repositoryChangesRequireAnEmptyCollection() throws Exception {
+        UUID original = repository(WORKSPACE, 3);
+        UUID replacement = repository(WORKSPACE, 4);
+        UUID document = document(original);
+        String collection = """
+                {"name":"Repository rules","repositoryId":"%s"}
+                """.formatted(original);
+        String changed = collection.replace(original.toString(), replacement.toString());
+        String cleared = collection.replace("\"" + original + "\"", "null");
+
+        mvc.perform(as(post(PATH), LEAD, WORKSPACE).contentType("application/json").content(collection))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.hasDocuments").value(false));
+        UUID id = jdbc.sql("SELECT id FROM documentation_collections WHERE workspace_id = ? AND name = ?")
+                .params(WORKSPACE, "Repository rules").query(UUID.class).single();
+        String detail = PATH + "/" + id;
+        String documentPath = detail + "/documents/" + document;
+        mvc.perform(as(put(documentPath), LEAD, WORKSPACE)).andExpect(status().isNoContent());
+
+        for (String request : new String[] { changed, cleared }) {
+            mvc.perform(as(put(detail), LEAD, WORKSPACE).contentType("application/json").content(request))
+                    .andExpect(status().isConflict());
+        }
+        mvc.perform(as(put(detail), LEAD, WORKSPACE).contentType("application/json").content(collection))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.hasDocuments").value(true));
+        mvc.perform(as(get(detail + "/documents"), LEAD, WORKSPACE))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].id").value(document.toString()));
+
+        jdbc.sql("UPDATE repositories SET status = 'DISCONNECTED' WHERE id = ?").param(original).update();
+        mvc.perform(as(put(detail), LEAD, WORKSPACE).contentType("application/json").content(changed))
+                .andExpect(status().isConflict());
+        mvc.perform(as(put(detail), LEAD, WORKSPACE).contentType("application/json").content(collection))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.hasDocuments").value(true));
+        mvc.perform(as(delete(documentPath), LEAD, WORKSPACE)).andExpect(status().isNoContent());
+        mvc.perform(as(put(detail), LEAD, WORKSPACE).contentType("application/json").content(changed))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.repositoryId").value(replacement.toString()))
+                .andExpect(jsonPath("$.hasDocuments").value(false));
+        mvc.perform(as(put(detail), LEAD, WORKSPACE).contentType("application/json").content(cleared))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.repositoryId").isEmpty());
+        mvc.perform(as(delete(detail), LEAD, WORKSPACE)).andExpect(status().isNoContent());
+    }
+
+    @Test
     void collectionLifecycleEnforcesRoleAndWorkspaceBoundaries() throws Exception {
         UUID repo = repository(WORKSPACE, 1);
         UUID otherRepo = repository(OTHER, 2);

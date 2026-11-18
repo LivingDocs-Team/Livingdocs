@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -19,11 +20,14 @@ public class DocumentationCollectionService {
         this.jdbc = jdbc;
     }
 
-    public record Collection(UUID id, String name, String description, UUID repositoryId, String repositoryName) {}
+    public record Collection(UUID id, String name, String description, UUID repositoryId, String repositoryName,
+                             boolean hasDocuments) {}
     public record Document(UUID id, String title, String assignedOwnerId) {}
 
     private static final String COLLECTIONS = """
-            SELECT c.id, c.name, c.description, r.id AS repository_id, r.full_name AS repository_name
+            SELECT c.id, c.name, c.description, c.repository_id, r.full_name AS repository_name,
+                   EXISTS (SELECT 1 FROM documentation_collection_documents m WHERE m.collection_id = c.id)
+                       AS has_documents
             FROM documentation_collections c
             LEFT JOIN repositories r ON r.id = c.repository_id AND r.workspace_id = c.workspace_id
                 AND r.status <> 'DISCONNECTED'
@@ -47,11 +51,18 @@ public class DocumentationCollectionService {
 
     @Transactional
     public Collection save(String workspace, UUID id, String name, String description, UUID repositoryId) {
-        if (id != null) {
-            lockedCollection(workspace, id);
-        }
-        if (repositoryId != null) {
-            lockRepository(workspace, repositoryId);
+        if (id == null) {
+            if (repositoryId != null) lockRepository(workspace, repositoryId);
+        } else {
+            Collection existing = lockedCollection(workspace, id);
+            if (!Objects.equals(existing.repositoryId(), repositoryId)) {
+                // Read membership after acquiring the collection lock shared by attach and detach.
+                if (collection(workspace, id).hasDocuments()) {
+                    throw new ApiException(HttpStatus.CONFLICT, "COLLECTION_REPOSITORY_LOCKED",
+                            "Remove all documents from the collection before changing its repository.");
+                }
+                if (repositoryId != null) lockRepository(workspace, repositoryId);
+            }
         }
         UUID collectionId = id == null ? UUID.randomUUID() : id;
         String normalizedName = name.strip();
@@ -63,12 +74,6 @@ public class DocumentationCollectionService {
                         VALUES (?, ?, ?, ?, ?, ?)
                         """).params(collectionId, workspace, normalizedName, nameKey, description, repositoryId).update();
             } else {
-                jdbc.sql("""
-                        DELETE FROM documentation_collection_documents
-                        WHERE collection_id = ? AND document_id IN (
-                            SELECT id FROM documentation_artifacts WHERE repository_id IS DISTINCT FROM ?
-                        )
-                        """).params(id, repositoryId).update();
                 jdbc.sql("""
                         UPDATE documentation_collections SET name = ?, name_key = ?, description = ?, repository_id = ?
                         WHERE workspace_id = ? AND id = ?
@@ -92,7 +97,7 @@ public class DocumentationCollectionService {
     @Transactional
     public List<Document> documents(String workspace, UUID collectionId, boolean candidates) {
         Collection collection = lockedCollection(workspace, collectionId);
-        if (collection.repositoryId() == null) return List.of();
+        if (collection.repositoryName() == null) return List.of();
         lockRepository(workspace, collection.repositoryId());
         String membership = """
                  AND EXISTS (SELECT 1 FROM documentation_collection_documents m
