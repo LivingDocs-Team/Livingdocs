@@ -126,6 +126,62 @@ class GitHubIntegrationBffControllerTest {
     }
 
     @Test
+    void collectionOwnerAssignmentVerifiesRoleMembershipAndActiveTargetBeforeForwarding() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        UserRepository users = mock(UserRepository.class);
+        WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        WorkspaceMembershipRepository memberships = mock(WorkspaceMembershipRepository.class);
+        User actor = mock(User.class);
+        User target = mock(User.class);
+        when(users.findByEmail("lead@example.test")).thenReturn(Optional.of(actor));
+        when(users.findById(74L)).thenReturn(Optional.of(target));
+        when(actor.getId()).thenReturn(73L);
+        when(target.getId()).thenReturn(74L);
+        when(target.isActive()).thenReturn(true);
+        String workspace = "workspace-11111111-1111-1111-1111-111111111111";
+        String collection = "22222222-2222-2222-2222-222222222222";
+        String document = "33333333-3333-3333-3333-333333333333";
+        String path = "/api/workspaces/" + workspace + "/collections/" + collection
+                + "/documents/" + document + "/owner/74";
+        var controller = new GitHubIntegrationBffController(builder.build(), users,
+                "http://github.test:8082", "internal-test-credential");
+        controller.setWorkspaceRepository(workspaces);
+        controller.setWorkspaceMembershipRepository(memberships);
+        var incoming = new MockHttpServletRequest("PUT", path);
+        incoming.addHeader("X-Verified-Document-Owner-Id", "99");
+        incoming.addHeader("X-Verified-Workspace-Access", "OWNER");
+        Authentication auth = authenticatedEmail("lead@example.test");
+
+        when(actor.getRole()).thenReturn("DEVELOPER");
+        assertThatThrownBy(() -> controller.proxy(incoming, auth, null))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(403));
+        when(actor.getRole()).thenReturn("TECHNICAL_LEAD");
+        assertThatThrownBy(() -> controller.proxy(incoming, auth, null))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(404));
+        when(memberships.existsByWorkspace_IdAndUser_IdAndUser_ActiveTrue(workspace, 73L)).thenReturn(true);
+        assertThatThrownBy(() -> controller.proxy(incoming, auth, null))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(400));
+        when(memberships.existsByWorkspace_IdAndUser_IdAndUser_ActiveTrue(workspace, 74L)).thenReturn(true);
+        when(target.isActive()).thenReturn(false);
+        assertThatThrownBy(() -> controller.proxy(incoming, auth, null))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(400));
+
+        when(target.isActive()).thenReturn(true);
+        server.expect(requestTo("http://github.test:8082" + path))
+                .andExpect(method(HttpMethod.PUT))
+                .andExpect(header("X-Verified-Workspace-Access", "MEMBER"))
+                .andExpect(header("X-Verified-Document-Owner-Id", "74"))
+                .andRespond(withSuccess());
+        assertThat(controller.proxy(incoming, auth, null).getStatusCode().value()).isEqualTo(200);
+        server.verify();
+    }
+
+    @Test
     void memberCannotUseWorkspaceRepositoryMutationRoutes() {
         RestClient.Builder builder = RestClient.builder();
         UserRepository users = mock(UserRepository.class);

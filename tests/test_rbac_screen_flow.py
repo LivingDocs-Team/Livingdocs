@@ -19,7 +19,7 @@ MENUS = {
                     "Versions & Change Log", "Knowledge Base"],
         "screens": ["Profile & Settings", "Notifications", "GitHub Connection", "Repository List", "PR & Commit List",
                     "Coverage Gaps", "Generated Documents", "Version History", "Change Log",
-                    "Knowledge Search", "Template Library"],
+                    "Documentation Collections", "Knowledge Search", "Template Library"],
         "landing": "#/github/connection",
     },
     "STAFF": {
@@ -39,7 +39,7 @@ MENUS = {
         "screens": ["Profile & Settings", "Pull Requests & Commits", "Documentation", "Workflow Status",
                     "Staff Review", "Manager Approval", "Approval Audit Trail & History",
                     "Drift Policies & Thresholds", "Version History & Comparison", "Document Rollback",
-                    "Knowledge Search", "Documentation Templates", "Health Metrics, Dependency Graph & Reports"],
+                    "Documentation Collections", "Knowledge Search", "Documentation Templates", "Health Metrics, Dependency Graph & Reports"],
         "landing": "#/knowledge/search",
     },
     "ADMINISTRATOR": {
@@ -171,15 +171,47 @@ def test_login_redirects_to_the_role_landing_page_and_logout_returns_home(page: 
 
 # ---------- screen 2: menus per role ----------
 
-# Rows #4, #14, #15, #16 and #21 were removed from the web: their former URLs are unknown pages now.
+# Rows #4, #14, #15 and #16 were removed from the web: their former URLs are unknown pages now.
 @pytest.mark.parametrize("role", list(MENUS))
 @pytest.mark.parametrize("path", ["#/dashboard", "#/auto-update/settings", "#/auto-update/documents",
-                                  "#/drift/alerts", "#/drift/analysis", "#/drift/history", "#/knowledge/collections"])
+                                  "#/drift/alerts", "#/drift/analysis", "#/drift/history"])
 def test_removed_functions_are_not_reachable_by_any_role(page: Page, role, path):
     start(page, Api(role), f"{FRONTEND}/{path}")
     expect(page).to_have_url(ends_with(MENUS[role]["landing"]))
     expect(page.get_by_role("heading", name="Access denied")).to_have_count(0)
     expect(page.get_by_role("heading", name="Documentation Drift")).to_have_count(0)
+
+
+@pytest.mark.parametrize("role", ["DEVELOPER", "TECHNICAL_LEAD"])
+def test_collections_browse_and_manage_controls_follow_role(page: Page, role):
+    path = "/api/workspaces/ws-42/collections"
+    detail = f"{path}/{REPOSITORY_ID}"
+    document = {"id": DOCUMENT_ID, "title": "Shop guide", "assignedOwnerId": "42"}
+    routes = {
+        **SAVED_DOCUMENT_ROUTES,
+        "/api/managed-workspaces": [],
+        path: [{"id": REPOSITORY_ID, "name": "Platform guides", "repositoryId": REPOSITORY_ID,
+                "repositoryName": "acme/shop"}],
+        f"{detail}/documents": [document],
+        f"{detail}/document-candidates": [document],
+    }
+    api = Api(role, routes)
+    start(page, api, f"{FRONTEND}/#/knowledge/collections")
+    page.get_by_role("button", name="Platform guides").click()
+    expect(page.get_by_text("Shop guide", exact=True)).to_be_visible()
+    expect(page.get_by_text("Owner #42", exact=True)).to_be_visible()
+    can_manage = role == "TECHNICAL_LEAD"
+    for name in ("New collection", "Edit collection", "Delete collection", "Save owner"):
+        expect(page.get_by_role("button", name=name)).to_have_count(int(can_manage))
+    if not can_manage:
+        assert not any(request[1].endswith("/document-candidates") for request in api.requests)
+
+
+@pytest.mark.parametrize("role", ["STAFF", "MANAGER", "ADMINISTRATOR"])
+def test_disallowed_role_cannot_open_collections_directly(page: Page, role):
+    start(page, Api(role), f"{FRONTEND}/#/knowledge/collections")
+    expect(page.get_by_role("heading", name="Access denied")).to_be_visible()
+    expect(menu_link(page, "Documentation Collections")).to_have_count(0)
 
 
 @pytest.mark.parametrize("role", list(MENUS))

@@ -31,6 +31,7 @@ export default Object.freeze({
       placeholder('document-rollback', 'Document Rollback', '/versions/rollback', 'documentRollback'), // #19
     ]),
     module('knowledge', 'Knowledge Base', [
+      implemented('documentation-collections', 'Documentation Collections', '/knowledge/collections', 'collections', 'DocumentationCollections'),
       implemented('knowledge-search', 'Knowledge Search', '/knowledge/search', 'knowledgeBase', 'DocumentationSearch'), // #20
       implemented('templates', 'Documentation Templates', '/knowledge/templates', 'templates', 'TemplateLibrary'), // #22
     ]),

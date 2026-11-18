@@ -41,6 +41,7 @@ export default Object.freeze({
       placeholder('change-log', 'Change Log', '/versions/change-log', 'versionHistory'),
     ]),
     module('knowledge', 'Knowledge Base', [
+      implemented('documentation-collections', 'Documentation Collections', '/knowledge/collections', 'collections', 'DocumentationCollections'),
       implemented('knowledge-search', 'Knowledge Search', '/knowledge/search', 'knowledgeBase', 'DocumentationSearch', [
         section('search-results', 'Search Results', '/knowledge/search/results', 'knowledgeBase'),
         section('doc-code-relationships', 'Doc-to-Code Relationships', '/knowledge/search/relationships', 'knowledgeBase'),
