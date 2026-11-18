@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { githubApi } from './githubApi';
 import Can from './rbac/Can';
 
@@ -79,6 +79,9 @@ export default function StaffReviewQueue({ userId }) {
   const [reviewOutcome, setReviewOutcome] = useState(null);
   const [reviewResult, setReviewResult] = useState('');
   const [reviewComment, setReviewComment] = useState('');
+  const [commentDraft, setCommentDraft] = useState('');
+  const [selectedPassage, setSelectedPassage] = useState(null);
+  const contentRef = useRef(null);
 
   const queueKey = `${userId || ''}:${queueOpen}:${pageIndex}:${refreshIndex}`;
   const detailKey = `${userId || ''}:${queueOpen}:${selectedId}:${refreshIndex}`;
@@ -131,7 +134,9 @@ export default function StaffReviewQueue({ userId }) {
     Promise.allSettled([
       githubApi(prefix, { userId }),
       githubApi(`${prefix}/document`, { userId }),
-    ]).then(async ([workflowResult, contentResult]) => {
+      githubApi(`${prefix}/comments`, { userId }),
+      githubApi(`${prefix}/change-requests`, { userId }),
+    ]).then(async ([workflowResult, contentResult, commentsResult, changesResult]) => {
       if (cancelled) return;
       if (workflowResult.status === 'rejected') {
         setDetailErrorState({ key: detailKey, message: errorMessage(workflowResult.reason, 'view this workflow') });
@@ -158,10 +163,19 @@ export default function StaffReviewQueue({ userId }) {
         evidenceError = evidenceResult.status === 'rejected'
           ? errorMessage(evidenceResult.reason, 'view review evidence') : '';
       }
-      setDetail({ workflow, content, contentError: contentResult.status === 'rejected'
+      setDetail({ workflow, content,
+        changeRequests: changesResult.status === 'fulfilled' ? changesResult.value : [],
+        changesError: changesResult.status === 'rejected'
+          ? errorMessage(changesResult.reason, 'load change requests') : '',
+        comments: commentsResult.status === 'fulfilled' ? commentsResult.value : [],
+        commentsError: commentsResult.status === 'rejected'
+          ? errorMessage(commentsResult.reason, 'load review comments') : '',
+        contentError: contentResult.status === 'rejected'
         ? errorMessage(contentResult.reason, 'view document content') : '', comparison, evidence, comparisonError, evidenceError });
       setReviewResult('');
       setReviewComment(workflow?.staffComment || '');
+      setCommentDraft('');
+      setSelectedPassage(null);
       }).catch((error) => {
       if (!cancelled) setDetailErrorState({ key: detailKey, message: errorMessage(error, 'load this workflow') });
     }).finally(() => { if (!cancelled) setLoadedDetailKey(detailKey); });
@@ -201,6 +215,53 @@ export default function StaffReviewQueue({ userId }) {
     }
   }
 
+  function selectPassage() {
+    if (!assignedToMe || action) return;
+    const selection = window.getSelection();
+    const content = contentRef.current;
+    if (!selection || selection.rangeCount !== 1 || selection.isCollapsed || !content) return;
+    const range = selection.getRangeAt(0);
+    if (!content.contains(range.startContainer) || !content.contains(range.endContainer)) return;
+    const quote = range.toString();
+    if (!quote.trim() || quote.length > 4000) {
+      setSelectedPassage(null);
+      setActionMessage({ type: 'error', text: 'Select a passage of 1 to 4,000 characters.' });
+      return;
+    }
+    const before = range.cloneRange();
+    before.selectNodeContents(content);
+    before.setEnd(range.startContainer, range.startOffset);
+    const startOffset = before.toString().length;
+    setSelectedPassage({ startOffset, endOffset: startOffset + quote.length, quote });
+  }
+
+  async function submitComment(event) {
+    event.preventDefault();
+    if (!commentDraft.trim() || action || !assignedToMe) return;
+    const workflowId = selectedId;
+    setAction('comment');
+    setActionMessage(null);
+    try {
+      const comment = await githubApi(`/api/document-workflows/${encodeURIComponent(workflowId)}/comments`, {
+        method: 'POST', userId,
+        body: { comment: commentDraft.trim(), documentVersion: selectedWorkflow.submittedDocumentVersion,
+          ...(selectedPassage ? { section: selectedPassage } : {}) },
+      });
+      if (!comment?.id || String(comment.workflowId) !== workflowId) {
+        throw new Error('The response did not confirm the saved comment. Refresh to verify.');
+      }
+      setDetail((current) => String(current?.workflow.id) === workflowId
+        ? { ...current, comments: [...current.comments, comment] } : current);
+      setCommentDraft('');
+      setSelectedPassage(null);
+      setActionMessage({ type: 'success', text: 'Comment added.' });
+    } catch (error) {
+      setActionMessage({ type: 'error', text: errorMessage(error, 'add a review comment') });
+    } finally {
+      setAction('');
+    }
+  }
+
   function submitReview(event) {
     event.preventDefault();
     if (!['PASSED', 'CHANGES_REQUESTED'].includes(reviewResult)) return;
@@ -221,10 +282,10 @@ export default function StaffReviewQueue({ userId }) {
         </div>
         {queueOpen ? (
           <div className="documentation-actions">
-            <button type="button" className="documentation-secondary-button" onClick={refreshQueue} disabled={isLoadingQueue || !userId}>
+            <button type="button" className="documentation-secondary-button" onClick={refreshQueue} disabled={isLoadingQueue || !userId || Boolean(action)}>
               {isLoadingQueue ? 'Refreshing...' : 'Refresh queue'}
             </button>
-            <button type="button" className="documentation-secondary-button" onClick={() => setQueueOpen(false)}>Hide queue</button>
+            <button type="button" className="documentation-secondary-button" disabled={Boolean(action)} onClick={() => setQueueOpen(false)}>Hide queue</button>
           </div>
         ) : (
           <button type="button" className="documentation-primary-button" onClick={() => {
@@ -274,6 +335,7 @@ export default function StaffReviewQueue({ userId }) {
           <div className="staff-review-list" aria-label="Staff review queue items">
             {queue.content.map((item) => (
               <button type="button" key={item.id}
+                disabled={Boolean(action)}
                 className={`suggestion-review-card ${String(item.id) === selectedId ? 'active' : ''}`}
                 aria-pressed={String(item.id) === selectedId}
                 onClick={() => { setActionMessage(null); setSelectedId(String(item.id)); }}>
@@ -307,7 +369,57 @@ export default function StaffReviewQueue({ userId }) {
                 </dl>
                 {detail.contentError && <p role="alert" className="documentation-error">{detail.contentError}</p>}
                 <h5>Document content</h5>
-                {detail.content && <pre className="staff-review-content">{detail.content.content}</pre>}
+                {detail.content && <pre ref={contentRef} className="staff-review-content"
+                  tabIndex={0} onMouseUp={selectPassage} onKeyUp={selectPassage}>{detail.content.content}</pre>}
+
+                <section className="staff-review-comments" aria-label="Review comments">
+                  <h5>Review comments</h5>
+                  {detail.commentsError && <p role="alert">{detail.commentsError}</p>}
+                  {detail.comments.map((comment) => (
+                    <article key={comment.id}>
+                      <p>Staff {comment.actorUserId} · Version {comment.documentVersion} · {formatTimestamp(comment.createdAt)}</p>
+                      {comment.section && <blockquote aria-label="Referenced passage">{comment.section.quote}</blockquote>}
+                      <p>{comment.comment}</p>
+                    </article>
+                  ))}
+                  {assignedToMe && (
+                    <Can screen="staffReview" action="A">
+                      <form onSubmit={submitComment}>
+                        <p>Select a passage in the document above to give feedback on that section.</p>
+                        {selectedPassage && (
+                          <div>
+                            <blockquote aria-label="Selected passage">{selectedPassage.quote}</blockquote>
+                            <button type="button" disabled={Boolean(action)}
+                              onClick={() => setSelectedPassage(null)}>Clear passage</button>
+                          </div>
+                        )}
+                        <label htmlFor="independent-review-comment">Add review comment</label>
+                        <textarea id="independent-review-comment" required maxLength={2000}
+                          value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)}
+                          disabled={Boolean(action)} />
+                        <button type="submit" disabled={Boolean(action) || !commentDraft.trim()}>Add comment</button>
+                      </form>
+                    </Can>
+                  )}
+                </section>
+
+                <section className="staff-review-comments" aria-label="Requested changes">
+                  <h5>Requested changes</h5>
+                  {detail.changesError && <p role="alert">{detail.changesError}</p>}
+                  {detail.changeRequests.map((request) => (
+                    <article key={request.id}>
+                      <p>Staff {request.actorUserId} · {request.documentVersion
+                        ? `Version ${request.documentVersion}` : 'Version unavailable'} · {formatTimestamp(request.createdAt)}</p>
+                      <p>{request.comment}</p>
+                      {request.relatedComments.map((comment) => (
+                        <div key={comment.id}>
+                          {comment.section && <blockquote>{comment.section.quote}</blockquote>}
+                          <p>{comment.comment}</p>
+                        </div>
+                      ))}
+                    </article>
+                  ))}
+                </section>
 
                 {selectedWorkflow.staffComment && (
                   <section className="staff-review-comments">
