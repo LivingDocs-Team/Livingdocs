@@ -7,7 +7,7 @@
 //  - rows without a screen in the role's official flow are removed: Developer #11; Staff #7, #9, #11, #15,
 //    #16; Manager #7, #8, #9, #15, #16, #18.
 //  - #8 gains E (Export Markdown in the document editor), for Developer only.
-//  - rows #4, #14, #15, #16 and #21 are removed from the web for every role; the other rows keep
+//  - rows #4, #14, #15 and #16 are removed from the web for every role; the other rows keep
 //    their original numbers.
 import { normalizeRole, ROLE_ORDER } from './roles.js';
 
@@ -33,6 +33,7 @@ const ROWS = [
   [18, 'versionHistory', 'Version History, Change Log & Comparison', 'R', 'R', 'R', '', 'R', ''],
   [19, 'documentRollback', 'Document Rollback', 'U', 'U', '', 'U', 'U', ''],
   [20, 'knowledgeBase', 'Knowledge Base (search, relationships, browse)', 'R', 'R', '', '', 'R', ''],
+  [21, 'collections', 'Documentation Collections & Ownership', 'CRUD', 'R', '', '', 'CRUD', ''],
   [22, 'templates', 'Documentation Templates', 'CRUD', 'R', 'R', '', 'CRUD', ''],
   [23, 'healthReports', 'Health Metrics, Dependency Graph & Reports', 'RE', '', '', '', 'RE', ''],
   [24, 'userManagement', 'User, Role & Permission Management', 'CRUD', '', '', '', '', 'CRUD'],

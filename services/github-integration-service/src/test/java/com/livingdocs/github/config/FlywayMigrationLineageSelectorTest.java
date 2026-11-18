@@ -49,7 +49,9 @@ class FlywayMigrationLineageSelectorTest {
                     .locations(selector.select(dataSource).location(), "classpath:db/migration-common").load();
             upgraded.migrate();
             upgraded.validate();
-            assertThat(upgraded.info().current().getVersion().getVersion()).isEqualTo("11");
+            assertThat(upgraded.info().current().getVersion().getVersion()).isEqualTo("12");
+            assertThat(tableNames(dataSource)).contains("documentation_collections",
+                    "documentation_collection_documents", "documentation_owner_assignments");
             try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement();
                  ResultSet result = statement.executeQuery(
                          "SELECT comment, document_version, section_quote FROM document_workflow_audit")) {
