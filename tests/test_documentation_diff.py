@@ -18,6 +18,8 @@ pytest.importorskip("pytest_playwright", reason="cần cài pytest-playwright đ
 
 from playwright.sync_api import Page, expect  # noqa: E402
 
+from rbac_nav import open_screen  # noqa: E402
+
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 USER_ID = "42"
 WORKSPACE_ID = f"ws-{USER_ID}"
@@ -105,7 +107,7 @@ class FakeApi:
         if key == ("GET", "/api/auth/csrf"):
             return route.fulfill(status=200, json={"token": "csrf-ld183"})
         if key == ("GET", "/api/auth/me"):
-            return route.fulfill(status=200, json={"id": USER_ID, "email": "ld183@example.com"})
+            return route.fulfill(status=200, json={"id": USER_ID, "email": "ld183@example.com", "role": "DEVELOPER"})
         if key == ("GET", f"/api/workspaces/{WORKSPACE_ID}/repositories"):
             return route.fulfill(status=200, json=[{
                 "id": REPOSITORY_ID, "workspaceId": WORKSPACE_ID, "githubRepoId": 183,
@@ -156,7 +158,7 @@ def open_documentation_page(page: Page, api: FakeApi) -> None:
     page.add_init_script(f"window.sessionStorage.setItem('livingdocs.userId', '{USER_ID}')")
     page.route("**/api/**", api.handle)
     page.goto(FRONTEND_URL + "/")
-    page.get_by_role("button", name="Documentation Management").first.click()
+    open_screen(page, "Generated Documents")
     expect(page.get_by_role("heading", name="Documentation Management")).to_be_visible()
 
 
