@@ -6,6 +6,8 @@ from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import Page, expect
 
+from rbac_nav import open_screen
+
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 USER_ID = "42"
 WORKSPACE_ID = f"ws-{USER_ID}"
@@ -57,7 +59,7 @@ class FakeApi:
         self.requests.append((request.method, path, body))
 
         if (request.method, path) == ("GET", "/api/auth/me"):
-            return route.fulfill(status=200, json={"id": int(USER_ID), "email": "staff@example.test"})
+            return route.fulfill(status=200, json={"id": int(USER_ID), "email": "staff@example.test", "role": "STAFF"})
         if (request.method, path) == ("GET", "/api/auth/csrf"):
             return route.fulfill(status=200, json={"token": "csrf-ld313"})
         if (request.method, path) == ("GET", "/api/github/connection"):
@@ -155,8 +157,7 @@ class FakeApi:
 def open_documentation(page: Page, api: FakeApi):
     page.route("**/api/**", api.handle)
     page.goto(FRONTEND_URL)
-    page.get_by_role("button", name="Documentation Management").first.click()
-    expect(page.get_by_role("heading", name="Documentation Management")).to_be_visible()
+    open_screen(page, "Review Queue")
     expect(page.get_by_role("heading", name="Staff Review Queue")).to_be_visible()
     page.get_by_role("button", name="Open Staff Review Queue").click()
 
@@ -294,7 +295,7 @@ def test_expired_session_uses_existing_unauthenticated_flow(page: Page):
     api = FakeApi(queue_status=401)
     page.route("**/api/**", api.handle)
     page.goto(FRONTEND_URL)
-    page.get_by_role("button", name="Documentation Management").first.click()
+    open_screen(page, "Review Queue")
     page.get_by_role("button", name="Open Staff Review Queue").click()
 
     expect(page.get_by_role("alert").filter(has_text="Your LivingDocs session has expired")).to_be_visible()
