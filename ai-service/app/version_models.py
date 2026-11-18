@@ -140,6 +140,7 @@ class Document(BaseModel):
     target: str
     scope: Scope
     template_id: str
+    template_version: Optional[int] = None  # LD-227: template version the document was generated with
     output_language: str
     source_job_id: Optional[str] = None
     # Absent on legacy documents; never backfilled from the untrusted historical actor field.
