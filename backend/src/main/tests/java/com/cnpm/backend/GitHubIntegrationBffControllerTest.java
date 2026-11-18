@@ -453,6 +453,39 @@ class GitHubIntegrationBffControllerTest {
     }
 
     @Test
+    void commentRouteForwardsBodyAndOnlyBackendVerifiedStaffIdentity() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        UserRepository users = mock(UserRepository.class);
+        RoleRepository roles = mock(RoleRepository.class);
+        User staff = mock(User.class);
+        when(staff.getId()).thenReturn(81L);
+        when(staff.getRole()).thenReturn("STAFF");
+        when(users.findByEmail("staff@example.test")).thenReturn(Optional.of(staff));
+        Role role = new Role("STAFF", "Staff");
+        role.getPermissions().add(new Permission("DOCUMENT_REVIEW", "Review"));
+        when(roles.findWithPermissionsByName("STAFF")).thenReturn(Optional.of(role));
+        String path = "/api/document-workflows/11111111-1111-4111-8111-111111111111/comments";
+        String body = "{\"comment\":\"Clarify setup\",\"documentVersion\":2,"
+                + "\"section\":{\"startOffset\":0,\"endOffset\":5,\"quote\":\"Setup\"}}";
+        server.expect(requestTo("http://github.test:8082" + path))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("X-User-Id", "81"))
+                .andExpect(header("X-User-Authorities", "ROLE_STAFF,DOCUMENT_REVIEW"))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.content().string(body))
+                .andRespond(withSuccess("{\"id\":\"saved-comment\"}", MediaType.APPLICATION_JSON));
+        var controller = new GitHubIntegrationBffController(builder.build(), users, roles,
+                "http://github.test:8082", "internal-test-credential");
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
+        request.addHeader("Content-Type", "application/json");
+        request.addHeader("X-User-Id", "forged-owner");
+        request.addHeader("X-User-Authorities", "ROLE_MANAGER,DOCUMENT_APPROVE");
+        assertThat(controller.proxy(request, authenticatedEmail("staff@example.test"),
+                body.getBytes(java.nio.charset.StandardCharsets.UTF_8)).getStatusCode().value()).isEqualTo(200);
+        server.verify();
+    }
+
+    @Test
     void refusesARouteTheRoleHasNoRowForWithoutCallingGitHubIntegration() {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();   // no call is expected
@@ -462,6 +495,8 @@ class GitHubIntegrationBffControllerTest {
                 {"MANAGER", "POST", "/api/repositories/11111111-1111-4111-8111-111111111111/documentation/generate"},
                 {"DEVELOPER", "POST", "/api/document-workflows/11111111-1111-4111-8111-111111111111/approve"},
                 {"STAFF", "POST", "/api/document-workflows/11111111-1111-4111-8111-111111111111/approve"},
+                {"DEVELOPER", "POST", "/api/document-workflows/11111111-1111-4111-8111-111111111111/comments"},
+                {"MANAGER", "POST", "/api/document-workflows/11111111-1111-4111-8111-111111111111/comments"},
                 {"MANAGER", "POST", "/api/documentation/templates"},
                 {"DEVELOPER", "GET", "/api/document-workflows/manager/queue"},
                 {"DEVELOPER", "POST", "/api/repositories/11111111-1111-4111-8111-111111111111/drift/analyze"},
@@ -487,6 +522,8 @@ class GitHubIntegrationBffControllerTest {
         for (String[] allowed : new String[][] {
                 {"STAFF", "GET", "http://github.test:8082/api/document-workflows/staff/queue"},
                 {"MANAGER", "GET", "http://github.test:8082/api/document-workflows/manager/queue"},
+                {"DEVELOPER", "GET", "http://github.test:8082/api/document-workflows/11111111-1111-4111-8111-111111111111/comments"},
+                {"STAFF", "GET", "http://github.test:8082/api/document-workflows/11111111-1111-4111-8111-111111111111/change-requests"},
                 {"TECHNICAL_LEAD", "GET", "http://github.test:8082/api/documentation/templates"},
                 {"ADMIN", "GET", "http://github.test:8082/api/github/repos/available"}}) {
             RestClient.Builder builder = RestClient.builder();
