@@ -26,6 +26,12 @@ Phạm vi là kiểm thử hồi quy của PR #119. Jira LD-400 nhắc PR #94 tr
 
 Sau callback, frontend gọi `GET /api/auth/me` để đọc phiên. Các API yêu cầu xác thực hoặc quyền workspace/repository được kiểm tra bằng các tình huống hồi quy.
 
+### Hợp đồng quan sát qua kiểm thử
+
+- **FR-AUTH-REG.4 — Danh tính qua phiên.** `GET /api/auth/me` không nhận payload. Với phiên OAuth hợp lệ, tra tài khoản theo GitHub ID của principal đã xác thực. Với phiên email hợp lệ, tra theo email của principal. Trả `200` với `id`, `email`, `username`, `firstName`, `lastName`, `role` và không có token. Trả `401` nếu thiếu phiên hợp lệ, thiếu GitHub ID trong principal hoặc tài khoản tương ứng không tìm thấy.
+- **FR-AUTH-REG.5 — Phân biệt xác thực và phân quyền.** Khi tài khoản bị khóa, yêu cầu dùng lại phiên cũ phải mất quyền truy cập. Khi phiên hợp lệ nhưng thiếu quyền hoặc thiếu CSRF ở thao tác yêu cầu CSRF, trả `403` và không ghi thay đổi.
+- **FR-AUTH-REG.6 — Kiểm tra quyền qua các lớp.** Cùng một thao tác workspace/repository phải bị giới hạn theo danh tính phiên, quyền yêu cầu và phạm vi tài nguyên. Kiểm thử cả đường gọi qua Backend và kiểm tra ở GitHub Integration.
+
 ## 4. Luồng lỗi
 
 Trả `401` khi không có xác thực hợp lệ và `403` khi thiếu quyền hoặc yêu cầu bị chính sách CSRF từ chối.
@@ -35,6 +41,12 @@ Trả `401` khi không có xác thực hợp lệ và `403` khi thiếu quyền 
 - **AC-AUTH-REG.1:** Callback mô phỏng thành công tạo phiên đọc được qua `/me` và phản hồi không chứa token.
 - **AC-AUTH-REG.2:** Lỗi đổi token hoặc tài khoản bị khóa không tạo ra phiên sử dụng được.
 - **AC-AUTH-REG.3:** Thiếu quyền hoặc CSRF bị chặn ở thao tác bảo vệ.
+
+| Ca chấp nhận | Thiết lập và thao tác | Kết quả quan sát |
+|---|---|---|
+| AC-AUTH-REG.4 | GitHub mock trả callback hợp lệ. Gọi `/me` bằng cùng cookie phiên. | JSON đúng sáu trường danh tính; không có access token. |
+| AC-AUTH-REG.5 | GitHub mock từ chối đổi mã; gọi lại `/me` với trình duyệt chưa đăng nhập trước đó. | `/me` trả `401`. |
+| AC-AUTH-REG.6 | Dùng phiên đang hoạt động để gọi một thao tác cần quyền hoặc CSRF, lần lượt bỏ quyền và bỏ CSRF. | Từng lần trả `403`; kiểm tra tài nguyên đích chưa bị thay đổi. |
 
 ## 6. Kiểm thử và PR
 

@@ -26,6 +26,20 @@ Lịch sử lưu quyết định cùng danh tính và vai trò xác thực tại
 
 `GET /api/document-workflows/history-accessible` lấy danh sách theo quyền. `GET /api/document-workflows/{id}/history` lấy lịch sử của workflow được chọn.
 
+### Phạm vi truy cập và hợp đồng dữ liệu
+
+| Quyền | Workflow xuất hiện trong danh sách |
+|---|---|
+| `DOCUMENT_VIEW` | Workflow do người gọi sở hữu. |
+| `DOCUMENT_REVIEW_QUEUE_VIEW` | Workflow `PENDING_STAFF_REVIEW` hoặc `STAFF_REVIEWING`, chưa có reviewer hoặc được gán cho người gọi. |
+| `DOCUMENT_REVIEW` | Workflow có người gọi là reviewer được phân công. |
+| `DOCUMENT_APPROVAL_QUEUE_VIEW` | Workflow `PENDING_MANAGER_APPROVAL`, `APPROVED` hoặc `REJECTED`. |
+
+- **FR-APPROVAL-HISTORY.4 — Phân trang sau khi lọc quyền.** Lấy hợp các tập được phép đọc, sắp xếp `createdAt` giảm dần rồi `id` tăng dần. API nhận `page` mặc định 0, `size` mặc định 20. Trả `400` khi trang âm hoặc kích thước ngoài 1–100. Phản hồi gồm `content`, `page`, `size`, `totalElements`, `totalPages`, `first`, `last`.
+- **FR-APPROVAL-HISTORY.5 — Đọc timeline theo workflow.** `GET /api/document-workflows/{id}/history` trả các audit event theo `createdAt` tăng dần. Mỗi event gồm `id`, `workflowId`, `actorUserId`, `actorRole`, `action`, `previousStatus`, `newStatus`, `previousReviewerUserId`, `newReviewerUserId`, `comment`, `createdAt`. `actorRole` có thể là null ở bản ghi cũ.
+- **FR-APPROVAL-HISTORY.6 — Ghi quyết định cuối.** Manager có quyền tương ứng mới được duyệt hoặc từ chối workflow sau khi Staff đã review đạt. Từ chối phải có lý do. Ghi vai trò từ danh tính xác thực và dùng dữ liệu tại thời điểm quyết định khi render lịch sử.
+- **FR-APPROVAL-HISTORY.7 — Xử lý truy cập sai.** Thiếu mọi quyền khám phá trả `403` ở API danh sách; ID không tồn tại hoặc ngoài phạm vi đọc trả `404` ở API chi tiết lịch sử.
+
 ## 4. Luồng lỗi
 
 Từ chối truy cập lịch sử của workflow ngoài phạm vi quyền. Giao diện vẫn hiển thị được bản ghi cũ thiếu vai trò.
@@ -35,6 +49,11 @@ Từ chối truy cập lịch sử của workflow ngoài phạm vi quyền. Giao
 - **AC-APPROVAL-HISTORY.1:** Quyết định mới có đầy đủ thông tin audit.
 - **AC-APPROVAL-HISTORY.2:** Phân trang và quyền xem giới hạn đúng tập workflow.
 - **AC-APPROVAL-HISTORY.3:** Bản ghi cũ thiếu vai trò vẫn đọc được.
+
+| Ca chấp nhận | Thiết lập và thao tác | Kết quả quan sát |
+|---|---|---|
+| AC-APPROVAL-HISTORY.4 | Có hai workflow mới nhất cùng thời điểm; một workflow thuộc người khác. Gọi danh sách với quyền chỉ xem của chủ sở hữu. | Tổng số chỉ tính bản ghi được phép; đổi trang vẫn theo thứ tự ổn định. |
+| AC-APPROVAL-HISTORY.5 | Đổi vai trò của người đã phê duyệt sau khi quyết định được ghi. | Timeline vẫn hiển thị vai trò ghi tại thời điểm phê duyệt. |
 
 ## 6. Kiểm thử và PR
 
