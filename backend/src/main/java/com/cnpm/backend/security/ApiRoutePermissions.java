@@ -89,6 +89,9 @@ public final class ApiRoutePermissions {
         rule("GET", "/api/documentation/templates", need("templates", 'R'), need("documentation", 'R'));
         rule("GET", "/api/documentation/templates/sections", need("templates", 'R'), need("documentation", 'R'));
         rule("GET", "/api/documentation/templates/{}", need("templates", 'R'), need("documentation", 'R'));
+        rule("GET", "/api/documentation/templates/{}/versions", need("templates", 'R'));
+        rule("GET", "/api/documentation/templates/{}/versions/{}", need("templates", 'R'));
+        rule("POST", "/api/documentation/templates/{}/versions/{}/restore", need("templates", 'U'));
         rule("POST", "/api/documentation/templates", need("templates", 'C'));
         rule("PUT", "/api/documentation/templates/{}", need("templates", 'U'));
         rule("DELETE", "/api/documentation/templates/{}", need("templates", 'D'));

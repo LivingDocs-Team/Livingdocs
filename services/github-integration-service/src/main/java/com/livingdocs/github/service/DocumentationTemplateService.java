@@ -52,6 +52,23 @@ public class DocumentationTemplateService {
                 .retrieve().body(JsonNode.class), false);
     }
 
+    /** LD-227: every saved version of a template, newest first. */
+    public JsonNode versions(String templateId) {
+        return call(() -> aiServiceClient.get().uri("/templates/{id}/versions", templateId).retrieve()
+                .body(JsonNode.class), true);
+    }
+
+    public JsonNode version(String templateId, int number) {
+        return call(() -> aiServiceClient.get().uri("/templates/{id}/versions/{n}", templateId, number)
+                .retrieve().body(JsonNode.class), false);
+    }
+
+    /** LD-227: make an older version current again (saved as a new version). */
+    public JsonNode restore(String templateId, int number) {
+        return call(() -> aiServiceClient.post().uri("/templates/{id}/versions/{n}/restore", templateId, number)
+                .retrieve().body(JsonNode.class), false);
+    }
+
     public void delete(String templateId) {
         call(() -> {
             aiServiceClient.delete().uri("/templates/{id}", templateId).retrieve().toBodilessEntity();
@@ -88,7 +105,9 @@ public class DocumentationTemplateService {
         String detail = detail(e);
         return switch (e.getStatusCode().value()) {
             case 404 -> new ApiException(HttpStatus.NOT_FOUND, "TEMPLATE_NOT_FOUND",
-                    "Documentation template not found.");
+                    detail != null && detail.contains("version")
+                            ? "Documentation template version not found."
+                            : "Documentation template not found.");
             case 403 -> new ApiException(HttpStatus.FORBIDDEN, "TEMPLATE_READ_ONLY",
                     "Built-in templates cannot be changed or deleted.");
             case 409 -> new ApiException(HttpStatus.CONFLICT, "TEMPLATE_NAME_TAKEN",
