@@ -51,6 +51,8 @@ class FakeApi:
         self.requested_queue_pages = []
         self.requests = []
         self.review_bodies = []
+        self.comments = []
+        self.change_requests = []
 
     def handle(self, route):
         request = route.request
@@ -58,6 +60,17 @@ class FakeApi:
         body = json.loads(request.post_data) if request.post_data else None
         self.requests.append((request.method, path, body))
 
+        if (request.method, path) == ("GET", f"/api/document-workflows/{WORKFLOW_ID}/change-requests"):
+            return route.fulfill(status=200, json=self.change_requests)
+        if path == f"/api/document-workflows/{WORKFLOW_ID}/comments":
+            if request.method == "GET":
+                return route.fulfill(status=200, json=self.comments)
+            if request.method == "POST":
+                comment = dict(body, id=f"comment-{len(self.comments) + 1}",
+                               workflowId=WORKFLOW_ID, actorUserId=USER_ID,
+                               createdAt="2026-11-18T10:00:00Z")
+                self.comments.append(comment)
+                return route.fulfill(status=201, json=comment)
         if (request.method, path) == ("GET", "/api/auth/me"):
             return route.fulfill(status=200, json={"id": int(USER_ID), "email": "staff@example.test", "role": "STAFF"})
         if (request.method, path) == ("GET", "/api/auth/csrf"):
@@ -222,11 +235,82 @@ def test_release_success_refreshes_and_unclaims_workflow(page: Page):
     assert ("POST", f"/api/document-workflows/{WORKFLOW_ID}/release", None) in api.requests
 
 
+def test_section_feedback_preserves_selected_passage_after_reload(page: Page):
+    api = FakeApi(workflow("STAFF_REVIEWING", USER_ID))
+    open_documentation(page, api)
+    content = page.locator("pre.staff-review-content")
+    expect(content).to_contain_text("Current API content.")
+    content.evaluate("""element => {
+        const text = element.firstChild;
+        const start = text.textContent.indexOf('Current API');
+        const range = document.createRange();
+        range.setStart(text, start);
+        range.setEnd(text, start + 'Current API'.length);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    }""")
+    expect(page.get_by_label("Selected passage", exact=True)).to_have_text("Current API")
+    page.get_by_label("Add review comment", exact=True).fill("Explain these endpoints.")
+    page.get_by_role("button", name="Add comment", exact=True).click()
+    expect(page.get_by_role("status").filter(has_text="Comment added.")).to_be_visible()
+    assert api.comments[0]["section"] == {
+        "startOffset": len("# Shop guide\n\n"),
+        "endOffset": len("# Shop guide\n\nCurrent API"),
+        "quote": "Current API",
+    }
+    assert api.comments[0]["documentVersion"] == 2
+    expect(page.get_by_label("Selected passage", exact=True)).to_have_count(0)
+    page.reload()
+    open_screen(page, "Review Queue")
+    page.get_by_role("button", name="Open Staff Review Queue").click()
+    expect(page.get_by_label("Referenced passage", exact=True)).to_have_text("Current API")
+    expect(page.get_by_role("region", name="Review comments", exact=True)).to_contain_text("Explain these endpoints.")
+
+
+def test_change_request_history_shows_feedback_from_previous_rounds(page: Page):
+    api = FakeApi(workflow("STAFF_REVIEWING", USER_ID))
+    api.change_requests = [
+        {"id": "request-1", "actorUserId": USER_ID, "documentVersion": 1,
+         "comment": "Fix the setup instructions.", "createdAt": "2026-11-17T10:00:00Z",
+         "relatedComments": [{"id": "comment-1", "comment": "Explain the environment variables."}]},
+        {"id": "request-legacy", "actorUserId": USER_ID, "documentVersion": None,
+         "comment": "Earlier review feedback.", "createdAt": "2026-11-16T10:00:00Z",
+         "relatedComments": []},
+    ]
+    open_documentation(page, api)
+    history = page.get_by_role("region", name="Requested changes", exact=True)
+    expect(history).to_contain_text("Version 1")
+    expect(history).to_contain_text("Fix the setup instructions.")
+    expect(history).to_contain_text("Explain the environment variables.")
+    expect(history).to_contain_text("Version unavailable")
+    expect(page.get_by_role("button", name="Submit review")).to_be_visible()
+
+
+def test_independent_comment_keeps_review_open_and_survives_refresh(page: Page):
+    api = FakeApi(workflow("STAFF_REVIEWING", USER_ID))
+    open_documentation(page, api)
+    page.get_by_label("Add review comment", exact=True).fill("Clarify the setup steps.")
+    page.get_by_role("button", name="Add comment", exact=True).click()
+    expect(page.get_by_role("status").filter(has_text="Comment added.")).to_be_visible()
+    comments = page.get_by_role("region", name="Review comments", exact=True)
+    expect(comments).to_contain_text("Clarify the setup steps.")
+    expect(comments).to_contain_text("Version 2")
+    expect(page.get_by_role("button", name="Release claim")).to_be_visible()
+    assert api.item["status"] == "STAFF_REVIEWING"
+    assert not api.review_bodies
+    page.reload()
+    open_screen(page, "Review Queue")
+    page.get_by_role("button", name="Open Staff Review Queue").click()
+    expect(comments).to_contain_text("Clarify the setup steps.")
+
+
 def test_staff_review_passed_submits_comment_and_displays_backend_result(page: Page):
     api = FakeApi(workflow("STAFF_REVIEWING", USER_ID))
     open_documentation(page, api)
     page.get_by_label("Decision").select_option("PASSED")
-    page.get_by_label("Review comment").fill("The document matches the source.")
+    page.get_by_label("Review comment", exact=True).fill("The document matches the source.")
     page.get_by_role("button", name="Submit review").click()
 
     expect(page.get_by_role("heading", name="Review submitted")).to_be_visible()
@@ -245,7 +329,7 @@ def test_reviewing_last_item_on_last_page_returns_to_remaining_queue_items(page:
     page.get_by_role("button", name="Next").click()
     expect(page.get_by_role("status").filter(has_text="Page 2 of 2")).to_be_visible()
     page.get_by_label("Decision").select_option("PASSED")
-    page.get_by_label("Review comment").fill("Reviewed against the source.")
+    page.get_by_label("Review comment", exact=True).fill("Reviewed against the source.")
     page.get_by_role("button", name="Submit review").click()
 
     expect(page.get_by_label("Staff review queue items").get_by_role("button", name="Remaining guide")).to_be_visible()
@@ -259,10 +343,10 @@ def test_changes_requested_requires_comment_and_backend_response_is_shown(page: 
     page.get_by_label("Decision").select_option("CHANGES_REQUESTED")
     expect(page.get_by_role("button", name="Submit review")).to_be_enabled()
     page.get_by_role("button", name="Submit review").click()
-    expect(page.get_by_label("Review comment")).to_have_js_property("validity.valueMissing", True)
+    expect(page.get_by_label("Review comment", exact=True)).to_have_js_property("validity.valueMissing", True)
     assert api.review_bodies == []
 
-    page.get_by_label("Review comment").fill("Please clarify the authentication requirements.")
+    page.get_by_label("Review comment", exact=True).fill("Please clarify the authentication requirements.")
     page.get_by_role("button", name="Submit review").click()
     expect(page.get_by_label("Submitted Staff review result")).to_contain_text("CHANGES_REQUESTED")
     assert api.review_bodies == [{"result": "CHANGES_REQUESTED", "comment": "Please clarify the authentication requirements."}]
