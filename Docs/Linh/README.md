@@ -13,7 +13,8 @@ Các chức năng do Nguyễn Thị Phương Linh thực hiện, mỗi chức n�
 | [LD-339](LD-339-Kiem-thu-RAG.md) | Kiểm thử RAG và truy xuất tri thức: test case, kết quả, lỗi đã sửa | LD-339 |
 | [FR-AI-10](FR10.md) | Đề xuất cập nhật tài liệu (code thay đổi, drift) và duyệt, áp dụng đề xuất | LD-353, LD-354, LD-357 |
 | [FR-AI-04](FR4.md) | Bằng chứng xác thực và điểm độ tin cậy | LD-340 |
-| [FR-AI-05](FR5.md) | Mẫu tài liệu (documentation templates) | LD-96 (LD-97 – LD-100) |
+| [FR-AI-05](FR5.md) | Mẫu tài liệu (documentation templates) | LD-96 (LD-97 – LD-100), LD-223 (LD-224 – LD-228) |
+| [LD-228](LD-228-Kiem-thu-quan-ly-mau.md) | Kiểm thử quản lý mẫu: bộ test, test case, kết quả | LD-228 |
 | [FR-AI-06](FR6.md) | Quản lý phiên bản tài liệu (lưu tài liệu, phiên bản, lịch sử) | LD-195 |
 
 Mỗi file gồm: mô tả, danh sách yêu cầu (FR-AI-xx.y), API, dữ liệu, luồng chính, luồng lỗi, quy tắc nghiệp vụ, tiêu chí chấp nhận và test liên quan. Các con số (trọng số, giới hạn, ngưỡng) trong file là giá trị đang dùng trong code, để có thể dựng lại đúng hành vi.
