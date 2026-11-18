@@ -19,6 +19,8 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.livingdocs.github.dto.WorkflowDtos.AuditResponse;
+import com.livingdocs.github.dto.WorkflowDtos.ReviewCommentRequest;
+import com.livingdocs.github.dto.WorkflowDtos.ReviewCommentResponse;
 import com.livingdocs.github.dto.WorkflowDtos.ContentResponse;
 import com.livingdocs.github.dto.WorkflowDtos.CreateWorkflowRequest;
 import com.livingdocs.github.dto.WorkflowDtos.EditDocumentRequest;
@@ -165,7 +167,12 @@ public class DocumentWorkflowController {
 
     @PostMapping("/document-workflows/{id}/submit")
     public WorkflowResponse submit(@RequestHeader(USER_HEADER) String userId,
-            @RequestHeader(AUTHORITIES_HEADER) String authorities, @PathVariable UUID id) {
+            @RequestHeader(AUTHORITIES_HEADER) String authorities, @PathVariable UUID id,
+            @Valid @RequestBody(required = false)
+            com.livingdocs.github.dto.WorkflowDtos.SubmitWorkflowRequest request) {
+        if (request != null && request.expectedVersion() != null) {
+            return workflowService.submit(userId, parse(authorities), id, request.expectedVersion());
+        }
         return workflowService.submit(userId, parse(authorities), id);
     }
 
@@ -187,6 +194,29 @@ public class DocumentWorkflowController {
             @RequestHeader("X-Verified-Staff-User-Id") String verifiedStaffUserId,
             @PathVariable UUID id, @Valid @RequestBody ReassignRequest request) {
         return workflowService.reassign(userId, parse(authorities), id, verifiedStaffUserId, request);
+    }
+
+    @GetMapping("/document-workflows/{id}/comments")
+    public java.util.List<ReviewCommentResponse> comments(
+            @RequestHeader(USER_HEADER) String userId,
+            @RequestHeader(AUTHORITIES_HEADER) String authorities, @PathVariable UUID id) {
+        return workflowService.comments(userId, parse(authorities), id);
+    }
+
+    @PostMapping("/document-workflows/{id}/comments")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ReviewCommentResponse addComment(
+            @RequestHeader(USER_HEADER) String userId,
+            @RequestHeader(AUTHORITIES_HEADER) String authorities, @PathVariable UUID id,
+            @Valid @RequestBody ReviewCommentRequest request) {
+        return workflowService.addComment(userId, parse(authorities), id, request);
+    }
+
+    @GetMapping("/document-workflows/{id}/change-requests")
+    public java.util.List<com.livingdocs.github.dto.WorkflowDtos.ChangeRequestResponse> changeRequests(
+            @RequestHeader(USER_HEADER) String userId,
+            @RequestHeader(AUTHORITIES_HEADER) String authorities, @PathVariable UUID id) {
+        return workflowService.changeRequests(userId, parse(authorities), id);
     }
 
     @PostMapping("/document-workflows/{id}/staff-review")

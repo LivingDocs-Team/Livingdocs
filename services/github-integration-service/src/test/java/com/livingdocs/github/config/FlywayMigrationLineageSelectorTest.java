@@ -24,6 +24,45 @@ class FlywayMigrationLineageSelectorTest {
     private final FlywayMigrationLineageSelector selector = new FlywayMigrationLineageSelector();
 
     @Test
+    void reviewFeedbackUpgradesEverySupportedLineageAndPreservesOldRows() throws Exception {
+        for (var lineage : FlywayMigrationLineageSelector.Lineage.values()) {
+            DataSource dataSource = dataSource();
+            Flyway previous = Flyway.configure().dataSource(dataSource)
+                    .locations(lineage.location(), "classpath:db/migration-common").target("9").load();
+            previous.migrate();
+            try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        INSERT INTO document_workflows
+                            (id, document_id, document_title, owner_user_id, status, created_at, updated_at)
+                        VALUES ('11111111-1111-4111-8111-111111111111', 'old-doc', 'Old document',
+                            '73', 'CHANGES_REQUESTED', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        """);
+                statement.execute("""
+                        INSERT INTO document_workflow_audit
+                            (id, workflow_id, actor_user_id, action, new_status, comment, created_at)
+                        VALUES ('22222222-2222-4222-8222-222222222222',
+                            '11111111-1111-4111-8111-111111111111', '81', 'CHANGES_REQUESTED',
+                            'CHANGES_REQUESTED', 'Historical feedback', CURRENT_TIMESTAMP)
+                        """);
+            }
+            Flyway upgraded = Flyway.configure().dataSource(dataSource)
+                    .locations(selector.select(dataSource).location(), "classpath:db/migration-common").load();
+            upgraded.migrate();
+            upgraded.validate();
+            assertThat(upgraded.info().current().getVersion().getVersion()).isEqualTo("11");
+            try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement();
+                 ResultSet result = statement.executeQuery(
+                         "SELECT comment, document_version, section_quote FROM document_workflow_audit")) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getString("comment")).isEqualTo("Historical feedback");
+                assertThat(result.getObject("document_version")).isNull();
+                assertThat(result.getString("section_quote")).isNull();
+                assertThat(result.next()).isFalse();
+            }
+        }
+    }
+
+    @Test
     void selectsCurrentLineageForAnEmptyDatabase() {
         assertThat(selector.select(dataSource())).isEqualTo(
                 FlywayMigrationLineageSelector.Lineage.CURRENT);
