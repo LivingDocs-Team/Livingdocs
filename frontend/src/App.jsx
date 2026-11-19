@@ -1,32 +1,45 @@
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import './App.css';
+import './theme.css';
+import AnimatedBackground from './AnimatedBackground';
+import AuthField from './AuthField';
 import { csrfHeaders } from './csrf';
+import Icon from './icons';
+import PublicShell from './PublicShell';
+import { useSpotlight } from './spotlight';
 
 import Register from './Register';
-import Profile from './Profile';
-import NotificationPreferences from './NotificationPreferences';
-import GitHubConnection from './GitHubConnection';
-import RepositoryManagement from './RepositoryManagement';
-import DocumentationManagement from './DocumentationManagement';
-import DocumentationSearch from './DocumentationSearch';
-import DocumentationDrift from './DocumentationDrift';
+import AppShell from './rbac/AppShell';
+import { postLoginPath, resolveRoute } from './rbac/guard.js';
+import { hrefFor, navigate, useHashPath } from './rbac/hashRoute.js';
+import { RbacContext } from './rbac/usePermission.js';
+
+const OAUTH_ERROR = new URLSearchParams(window.location.search).get('oauth') === 'error';
 
 function App() {
-  const [page, setPage] = useState('login');
-  const [userId, setUserId] = useState(null);
-  const [userRole, setUserRole] = useState('');
+  const hashPath = useHashPath();
+  // { id, role, email } of the signed-in user, or null.
+  const [user, setUser] = useState(null);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState(() => (
-    new URLSearchParams(window.location.search).get('oauth') === 'error'
+    OAUTH_ERROR
       ? 'Could not sign in with GitHub. If your LivingDocs account already uses this email, sign in with your password and connect GitHub from GitHub Connection.'
       : ''
   ));
   const [loginSuccess, setLoginSuccess] = useState('');
   const [logoutError, setLogoutError] = useState('');
+  // Internal page requested before sign-in; opened after sign-in when the role may access it.
+  const requestedPath = useRef(null);
+
+  useSpotlight();
+
+  const path = hashPath || (OAUTH_ERROR ? '/login' : '/');
+  const isAuthenticated = user != null;
+  const decision = resolveRoute({ path, role: user?.role, isAuthenticated });
 
   useEffect(() => {
   let cancelled = false;
@@ -42,32 +55,26 @@ function App() {
 
       if (!response.ok) {
         sessionStorage.removeItem('livingdocs.userId');
-        if (!cancelled) {
-          setUserId(null);
-          setUserRole('');
-          setPage('login');
-        }
+        if (!cancelled) setUser(null);
         return;
       }
 
-      const user = await response.json();
+      const current = await response.json();
 
-      if (!user || user.id == null) {
+      if (!current || current.id == null) {
         throw new Error('Invalid current-user response');
       }
 
       if (!cancelled) {
-        setUserId(String(user.id));
-        setUserRole(typeof user.role === 'string' ? user.role : '');
-        sessionStorage.setItem('livingdocs.userId', String(user.id));
-        setPage('github');
+        setUser({
+          id: String(current.id),
+          role: typeof current.role === 'string' ? current.role : '',
+          email: typeof current.email === 'string' ? current.email : '',
+        });
+        sessionStorage.setItem('livingdocs.userId', String(current.id));
       }
     } catch {
-      if (!cancelled) {
-        setUserId(null);
-        setUserRole('');
-        setPage('login');
-      }
+      if (!cancelled) setUser(null);
     } finally {
       if (!cancelled) {
         setIsCheckingSession(false);
@@ -82,16 +89,31 @@ function App() {
   };
 }, []);
   useEffect(() => {
+    // The route guard sends the now signed-out user from the internal page to Login.
     const handleSessionExpired = () => {
       sessionStorage.removeItem('livingdocs.userId');
-      setUserId(null);
-      setUserRole('');
-      setPage('login');
+      setUser(null);
+      setLoginSuccess('');
       setLoginError('Your LivingDocs session has expired. Please sign in again.');
     };
     window.addEventListener('livingdocs:unauthenticated', handleSessionExpired);
     return () => window.removeEventListener('livingdocs:unauthenticated', handleSessionExpired);
   }, []);
+
+  // Route guard redirects. Signed out on an internal URL -> Login (the URL is remembered). Signed in on
+  // a public page (after password login, a restored session or GitHub OAuth) or an unknown URL -> the
+  // remembered page when the role may open it, otherwise the role's landing page.
+  useEffect(() => {
+    if (isCheckingSession || decision.kind !== 'redirect') return;
+    let target = decision.to;
+    if (!isAuthenticated) {
+      requestedPath.current = path;
+    } else {
+      target = postLoginPath(user.role, requestedPath.current) || target;
+      requestedPath.current = null;
+    }
+    navigate(target, { replace: true });
+  }, [isCheckingSession, decision.kind, decision.to, isAuthenticated, path, user]);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -140,8 +162,7 @@ function App() {
       }
 
       sessionStorage.setItem('livingdocs.userId', String(result.id));
-      setUserId(String(result.id));
-      setUserRole(result.role);
+      setUser({ id: String(result.id), role: result.role, email: result.email });
       setLoginSuccess('Signed in successfully as ' + result.email + '.');
     } catch {
       setLoginError('Could not connect to the backend. Check the backend URL and try again.');
@@ -165,335 +186,137 @@ function App() {
         return;
       }
       sessionStorage.removeItem('livingdocs.userId');
-      setUserId(null);
-      setUserRole('');
+      navigate('/');
+      setUser(null);
       setLoginSuccess('');
-      setPage('login');
     } catch {
       setLogoutError('Could not connect to the backend to end the session.');
     }
   }
 
-  const renderPage = () => {
+  const renderPublicCard = (page) => {
     switch (page) {
       case 'register':
         return (
           <>
             <Register />
-            <p className="switch-page">
+            <p className="auth-foot">
               Already have an account?{' '}
-              <button type="button" onClick={() => setPage('login')}>
+              <button className="text-button" type="button" onClick={() => navigate('/login')}>
                 Sign in
               </button>
             </p>
           </>
         );
 
-      case 'profile':
+      case 'home':
         return (
-          <>
-            <Profile />
-            <p className="switch-page">
-              <button type="button" onClick={() => setPage('login')}>
-                Back to login
-              </button>
-            </p>
-          </>
-        );
-
-      case 'notifications':
-        return (
-          <>
-            <NotificationPreferences />
-            <p className="switch-page">
-              <button type="button" onClick={() => setPage('login')}>
-                Back to login
-              </button>
-            </p>
-          </>
-        );
-
-      case 'github':
-        return (
-          <>
-            <GitHubConnection userId={userId} />
-            <p className="switch-page">
-              <button type="button" onClick={() => setPage('login')}>
-                Back to login
-              </button>
-            </p>
-          </>
-        );
-
-      case 'repository':
-        return (
-          <>
-            <RepositoryManagement userId={userId} />
-            <p className="switch-page">
-              <button type="button" onClick={() => setPage('login')}>
-                Back to login
-              </button>
-            </p>
-          </>
-        );
-
-      case 'documentation':
-        return (
-          <>
-            <DocumentationManagement userId={userId} userRole={userRole} />
-            <p className="switch-page">
-              <button type="button" onClick={() => setPage('login')}>
-                Back to login
-              </button>
-            </p>
-          </>
-        );
-
-      case 'search':
-        return (
-          <>
-            <DocumentationSearch userId={userId} />
-            <p className="switch-page">
-              <button type="button" onClick={() => setPage('login')}>
-                Back to Login
-              </button>
-            </p>
-          </>
-        );
-
-      case 'drift':
-        return (
-          <>
-            <DocumentationDrift userId={userId} />
-            <p className="switch-page">
-              <button type="button" onClick={() => setPage('login')}>
-                Back to Login
-              </button>
-            </p>
-          </>
+          <section aria-labelledby="home-title">
+            <div className="auth-icon"><Icon name="term" size={17} /></div>
+            <h2 id="home-title">Get started</h2>
+            <p className="auth-sub">AI-assisted, self-updating documentation for engineering teams.</p>
+            <div className="auth-actions">
+              <a className="auth-submit" href={hrefFor('/login')}>Sign in<Icon name="arrow" /></a>
+              <a className="auth-secondary" href={hrefFor('/register')}>Create a Developer account</a>
+            </div>
+          </section>
         );
 
       case 'login':
       default:
         return (
-          <main className="page">
-            <section className="login-card">
-              <h1>LivingDocs</h1>
-              <p className="subtitle">Sign in to your account</p>
+          <section aria-labelledby="login-title">
+            <div className="auth-icon"><Icon name="term" size={17} /></div>
+            <h2 id="login-title">Sign in to your account</h2>
+            <p className="auth-sub">Welcome back. Pick up where you left off.</p>
 
-              <form onSubmit={handleSubmit}>
-                <label htmlFor="email">Email</label>
-                <input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  required
-                />
-
-                <label htmlFor="password">Password</label>
-                <input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  required
-                />
-
-                <button type="submit" disabled={isLoggingIn}>
-                  {isLoggingIn ? 'Signing in...' : 'Sign in'}
-                </button>
-              </form>
-              {loginError && <p role="alert">{loginError}</p>}
-              {loginSuccess && <p role="status">{loginSuccess}</p>}
-              {userId && (
-                <p className="footer">
-                  <button className="text-button" type="button" onClick={handleLogout}>
-                    Sign out
-                  </button>
-                </p>
-              )}
-              {logoutError && <p role="alert">{logoutError}</p>}
-
-              <div className="separator">or</div>
-
-              <button
-                className="github-button"
-                type="button"
-                onClick={() => window.location.assign(
-                  `${(import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')}/oauth2/authorization/github`,
-                )}
-              >
-                Continue with GitHub
+            <form onSubmit={handleSubmit}>
+              <AuthField
+                id="email"
+                label="Email"
+                icon="mail"
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="you@company.com"
+                required
+              />
+              <AuthField
+                id="password"
+                label="Password"
+                icon="lock"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="Enter your password"
+                required
+              />
+              <button className="auth-submit" type="submit" disabled={isLoggingIn}>
+                {isLoggingIn ? 'Signing in...' : 'Sign in'}
+                <Icon name="arrow" />
               </button>
+            </form>
+            {loginError && <p className="auth-message" role="alert">{loginError}</p>}
 
-              <p className="footer">
-                Don't have an account?{' '}
-                <button
-                  className="text-button"
-                  type="button"
-                  onClick={() => setPage('register')}
-                >
-                  Sign up
-                </button>
-              </p>
+            <div className="separator">or</div>
 
-              <p className="footer">
-                <button
-                  className="text-button"
-                  type="button"
-                  onClick={() => setPage('profile')}
-                >
-                  View profile
-                </button>
-              </p>
+            <button
+              className="github-button"
+              type="button"
+              onClick={() => window.location.assign(
+                `${(import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')}/oauth2/authorization/github`,
+              )}
+            >
+              <Icon name="github" />
+              Continue with GitHub
+            </button>
 
-              <p className="footer">
-                <button
-                  className="text-button"
-                  type="button"
-                  onClick={() => setPage('notifications')}
-                >
-                  Notification preferences
-                </button>
-              </p>
-            </section>
-
-            <section className="quick-access">
-              <h2>Quick access</h2>
-              <p className="quick-access-description">
-                Access your development tools directly from LivingDocs.
-              </p>
-
-              <div className="quick-access-grid">
-                <button
-                  className="quick-access-card"
-                  type="button"
-                  onClick={() => setPage('github')}
-                >
-                  <span className="quick-access-icon" aria-hidden="true">
-                    {'</>'}
-                  </span>
-                  <span className="quick-access-title">
-                    GitHub Connection
-                  </span>
-                  <span className="quick-access-description">
-                    Connect and manage your GitHub account.
-                  </span>
-                  <span className="quick-access-link">Open feature →</span>
-                </button>
-
-                <button
-                  className="quick-access-card"
-                  type="button"
-                  onClick={() => setPage('repository')}
-                >
-                  <span className="quick-access-icon" aria-hidden="true">
-                    {'{ }'}
-                  </span>
-                  <span className="quick-access-title">
-                    Repository Management
-                  </span>
-                  <span className="quick-access-description">
-                    View and manage your repositories.
-                  </span>
-                  <span className="quick-access-link">Open feature →</span>
-                </button>
-
-                <button
-                  className="quick-access-card"
-                  type="button"
-                  onClick={() => setPage('documentation')}
-                >
-                  <span className="quick-access-icon" aria-hidden="true">
-                    {'▤'}
-                  </span>
-                  <span className="quick-access-title">
-                    Documentation Management
-                  </span>
-                  <span className="quick-access-description">
-                    Create and manage project documentation.
-                  </span>
-                  <span className="quick-access-link">Open feature →</span>
-                </button>
-                <button
-                  className="quick-access-card"
-                  type="button"
-                  onClick={() => setPage('search')}
-                >
-                  <span className="quick-access-icon" aria-hidden="true">⌕</span>
-                  <span className="quick-access-title">Documentation Search</span>
-                  <span className="quick-access-description">
-                    Find documentation and linked code in your repositories.
-                  </span>
-                  <span className="quick-access-link">Open feature ↗</span>
-                </button>
-                <button
-                  className="quick-access-card"
-                  type="button"
-                  onClick={() => setPage('drift')}
-                >
-                  <span className="quick-access-icon" aria-hidden="true">⚠</span>
-                  <span className="quick-access-title">Documentation Drift</span>
-                  <span className="quick-access-description">
-                    Check a pull request for outdated documentation, ranked by severity.
-                  </span>
-                  <span className="quick-access-link">Open feature →</span>
-                </button>
-              </div>
-            </section>
-          </main>
+            <p className="auth-foot">
+              Don't have an account?{' '}
+              <button className="text-button" type="button" onClick={() => navigate('/register')}>
+                Sign up
+              </button>
+              {' '}(Developer accounts only)
+            </p>
+          </section>
         );
     }
   };
+
   if (isCheckingSession) {
-  return <div className="app-content">Checking session...</div>;
-}
+    return (
+      <>
+        <AnimatedBackground />
+        <div className="app-content session-check">Checking session...</div>
+      </>
+    );
+  }
+
+  if (!isAuthenticated) {
+    const page = decision.kind === 'public' ? decision.page : null;
+    return (
+      <>
+        <AnimatedBackground />
+        {page
+          ? <PublicShell key={page} page={page}>{renderPublicCard(page)}</PublicShell>
+          : <p className="session-check" role="status">Redirecting…</p>}
+      </>
+    );
+  }
+
   return (
-    <div className="app">
-      {page !== 'login' && (
-        <nav className="app-navigation">
-          <div className="nav-brand">LivingDocs</div>
-
-          <div className="nav-links">
-            <button type="button" onClick={() => setPage('github')}>
-              GitHub Connection
-            </button>
-
-            <button type="button" onClick={() => setPage('repository')}>
-              Repository Management
-            </button>
-
-            <button type="button" onClick={() => setPage('documentation')}>
-              Documentation Management
-            </button>
-
-            <button type="button" onClick={() => setPage('search')}>
-              Documentation Search
-            </button>
-
-            <button type="button" onClick={() => setPage('drift')}>
-              Documentation Drift
-            </button>
-
-            <button type="button" onClick={() => setPage('profile')}>
-              Profile
-            </button>
-
-            <button type="button" onClick={() => setPage('notifications')}>
-              Notifications
-            </button>
-
-            <button type="button" onClick={handleLogout}>
-              Logout
-            </button>
-          </div>
-          {logoutError && <p role="alert">{logoutError}</p>}
-        </nav>
-      )}
-
-      <main className="app-content">{renderPage()}</main>
-    </div>
+    <RbacContext.Provider value={user.role}>
+      <AnimatedBackground />
+      <AppShell
+        decision={decision}
+        userId={user.id}
+        userRole={user.role}
+        userEmail={user.email}
+        notice={loginSuccess}
+        onLogout={handleLogout}
+        logoutError={logoutError}
+      />
+    </RbacContext.Provider>
   );
 }
 

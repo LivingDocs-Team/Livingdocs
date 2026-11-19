@@ -1,6 +1,8 @@
 import pytest
 import re
 from playwright.sync_api import Page, expect
+
+from rbac_nav import LOGIN_URL, open_screen
 from fastapi.testclient import TestClient
 from app.main import app
 
@@ -161,14 +163,14 @@ def test_ld211_documentation_code_relationship_flow(page: Page):
         return route.fulfill(status=404, json={"message": f"Unexpected API request: {request.method} {path}"})
 
     page.route("**/api/**", mock_api)
-    page.goto("http://localhost:3000/")
+    page.goto(LOGIN_URL)
 
     page.get_by_label("Email").fill("user@example.test")
     page.get_by_label("Password").fill("test-only-password")
     page.get_by_role("button", name="Sign in").click()
     expect(page.get_by_role("status").filter(has_text="Signed in successfully")).to_be_visible()
 
-    page.get_by_role("button", name="Repository Management").first.click()
+    open_screen(page, "Repository List")
     expect(page.get_by_role("heading", name="Repository Management")).to_be_visible()
     page.get_by_role("checkbox", name="Select acme/shop").check()
     page.get_by_role("button", name="Add selected to workspace").click()
@@ -178,7 +180,7 @@ def test_ld211_documentation_code_relationship_flow(page: Page):
     page.get_by_role("button", name="Sync now").click()
     expect(page.get_by_role("status").filter(has_text="acme/shop synchronized")).to_be_visible()
 
-    page.get_by_role("button", name="Documentation Management").first.click()
+    open_screen(page, "Generated Documents")
     expect(page.get_by_role("heading", name="Saved documentation")).to_be_visible()
     page.get_by_role("button", name="Open document").click()
     expect(page.locator(".markdown-preview-content")).to_contain_text("Saved shop documentation")
@@ -300,14 +302,14 @@ def test_frontend_upload_repo_flow(page: Page):
         return route.fulfill(status=404, json={"message": f"Unexpected API request: {request.method} {path}"})
 
     page.route("**/api/**", mock_api)
-    page.goto("http://localhost:3000/")
+    page.goto(LOGIN_URL)
 
     page.get_by_label("Email").fill("user@example.test")
     page.get_by_label("Password").fill("test-only-password")
     page.get_by_role("button", name="Sign in").click()
     expect(page.get_by_role("status").filter(has_text="Signed in successfully")).to_be_visible()
 
-    page.get_by_role("button", name="Repository Management").first.click()
+    open_screen(page, "Repository List")
     expect(page.get_by_role("heading", name="Repository Management")).to_be_visible()
     page.get_by_role("checkbox", name="Select acme/shop").check()
     page.get_by_role("button", name="Add selected to workspace").click()
@@ -317,7 +319,7 @@ def test_frontend_upload_repo_flow(page: Page):
     page.get_by_role("button", name="Sync now").click()
     expect(page.get_by_role("status").filter(has_text="acme/shop synchronized")).to_be_visible()
 
-    page.get_by_role("button", name="Documentation Management").first.click()
+    open_screen(page, "Generated Documents")
     page.get_by_role("button", name="Generate documentation").click()
     expect(page.get_by_role("heading", name="Generated Documentation")).to_be_visible(timeout=10_000)
     expect(page.locator("#documentation-editor")).to_have_value("# acme/shop\n\nGenerated from analyzed source.")
@@ -371,11 +373,11 @@ def test_documentation_search_shows_documentation_and_code_navigation(page: Page
         return route.fulfill(status=404, json={"message": f"Unexpected API request: {request.method} {path}"})
 
     page.route("**/api/**", mock_api)
-    page.goto("http://localhost:3000/")
+    page.goto(LOGIN_URL)
     page.get_by_label("Email").fill("user@example.test")
     page.get_by_label("Password").fill("test-only-password")
     page.get_by_role("button", name="Sign in").click()
-    page.get_by_role("button", name="Documentation Search").click()
+    open_screen(page, "Knowledge Search")
     page.get_by_label("Search terms").fill("checkout")
     page.get_by_role("button", name="Search", exact=True).click()
 
@@ -389,7 +391,7 @@ def test_documentation_search_shows_documentation_and_code_navigation(page: Page
     assert len(search_calls) == 1
 
 
-def test_documentation_search_back_to_login_keeps_session_and_does_not_log_out(page: Page):
+def test_leaving_documentation_search_through_the_menu_keeps_the_session(page: Page):
     calls = []
 
     def mock_api(route):
@@ -410,15 +412,16 @@ def test_documentation_search_back_to_login_keeps_session_and_does_not_log_out(p
         return route.fulfill(status=404, json={"message": f"Unexpected API request: {request.method} {path}"})
 
     page.route("**/api/**", mock_api)
-    page.goto("http://localhost:3000/")
+    page.goto(LOGIN_URL)
     page.get_by_label("Email").fill("user@example.test")
     page.get_by_label("Password").fill("test-only-password")
     page.get_by_role("button", name="Sign in").click()
-    page.get_by_role("button", name="Documentation Search").click()
+    open_screen(page, "Knowledge Search")
 
     expect(page.get_by_role("heading", name="Documentation Search")).to_be_visible()
-    page.get_by_role("button", name="Back to Login").click()
-    expect(page.get_by_role("heading", name="LivingDocs")).to_be_visible()
+    open_screen(page, "Profile & Settings")
+    expect(page.get_by_role("heading", name="Profile & Settings")).to_be_visible()
+    expect(page.get_by_role("button", name="Logout")).to_be_visible()
     assert ("POST", "http://localhost:3000/api/auth/logout") not in calls
 
 
@@ -437,11 +440,11 @@ def test_documentation_search_validates_empty_query(page: Page):
         return route.fulfill(status=404, json={"message": "Unexpected API request"})
 
     page.route("**/api/**", mock_api)
-    page.goto("http://localhost:3000/")
+    page.goto(LOGIN_URL)
     page.get_by_label("Email").fill("user@example.test")
     page.get_by_label("Password").fill("test-only-password")
     page.get_by_role("button", name="Sign in").click()
-    page.get_by_role("button", name="Documentation Search").click()
+    open_screen(page, "Knowledge Search")
     page.get_by_role("button", name="Search", exact=True).click()
     expect(page.get_by_role("alert")).to_have_text("Enter a search term.")
 
@@ -476,11 +479,11 @@ def test_documentation_search_repository_selection_and_isolation(page: Page):
         return route.fulfill(status=404, json={"message": f"Unexpected request: {path}"})
 
     page.route("**/api/**", mock_api)
-    page.goto("http://localhost:3000/")
+    page.goto(LOGIN_URL)
     page.get_by_label("Email").fill("user@example.test")
     page.get_by_label("Password").fill("test-only-password")
     page.get_by_role("button", name="Sign in").click()
-    page.get_by_role("button", name="Documentation Search").click()
+    open_screen(page, "Knowledge Search")
     expect(page.get_by_label("Repository")).to_have_value(REPOSITORY_ID)
     page.get_by_label("Repository").select_option(repository_b)
     page.get_by_label("Search terms").fill("checkout")
@@ -526,11 +529,11 @@ def test_documentation_search_loading_and_empty_results(page: Page):
         return route.fulfill(status=404, json={"message": f"Unexpected request: {path}"})
 
     page.route("**/api/**", mock_api)
-    page.goto("http://localhost:3000/")
+    page.goto(LOGIN_URL)
     page.get_by_label("Email").fill("user@example.test")
     page.get_by_label("Password").fill("test-only-password")
     page.get_by_role("button", name="Sign in").click()
-    page.get_by_role("button", name="Documentation Search").click()
+    open_screen(page, "Knowledge Search")
     page.get_by_label("Search terms").fill("missing")
     page.get_by_role("button", name="Search", exact=True).click()
 
@@ -562,11 +565,11 @@ def test_documentation_search_displays_api_errors(page: Page):
         return route.fulfill(status=404, json={"message": f"Unexpected request: {path}"})
 
     page.route("**/api/**", mock_api)
-    page.goto("http://localhost:3000/")
+    page.goto(LOGIN_URL)
     page.get_by_label("Email").fill("user@example.test")
     page.get_by_label("Password").fill("test-only-password")
     page.get_by_role("button", name="Sign in").click()
-    page.get_by_role("button", name="Documentation Search").click()
+    open_screen(page, "Knowledge Search")
     page.get_by_label("Search terms").fill("checkout")
     page.get_by_role("button", name="Search", exact=True).click()
     expect(page.get_by_role("alert")).to_have_text(
@@ -591,12 +594,12 @@ def test_login_can_open_github_connection_and_view_status(page: Page):
         return route.fulfill(status=404, json={"message": f"Unexpected request: {path}"})
 
     page.route("**/api/**", mock_api)
-    page.goto("http://localhost:3000/")
+    page.goto(LOGIN_URL)
     page.get_by_label("Email").fill("user@example.test")
     page.get_by_label("Password").fill("test-only-password")
     page.get_by_role("button", name="Sign in").click()
     expect(page.get_by_role("status").filter(has_text="Signed in successfully")).to_be_visible()
-    page.get_by_role("button", name="GitHub Connection").click()
+    open_screen(page, "GitHub Connection")
     expect(page.get_by_role("heading", name="GitHub Integration")).to_be_visible()
     expect(page.get_by_role("status").filter(has_text="Connected as @test-user")).to_be_visible()
 
