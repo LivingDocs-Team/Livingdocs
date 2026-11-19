@@ -20,7 +20,7 @@ concurrency:
 jobs:
   backend-build-test:
     name: Backend Build and Test
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     services:
@@ -72,7 +72,7 @@ jobs:
 
   frontend-build:
     name: Frontend Build and Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -160,7 +160,7 @@ jobs:
 
   github-integration-test:
     name: GitHub Integration Service Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -202,7 +202,7 @@ jobs:
 
   ai-service-test:
     name: AI Service Build and Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -231,7 +231,7 @@ jobs:
 
   ai-service-integration:
     name: AI Service Integration Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -290,7 +290,7 @@ jobs:
 
   docker-compose-validation:
     name: Docker Compose Validation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       TOKEN_ENCRYPTION_KEY: "ci-validation-placeholder-only"
