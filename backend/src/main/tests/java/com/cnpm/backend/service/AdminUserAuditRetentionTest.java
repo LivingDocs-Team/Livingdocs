@@ -1,42 +1,60 @@
 package com.cnpm.backend.service;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
 import com.cnpm.backend.repository.AdminUserAuditRepository;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-
+@ExtendWith(MockitoExtension.class)
 class AdminUserAuditRetentionTest {
-    private final AdminUserAuditRepository audit = mock(AdminUserAuditRepository.class);
+
+    @Mock AdminUserAuditRepository audit;
+    @Mock SystemConfigurationService config;
+
+    @InjectMocks AdminUserAuditRetention retention;
 
     @Test
-    void zeroDaysDisablesDeletion() {
-        new AdminUserAuditRetention(audit, 0).purgeExpiredRecords();
+    void purgeUsesConfiguredRetentionWindow() {
+        when(config.getAuditLogRetentionDays()).thenReturn(90);
+        when(audit.deleteOlderThan(any())).thenReturn(5);
 
-        verifyNoInteractions(audit);
+        retention.purgeExpiredRecords();
+
+        verify(audit).deleteOlderThan(argThat(cutoff ->
+                Math.abs(ChronoUnit.DAYS.between(cutoff, Instant.now()) - 90) <= 1));
     }
 
     @Test
-    void positiveDaysSetTheCutoff() {
-        Instant earliest = Instant.now().minus(30, ChronoUnit.DAYS);
+    void purgeReadsOverrideOnEveryRun() {
+        when(config.getAuditLogRetentionDays()).thenReturn(730, 30);
+        when(audit.deleteOlderThan(any())).thenReturn(0);
 
-        new AdminUserAuditRetention(audit, 30).purgeExpiredRecords();
+        retention.purgeExpiredRecords();   // default 730
+        retention.purgeExpiredRecords();   // admin just PATCHed to 30
 
-        var cutoff = ArgumentCaptor.forClass(Instant.class);
-        verify(audit).deleteOlderThan(cutoff.capture());
-        assertThat(cutoff.getValue()).isBetween(earliest, Instant.now().minus(30, ChronoUnit.DAYS));
+        verify(audit).deleteOlderThan(argThat(cutoff ->
+                Math.abs(ChronoUnit.DAYS.between(cutoff, Instant.now()) - 730) <= 1));
+        verify(audit).deleteOlderThan(argThat(cutoff ->
+                Math.abs(ChronoUnit.DAYS.between(cutoff, Instant.now()) - 30) <= 1));
     }
 
     @Test
-    void negativeDaysAreRejected() {
-        assertThatIllegalArgumentException().isThrownBy(() -> new AdminUserAuditRetention(audit, -1));
+    void purgeSkipsWhenRetentionIsNotPositive() {
+        when(config.getAuditLogRetentionDays()).thenReturn(0);
+
+        retention.purgeExpiredRecords();
+
         verifyNoInteractions(audit);
     }
 }

@@ -101,7 +101,9 @@ public class SystemConfigurationService {
                 "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$");
         list("generation", "generation.sections", "Overview,Classes,Functions,API Endpoints",
                 List.of("Overview", "Classes", "Functions", "API Endpoints"), null, 1, "Sections included in generated documentation.");
-        integer("generation", "generation.maxAttempts", 3, 1, 10, "AI attempts per file before falling back to analysis data only.");
+        integer("generation", "generation.maxAttempts",
+            envInt("GENERATION_MAX_ATTEMPTS", 3), 1, 10,
+            "AI attempts per file before falling back to analysis data only.");
 
         // LD-278 - Automatic documentation update triggers and policies
         group("auto-update", "Automatic Update Policies");
@@ -116,8 +118,12 @@ public class SystemConfigurationService {
 
         // Change-log and audit-log retention
         group("retention", "Change-Log & Audit-Log Retention");
-        integer("retention", "retention.changeLogDays", 365, 30, 3650, "Days to keep change-log entries.");
-        integer("retention", "retention.auditLogDays", 730, 30, 3650, "Days to keep audit-log entries.");
+                integer("retention", "retention.changeLogDays",
+                envInt("RETENTION_CHANGE_LOG_DAYS", 365), 30, 3650,
+                "Days to keep change-log entries.");
+        integer("retention", "retention.auditLogDays",
+                envInt("ADMIN_USER_AUDIT_RETENTION_DAYS", 730), 30, 3650,
+                "Days to keep audit-log entries.");
 
         // LD-279 - AI model, embedding model, confidence threshold, token budget
         group("ai", "AI Model & Confidence");
@@ -178,7 +184,11 @@ public class SystemConfigurationService {
     @SuppressWarnings("unchecked")
     public List<String> getList(String key) { return (List<String>) get(key); }
 
-    // ---------------------------------------------------------------- commands
+    public boolean isAutoUpdateEnabled()       { return getBoolean("autoUpdate.enabled"); }
+    public int     getGenerationMaxAttempts()  { return getInt("generation.maxAttempts"); }
+    public int     getAuditLogRetentionDays()  { return getInt("retention.auditLogDays"); }
+    public int     getChangeLogRetentionDays() { return getInt("retention.changeLogDays"); }
+
 
     /** Validates every value first, then stores them all (a single invalid value changes nothing). */
     @Transactional
@@ -366,6 +376,26 @@ public class SystemConfigurationService {
         if (result.size() > MAX_LIST_ITEMS) throw new IllegalArgumentException("must contain at most " + MAX_LIST_ITEMS + " items");
         return List.copyOf(result);
     }
+
+        // ---------------------------------------------------------------- env fallback (LD-273)
+
+    /**
+     * Reads an integer from an environment variable, falling back to {@code defaultValue} when the
+     * variable is unset, blank or not a number. Deployments keep configuring the same values through
+     * environment variables, but the database override (system_settings) remains the top priority.
+     */
+    private static int envInt(String name, int defaultValue) {
+        String raw = System.getenv(name);
+        if (raw == null || raw.isBlank()) return defaultValue;
+        try {
+            return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            log.warn("Environment variable {}={} is not an integer; using default {}", name, raw, defaultValue);
+            return defaultValue;
+        }
+    }
+
+    // ---------------------------------------------------------------- catalog builders
 
     // ---------------------------------------------------------------- catalog builders
 

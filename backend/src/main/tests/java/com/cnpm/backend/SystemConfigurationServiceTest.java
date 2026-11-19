@@ -179,6 +179,43 @@ class SystemConfigurationServiceTest {
                 assertThat(setting.key().toLowerCase()).doesNotContain("secret", "password", "privatekey", "apikey")));
     }
 
+    @Test
+    void retentionAndGenerationAccessorsReflectPatchAndReset() {
+    service.update("retention", Map.of("retention.auditLogDays", 90), "admin");
+    assertThat(service.getAuditLogRetentionDays()).isEqualTo(90);
+
+    service.update("generation", Map.of("generation.maxAttempts", 5), "admin");
+    assertThat(service.getGenerationMaxAttempts()).isEqualTo(5);
+
+    service.update("auto-update", Map.of("autoUpdate.enabled", true), "admin");
+    assertThat(service.isAutoUpdateEnabled()).isTrue();
+
+    service.reset("retention");
+    service.reset("generation");
+    service.reset("auto-update");
+    assertThat(service.getAuditLogRetentionDays()).isEqualTo(730);
+    assertThat(service.getGenerationMaxAttempts()).isEqualTo(3);
+    assertThat(service.isAutoUpdateEnabled()).isFalse();
+}
+
+    @Test
+    void retentionGenerationAndAutoUpdateAccessorsReflectPatchAndReset() {
+        service.update("retention", Map.of("retention.auditLogDays", 90), "admin");
+        assertThat(service.getAuditLogRetentionDays()).isEqualTo(90);
+
+        service.update("generation", Map.of("generation.maxAttempts", 5), "admin");
+        assertThat(service.getGenerationMaxAttempts()).isEqualTo(5);
+
+        service.update("auto-update", Map.of("autoUpdate.enabled", true), "admin");
+        assertThat(service.isAutoUpdateEnabled()).isTrue();
+
+        service.reset("retention");
+        service.reset("generation");
+        service.reset("auto-update");
+        assertThat(service.getAuditLogRetentionDays()).isEqualTo(730);
+        assertThat(service.getGenerationMaxAttempts()).isEqualTo(3);
+        assertThat(service.isAutoUpdateEnabled()).isFalse();
+    }
     private void assertInvalid(String group, String key, Object value) {
         Map<String, Object> change = new HashMap<>();
         change.put(key, value);
