@@ -28,9 +28,14 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.test.context.jdbc.Sql;
+
 @SpringBootTest
 @AutoConfigureMockMvc
 @Transactional
+@Sql("/db/notification-policies-postgresql.sql")
+@EnabledIfEnvironmentVariable(named = "DB_URL", matches = ".*postgresql.*")
 class AdminMonitoringPostgresTest {
     private static final String POLICIES = "/api/admin/notification-policies";
     private static final String ANALYTICS = "/api/admin/system-analytics";
