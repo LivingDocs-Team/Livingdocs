@@ -44,6 +44,3 @@ class TokenEncryptorTest {
                 .isInstanceOf(IllegalStateException.class);
     }
 }
-
-
-

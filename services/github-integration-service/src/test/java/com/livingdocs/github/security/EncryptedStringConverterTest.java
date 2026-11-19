@@ -51,6 +51,3 @@ class EncryptedStringConverterTest {
         return new EncryptedStringConverter(new TokenEncryptor(base64Key));
     }
 }
-
-
-

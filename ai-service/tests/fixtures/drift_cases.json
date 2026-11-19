@@ -1,0 +1,4387 @@
+{
+ "about": "LD-347 / LD-346 drift regression fixtures; regenerate the analyzer results with ai-service/scripts/capture_drift_cases.py",
+ "cases": [
+  {
+   "name": "referential_removed_and_renamed",
+   "description": "A function is removed and another renamed; the docs still name both.",
+   "path": "shop/cart.py",
+   "status": "modified",
+   "previous_path": null,
+   "before": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "after": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_cart_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n",
+   "docs": {
+    "README.md": "# Shop\n\nCount with `count_items(cart_id)`; the mobile app calls `legacy_total`.\n"
+   },
+   "expected": [
+    [
+     "referential",
+     "entity_renamed",
+     "count_cart_items",
+     "README.md"
+    ],
+    [
+     "referential",
+     "entity_removed",
+     "legacy_total",
+     "README.md"
+    ]
+   ],
+   "warnings": [],
+   "before_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   },
+   "after_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_cart_items",
+      "signature": "def count_cart_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_cart_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   }
+  },
+  {
+   "name": "referential_endpoint_moved",
+   "description": "An endpoint moves to another path (same handler); the docs show the old path.",
+   "path": "shop/cart.py",
+   "status": "modified",
+   "previous_path": null,
+   "before": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "after": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/api/v2/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "docs": {
+    "docs/api.md": "# Cart API\n\n## `get_total`\n\n`GET /carts/{cart_id}` returns the total of a cart.\n\n```\nget_total(cart_id, discount=0.0)\n```\n\n| Name | Type | Default |\n|---|---|---|\n| `cart_id` | int | - |\n| `discount` | float | 0.0 |\n\nTotal of a cart in VND, VAT included. Returns `404` when the cart does not exist.\n\n## `fetch_cart`\n\n`fetch_cart(cart_id, timeout=30)` loads a cart from the database.\n\n## `clear_cart`\n\n| Name | Type | Default |\n|---|---|---|\n| `cart_id` | int | - |\n| `timeout` | int | 30 |\n\n## `count_items`\n\n`count_items(cart_id)` counts the items.\n"
+   },
+   "expected": [
+    [
+     "referential",
+     "endpoint_moved",
+     "GET /api/v2/carts/{cart_id}",
+     "docs/api.md"
+    ]
+   ],
+   "warnings": [],
+   "before_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   },
+   "after_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/api/v2/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   }
+  },
+  {
+   "name": "referential_file_moved",
+   "description": "The module moves without code changes; docs name the old module and path.",
+   "path": "shop/basket.py",
+   "status": "renamed",
+   "previous_path": "shop/cart.py",
+   "before": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "after": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "docs": {
+    "docs/dev.md": "# Development\n\nImport with `from shop.cart import get_total`.\n",
+    "README.md": "# Shop\n\nThe cart service lives in `shop/cart.py`.\n"
+   },
+   "expected": [
+    [
+     "referential",
+     "module_moved",
+     null,
+     "docs/dev.md"
+    ],
+    [
+     "referential",
+     "file_moved",
+     null,
+     "README.md"
+    ]
+   ],
+   "warnings": [],
+   "before_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   },
+   "after_analysis": {
+    "path": "shop/basket.py",
+    "language": "python",
+    "module": "shop.basket",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   }
+  },
+  {
+   "name": "signature_parameter_removed",
+   "description": "A parameter is removed; the call shown in the docs still passes it.",
+   "path": "shop/cart.py",
+   "status": "modified",
+   "previous_path": null,
+   "before": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "after": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "docs": {
+    "docs/api.md": "# Cart API\n\n## `get_total`\n\n`GET /carts/{cart_id}` returns the total of a cart.\n\n```\nget_total(cart_id, discount=0.0)\n```\n\n| Name | Type | Default |\n|---|---|---|\n| `cart_id` | int | - |\n| `discount` | float | 0.0 |\n\nTotal of a cart in VND, VAT included. Returns `404` when the cart does not exist.\n\n## `fetch_cart`\n\n`fetch_cart(cart_id, timeout=30)` loads a cart from the database.\n\n## `clear_cart`\n\n| Name | Type | Default |\n|---|---|---|\n| `cart_id` | int | - |\n| `timeout` | int | 30 |\n\n## `count_items`\n\n`count_items(cart_id)` counts the items.\n"
+   },
+   "expected": [
+    [
+     "signature",
+     "parameter_removed",
+     "fetch_cart",
+     "docs/api.md"
+    ]
+   ],
+   "warnings": [],
+   "before_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   },
+   "after_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   }
+  },
+  {
+   "name": "signature_type_and_default_changed",
+   "description": "A parameter's type and default change; the table shows the old ones.",
+   "path": "shop/cart.py",
+   "status": "modified",
+   "previous_path": null,
+   "before": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "after": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: str, discount: float = 0.1) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "docs": {
+    "docs/api.md": "# Cart API\n\n## `get_total`\n\n`GET /carts/{cart_id}` returns the total of a cart.\n\n```\nget_total(cart_id, discount=0.0)\n```\n\n| Name | Type | Default |\n|---|---|---|\n| `cart_id` | int | - |\n| `discount` | float | 0.0 |\n\nTotal of a cart in VND, VAT included. Returns `404` when the cart does not exist.\n\n## `fetch_cart`\n\n`fetch_cart(cart_id, timeout=30)` loads a cart from the database.\n\n## `clear_cart`\n\n| Name | Type | Default |\n|---|---|---|\n| `cart_id` | int | - |\n| `timeout` | int | 30 |\n\n## `count_items`\n\n`count_items(cart_id)` counts the items.\n"
+   },
+   "expected": [
+    [
+     "signature",
+     "parameter_type_changed",
+     "get_total",
+     "docs/api.md"
+    ]
+   ],
+   "warnings": [],
+   "before_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   },
+   "after_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: str, discount: float=0.1) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "str",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.1",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: str, discount: float = 0.1) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "str",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.1",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   }
+  },
+  {
+   "name": "signature_optional_parameter_added",
+   "description": "An optional parameter is added: not breaking, the docs are incomplete.",
+   "path": "shop/cart.py",
+   "status": "modified",
+   "previous_path": null,
+   "before": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "after": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int, unique: bool = False) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "docs": {
+    "docs/api.md": "# Cart API\n\n## `get_total`\n\n`GET /carts/{cart_id}` returns the total of a cart.\n\n```\nget_total(cart_id, discount=0.0)\n```\n\n| Name | Type | Default |\n|---|---|---|\n| `cart_id` | int | - |\n| `discount` | float | 0.0 |\n\nTotal of a cart in VND, VAT included. Returns `404` when the cart does not exist.\n\n## `fetch_cart`\n\n`fetch_cart(cart_id, timeout=30)` loads a cart from the database.\n\n## `clear_cart`\n\n| Name | Type | Default |\n|---|---|---|\n| `cart_id` | int | - |\n| `timeout` | int | 30 |\n\n## `count_items`\n\n`count_items(cart_id)` counts the items.\n"
+   },
+   "expected": [
+    [
+     "signature",
+     "parameter_added",
+     "count_items",
+     "docs/api.md"
+    ]
+   ],
+   "warnings": [],
+   "before_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   },
+   "after_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int, unique: bool=False) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "unique",
+        "type": "bool",
+        "default": "False",
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int, unique: bool = False) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   }
+  },
+  {
+   "name": "semantic_status_code_changed",
+   "description": "The endpoint answers 410 instead of 404; the docs still say 404.",
+   "path": "shop/cart.py",
+   "status": "modified",
+   "previous_path": null,
+   "before": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "after": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=410, detail=\"cart expired\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "docs": {
+    "docs/api.md": "# Cart API\n\n## `get_total`\n\n`GET /carts/{cart_id}` returns the total of a cart.\n\n```\nget_total(cart_id, discount=0.0)\n```\n\n| Name | Type | Default |\n|---|---|---|\n| `cart_id` | int | - |\n| `discount` | float | 0.0 |\n\nTotal of a cart in VND, VAT included. Returns `404` when the cart does not exist.\n\n## `fetch_cart`\n\n`fetch_cart(cart_id, timeout=30)` loads a cart from the database.\n\n## `clear_cart`\n\n| Name | Type | Default |\n|---|---|---|\n| `cart_id` | int | - |\n| `timeout` | int | 30 |\n\n## `count_items`\n\n`count_items(cart_id)` counts the items.\n"
+   },
+   "expected": [
+    [
+     "semantic",
+     "status_codes_changed",
+     "get_total",
+     "docs/api.md"
+    ]
+   ],
+   "warnings": [],
+   "before_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   },
+   "after_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=410, detail=\"cart expired\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   }
+  },
+  {
+   "name": "semantic_docstring_changed",
+   "description": "The docstring changes; the docs still quote the old one.",
+   "path": "shop/cart.py",
+   "status": "modified",
+   "previous_path": null,
+   "before": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "after": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in USD, without VAT.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "docs": {
+    "docs/api.md": "# Cart API\n\n## `get_total`\n\n`GET /carts/{cart_id}` returns the total of a cart.\n\n```\nget_total(cart_id, discount=0.0)\n```\n\n| Name | Type | Default |\n|---|---|---|\n| `cart_id` | int | - |\n| `discount` | float | 0.0 |\n\nTotal of a cart in VND, VAT included. Returns `404` when the cart does not exist.\n\n## `fetch_cart`\n\n`fetch_cart(cart_id, timeout=30)` loads a cart from the database.\n\n## `clear_cart`\n\n| Name | Type | Default |\n|---|---|---|\n| `cart_id` | int | - |\n| `timeout` | int | 30 |\n\n## `count_items`\n\n`count_items(cart_id)` counts the items.\n"
+   },
+   "expected": [
+    [
+     "semantic",
+     "docstring_changed",
+     "get_total",
+     "docs/api.md"
+    ]
+   ],
+   "warnings": [],
+   "before_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   },
+   "after_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in USD, without VAT.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in USD, without VAT.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   }
+  },
+  {
+   "name": "unchanged_docs_already_updated",
+   "description": "The signature changes and the same PR updates the docs.",
+   "path": "shop/cart.py",
+   "status": "modified",
+   "previous_path": null,
+   "before": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "after": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, currency: str = \"VND\") -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"])\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "docs": {
+    "docs/api.md": "# Cart API\n\n## `get_total`\n\n`GET /carts/{cart_id}` returns the total of a cart.\n\n```\nget_total(cart_id, currency=\"VND\")\n```\n\n| Name | Type | Default |\n|---|---|---|\n| `cart_id` | int | - |\n| `currency` | str | \"VND\" |\n\nTotal of a cart in VND, VAT included. Returns `404` when the cart does not exist.\n\n## `fetch_cart`\n\n`fetch_cart(cart_id, timeout=30)` loads a cart from the database.\n\n## `clear_cart`\n\n| Name | Type | Default |\n|---|---|---|\n| `cart_id` | int | - |\n| `timeout` | int | 30 |\n\n## `count_items`\n\n`count_items(cart_id)` counts the items.\n"
+   },
+   "expected": [],
+   "warnings": [],
+   "before_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   },
+   "after_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, currency: str='VND') -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "currency",
+        "type": "str",
+        "default": "'VND'",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, currency: str = \"VND\") -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"])",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "currency",
+        "type": "str",
+        "default": "'VND'",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   }
+  },
+  {
+   "name": "unchanged_docs_other_section",
+   "description": "A removed parameter is still listed, but in the next function's section.",
+   "path": "shop/cart.py",
+   "status": "modified",
+   "previous_path": null,
+   "before": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "after": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "docs": {
+    "docs/api.md": "# Cart API\n\n## `get_total`\n\n`GET /carts/{cart_id}` returns the total of a cart.\n\n```\nget_total(cart_id, discount=0.0)\n```\n\n| Name | Type | Default |\n|---|---|---|\n| `cart_id` | int | - |\n| `discount` | float | 0.0 |\n\nTotal of a cart in VND, VAT included. Returns `404` when the cart does not exist.\n\n## `fetch_cart`\n\n`fetch_cart(cart_id)` loads a cart from the database.\n\n## `clear_cart`\n\n| Name | Type | Default |\n|---|---|---|\n| `cart_id` | int | - |\n| `timeout` | int | 30 |\n\n## `count_items`\n\n`count_items(cart_id)` counts the items.\n"
+   },
+   "expected": [],
+   "warnings": [],
+   "before_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   },
+   "after_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   }
+  },
+  {
+   "name": "unchanged_docs_unrelated",
+   "description": "The code changes, but the documentation never describes the changed code.",
+   "path": "shop/cart.py",
+   "status": "modified",
+   "previous_path": null,
+   "before": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "after": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 60) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "docs": {
+    "README.md": "# Shop\n\nRun `uvicorn shop.main:app` and open the checkout page.\n"
+   },
+   "expected": [],
+   "warnings": [],
+   "before_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   },
+   "after_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=60) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "60",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 60) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   }
+  },
+  {
+   "name": "unchanged_docs_acknowledge_change",
+   "description": "The docs already say what was removed or renamed; the change log is history.",
+   "path": "shop/cart.py",
+   "status": "modified",
+   "previous_path": null,
+   "before": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "after": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_cart_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n",
+   "docs": {
+    "docs/migration.md": "# Migration to 2.0\n\n- `legacy_total` was removed; use `get_total`.\n- `count_items` was renamed to `count_cart_items`.\n",
+    "CHANGELOG.md": "# Changelog\n\n## 1.4\n\n- Added `legacy_total` and `count_items`.\n"
+   },
+   "expected": [],
+   "warnings": [
+    "CHANGELOG.md: change log, not checked (it describes earlier versions on purpose)."
+   ],
+   "before_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   },
+   "after_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_cart_items",
+      "signature": "def count_cart_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_cart_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   }
+  },
+  {
+   "name": "unchanged_docs_new_docstring_quoted",
+   "description": "The docstring changes and the docs already quote the new one.",
+   "path": "shop/cart.py",
+   "status": "modified",
+   "previous_path": null,
+   "before": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "after": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the cache, then the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "docs": {
+    "docs/api.md": "# Cart API\n\n## `fetch_cart`\n\nLoad a cart from the cache, then the database.\n"
+   },
+   "expected": [],
+   "warnings": [],
+   "before_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   },
+   "after_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the cache, then the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the cache, then the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   }
+  },
+  {
+   "name": "no_change_formatting_and_comments",
+   "description": "Only comments, blank lines and spacing change.",
+   "path": "shop/cart.py",
+   "status": "modified",
+   "previous_path": null,
+   "before": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "after": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    # read the cart\n    cart  =  DB.get( cart_id )\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))  # rows\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "docs": {
+    "docs/api.md": "# Cart API\n\n## `get_total`\n\n`GET /carts/{cart_id}` returns the total of a cart.\n\n```\nget_total(cart_id, discount=0.0)\n```\n\n| Name | Type | Default |\n|---|---|---|\n| `cart_id` | int | - |\n| `discount` | float | 0.0 |\n\nTotal of a cart in VND, VAT included. Returns `404` when the cart does not exist.\n\n## `fetch_cart`\n\n`fetch_cart(cart_id, timeout=30)` loads a cart from the database.\n\n## `clear_cart`\n\n| Name | Type | Default |\n|---|---|---|\n| `cart_id` | int | - |\n| `timeout` | int | 30 |\n\n## `count_items`\n\n`count_items(cart_id)` counts the items.\n"
+   },
+   "expected": [],
+   "warnings": [],
+   "before_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   },
+   "after_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    # read the cart\n    cart  =  DB.get( cart_id )\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 15
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 18,
+      "end_lineno": 20
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 23,
+      "end_lineno": 25
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))  # rows",
+      "lineno": 28,
+      "end_lineno": 30
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 33,
+      "end_lineno": 35
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 15
+     }
+    ]
+   }
+  },
+  {
+   "name": "no_change_identical",
+   "description": "The file is touched but its content is identical.",
+   "path": "shop/cart.py",
+   "status": "modified",
+   "previous_path": null,
+   "before": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "after": "\"\"\"Shopping cart service.\"\"\"\nfrom fastapi import FastAPI, HTTPException\n\napp = FastAPI()\nDB = {}\n\n\n@app.get(\"/carts/{cart_id}\")\ndef get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount\n\n\ndef fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})\n\n\ndef clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)\n\n\ndef count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))\n\n\ndef legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))\n",
+   "docs": {
+    "docs/api.md": "# Cart API\n\n## `get_total`\n\n`GET /carts/{cart_id}` returns the total of a cart.\n\n```\nget_total(cart_id, discount=0.0)\n```\n\n| Name | Type | Default |\n|---|---|---|\n| `cart_id` | int | - |\n| `discount` | float | 0.0 |\n\nTotal of a cart in VND, VAT included. Returns `404` when the cart does not exist.\n\n## `fetch_cart`\n\n`fetch_cart(cart_id, timeout=30)` loads a cart from the database.\n\n## `clear_cart`\n\n| Name | Type | Default |\n|---|---|---|\n| `cart_id` | int | - |\n| `timeout` | int | 30 |\n\n## `count_items`\n\n`count_items(cart_id)` counts the items.\n"
+   },
+   "expected": [],
+   "warnings": [],
+   "before_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   },
+   "after_analysis": {
+    "path": "shop/cart.py",
+    "language": "python",
+    "module": "shop.cart",
+    "status": "ok",
+    "error": null,
+    "classes": [],
+    "functions": [
+     {
+      "name": "get_total",
+      "signature": "def get_total(cart_id: int, discount: float=0.0) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Total of a cart in VND, VAT included.",
+      "source": "def get_total(cart_id: int, discount: float = 0.0) -> float:\n    \"\"\"Total of a cart in VND, VAT included.\"\"\"\n    cart = DB.get(cart_id)\n    if cart is None:\n        raise HTTPException(status_code=404, detail=\"cart not found\")\n    return sum(cart[\"items\"]) - discount",
+      "lineno": 9,
+      "end_lineno": 14
+     },
+     {
+      "name": "fetch_cart",
+      "signature": "def fetch_cart(cart_id: int, timeout: int=30) -> dict",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "dict",
+      "docstring": "Load a cart from the database.",
+      "source": "def fetch_cart(cart_id: int, timeout: int = 30) -> dict:\n    \"\"\"Load a cart from the database.\"\"\"\n    return DB.get(cart_id, {\"timeout\": timeout})",
+      "lineno": 17,
+      "end_lineno": 19
+     },
+     {
+      "name": "clear_cart",
+      "signature": "def clear_cart(cart_id: int, timeout: int=30) -> None",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "timeout",
+        "type": "int",
+        "default": "30",
+        "description": null
+       }
+      ],
+      "return_type": "None",
+      "docstring": "Empty a cart.",
+      "source": "def clear_cart(cart_id: int, timeout: int = 30) -> None:\n    \"\"\"Empty a cart.\"\"\"\n    DB.pop(cart_id, None)",
+      "lineno": 22,
+      "end_lineno": 24
+     },
+     {
+      "name": "count_items",
+      "signature": "def count_items(cart_id: int) -> int",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "int",
+      "docstring": "Number of items in a cart.",
+      "source": "def count_items(cart_id: int) -> int:\n    \"\"\"Number of items in a cart.\"\"\"\n    return len(DB.get(cart_id, {}).get(\"items\", []))",
+      "lineno": 27,
+      "end_lineno": 29
+     },
+     {
+      "name": "legacy_total",
+      "signature": "def legacy_total(cart_id: int) -> float",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       }
+      ],
+      "return_type": "float",
+      "docstring": "Old total kept for the mobile app.",
+      "source": "def legacy_total(cart_id: int) -> float:\n    \"\"\"Old total kept for the mobile app.\"\"\"\n    return float(sum(DB.get(cart_id, {}).get(\"items\", [])))",
+      "lineno": 32,
+      "end_lineno": 34
+     }
+    ],
+    "endpoints": [
+     {
+      "http_method": "GET",
+      "path": "/carts/{cart_id}",
+      "handler": "get_total",
+      "parameters": [
+       {
+        "name": "cart_id",
+        "type": "int",
+        "default": null,
+        "description": null
+       },
+       {
+        "name": "discount",
+        "type": "float",
+        "default": "0.0",
+        "description": null
+       }
+      ],
+      "request_body": null,
+      "response": "float",
+      "lineno": 9,
+      "end_lineno": 14
+     }
+    ]
+   }
+  }
+ ]
+}

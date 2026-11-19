@@ -16,6 +16,3 @@ public class CsrfTokenController {
         return Map.of("token", rawToken instanceof String value ? value : csrfToken.getToken());
     }
 }
-
-
-

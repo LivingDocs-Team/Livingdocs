@@ -87,6 +87,3 @@ def test_built_in_template_is_protected_and_unknown_template_rejected():
     r = client.post("/generate", json={"scope": "file", "target": "f", "template_id": "nope",
                                        "files": [SAMPLE_FILE]})
     assert r.status_code == 404
-
-
-

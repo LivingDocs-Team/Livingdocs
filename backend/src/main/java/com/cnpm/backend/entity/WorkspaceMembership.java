@@ -38,6 +38,3 @@ public class WorkspaceMembership {
     public Workspace getWorkspace() { return workspace; }
     public User getUser() { return user; }
 }
-
-
-

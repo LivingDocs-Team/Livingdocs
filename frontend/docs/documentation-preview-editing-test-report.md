@@ -1,3 +1,4 @@
+
 # Báo cáo kiểm thử: Documentation Preview & Editing (LD-105)
 
 Người làm: Đăng (TV2). Ngày: 25/10/2026, cập nhật 26/10/2026 sau khi LD-101 cải tiến phần xem trước. Thuộc LD-101.
@@ -76,6 +77,3 @@ File: `tests/test_documentation_preview_editing.py`
 - Backend được giả lập nên đây là kiểm thử giao diện. Phần sinh tài liệu phía server đã có test riêng (`DocumentationGenerationServiceTest` trong github-integration-service, test của ai-service).
 - Test không phụ thuộc danh sách template, nên vẫn chạy được khi LD-96 (quản lý template) được merge.
 - Test dùng role và nhãn trên giao diện (tên nút, tab, `#documentation-editor`). Đổi chữ trên các nút này thì cần sửa test theo.
-
-
-

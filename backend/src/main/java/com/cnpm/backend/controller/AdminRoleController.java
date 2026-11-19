@@ -148,6 +148,3 @@ public class AdminRoleController {
     public record RoleResponse(String name, String description, List<String> permissions) { }
     public record PermissionResponse(String code, String description) { }
 }
-
-
-

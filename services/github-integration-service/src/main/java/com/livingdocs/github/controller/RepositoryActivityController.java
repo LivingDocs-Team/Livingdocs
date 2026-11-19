@@ -44,6 +44,3 @@ public class RepositoryActivityController {
         return ingestionService.listCommits(id);
     }
 }
-
-
-

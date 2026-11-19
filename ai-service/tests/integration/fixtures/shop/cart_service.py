@@ -28,6 +28,3 @@ class CartService:
         """Total price of the cart including VAT."""
         cart = self.carts.get(cart_id, Cart())
         return sum(self.prices[p] * q for p, q in cart.items.items())
-
-
-

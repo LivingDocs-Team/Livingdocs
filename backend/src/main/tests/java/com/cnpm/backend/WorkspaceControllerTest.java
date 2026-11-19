@@ -91,6 +91,34 @@ class WorkspaceControllerTest {
     }
 
     @Test
+    void listReturnsEmptyArrayWhenAuthenticatedUserHasNoManagedWorkspaces() throws Exception {
+        when(workspaces.listForUser(owner)).thenReturn(java.util.List.of());
+
+        mvc.perform(get("/api/managed-workspaces").principal(authentication))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                        .json("[]"));
+
+        verify(workspaces).listForUser(owner);
+    }
+
+    @Test
+    void listReturnsManagedWorkspacesForAuthenticatedUser() throws Exception {
+        Workspace workspace = new Workspace(owner, "Platform Docs", "Shared documentation");
+        ReflectionTestUtils.setField(workspace, "id", "workspace-123e4567-e89b-12d3-a456-426614174000");
+        when(workspaces.listForUser(owner)).thenReturn(java.util.List.of(workspace));
+
+        mvc.perform(get("/api/managed-workspaces").principal(authentication))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(workspace.getId()))
+                .andExpect(jsonPath("$[0].name").value("Platform Docs"))
+                .andExpect(jsonPath("$[0].ownerId").value(73))
+                .andExpect(jsonPath("$[0].accessRole").value("OWNER"));
+
+        verify(workspaces).listForUser(owner);
+    }
+
+    @Test
     void memberManagementUsesAuthenticatedWorkspaceOwnerAndReturnsMinimalUserData() throws Exception {
         User member = new User("member@example.test", "unused", "Member", "Test", "DEVELOPER", true);
         member.setUsername("member");
@@ -117,6 +145,3 @@ class WorkspaceControllerTest {
         verify(workspaces).removeMember(owner, "workspace-shared", 91L);
     }
 }
-
-
-

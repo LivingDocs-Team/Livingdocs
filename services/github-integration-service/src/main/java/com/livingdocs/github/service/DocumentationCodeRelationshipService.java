@@ -219,6 +219,3 @@ public class DocumentationCodeRelationshipService {
         return parent == null || parent.isBlank() ? name : parent + "." + name;
     }
 }
-
-
-

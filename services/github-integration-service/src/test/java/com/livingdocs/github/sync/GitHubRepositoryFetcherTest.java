@@ -408,6 +408,3 @@ class GitHubRepositoryFetcherTest {
     }
 
 }
-
-
-

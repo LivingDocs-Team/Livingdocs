@@ -12,19 +12,47 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.PositiveOrZero;
 
 public final class WorkflowDtos {
     private WorkflowDtos() { }
 
     public record SaveGeneratedDocumentRequest(@Size(max = 200) String title) { }
     public record CreateWorkflowRequest(@NotBlank @Size(max = 64) String documentId) { }
+    public record SectionFeedback(@NotNull @PositiveOrZero Integer startOffset,
+                                  @NotNull @Positive Integer endOffset,
+                                  @NotBlank @Size(max = 4000) String quote) { }
+    public record ReviewCommentRequest(@NotBlank @Size(max = 2000) String comment,
+                                       @NotNull @Positive Integer documentVersion,
+                                       @Valid SectionFeedback section) {
+        public ReviewCommentRequest(String comment, Integer documentVersion) {
+            this(comment, documentVersion, null);
+        }
+    }
+    public record ReviewCommentResponse(UUID id, UUID workflowId, String actorUserId,
+                                       Integer documentVersion, String comment, Instant createdAt,
+                                       SectionFeedback section) {
+        public ReviewCommentResponse(UUID id, UUID workflowId, String actorUserId,
+                Integer documentVersion, String comment, Instant createdAt) {
+            this(id, workflowId, actorUserId, documentVersion, comment, createdAt, null);
+        }
+    }
+    public record ChangeRequestResponse(UUID id, String actorUserId, Integer documentVersion,
+                                        String comment, Instant createdAt,
+                                        List<ReviewCommentResponse> relatedComments) { }
     public record StaffReviewRequest(@NotNull StaffReviewResult result,
                                      @Size(max = 2000) String comment) { }
     public record ManagerDecisionRequest(@Size(max = 2000) String comment) { }
+    public record SubmitWorkflowRequest(@Positive Integer expectedVersion) { }
     public record ReassignRequest(@NotNull @Positive Long targetStaffUserId,
                                  @NotBlank @Size(max = 1000) String reason) { }
     public record EditDocumentRequest(@NotBlank @Size(max = 2_000_000) String content,
-                                      @Size(max = 1000) String note) { }
+                                      @Size(max = 1000) String note, @Positive Integer expectedVersion) {
+        public EditDocumentRequest(String content, String note) {
+            this(content, note, null);
+        }
+    }
     public record RollbackRequest(
         @NotNull @Positive Integer sourceVersion,
         @NotBlank @Size(max = 1000) String reason
@@ -42,6 +70,3 @@ public final class WorkflowDtos {
     public record PageResponse<T>(List<T> content, int page, int size, long totalElements,
             int totalPages, boolean first, boolean last) { }
 }
-
-
-

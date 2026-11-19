@@ -184,6 +184,3 @@ public class SourceChange {
 
     public List<AffectedDocument> getAffectedDocuments() { return affectedDocuments; }
 }
-
-
-

@@ -269,7 +269,7 @@ class RepositorySyncApiTest {
         connection.setStatus(ConnectionStatus.ACTIVE);
         connectionRepository.save(connection);
 
-        when(gitHubClient.listAccessibleRepositories(TOKEN)).thenReturn(List.of(SHOP));
+        when(gitHubClient.listUserRepositories(TOKEN)).thenReturn(List.of(SHOP));
         String body = mvc.perform(post("/api/workspaces/ws-" + user + "/repositories").header(USER_HEADER, user)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"githubRepoIds\":[" + SHOP.id() + "]}"))
@@ -309,6 +309,3 @@ class RepositorySyncApiTest {
         return new GitHubApiException("GitHub API trả lỗi " + status, status, headers, "{\"message\":\"error\"}");
     }
 }
-
-
-

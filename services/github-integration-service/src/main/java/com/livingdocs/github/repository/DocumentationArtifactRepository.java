@@ -12,6 +12,3 @@ public interface DocumentationArtifactRepository extends JpaRepository<Documenta
     Optional<DocumentationArtifact> findByIdAndOwnerUserId(UUID id, String ownerUserId);
     List<DocumentationArtifact> findByRepositoryIdAndOwnerUserIdOrderByCreatedAtDesc(UUID repositoryId, String ownerUserId);
 }
-
-
-

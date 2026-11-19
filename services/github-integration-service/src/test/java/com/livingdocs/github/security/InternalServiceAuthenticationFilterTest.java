@@ -98,6 +98,3 @@ class InternalServiceAuthenticationFilterTest {
         return request;
     }
 }
-
-
-

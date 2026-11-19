@@ -280,7 +280,8 @@ def test_internal_document_routes_require_the_service_credential(monkeypatch):
 def test_internal_document_creation_uses_trusted_owner_not_request_fields(monkeypatch):
     monkeypatch.setenv("INTERNAL_API_SECRET", "workflow-internal-secret")
     job_response = client.post("/generate", json={"scope": "repository", "target": "acme/shop",
-                                                   "files": [CART, USERS]})
+                                                   "files": [CART, USERS]},
+                                 headers={"Authorization": "Bearer workflow-internal-secret"})
     assert job_response.status_code == 202
     job_id = job_response.json()["id"]
 
@@ -293,14 +294,16 @@ def test_internal_document_creation_uses_trusted_owner_not_request_fields(monkey
     assert response.json()["id"]
     assert response.json()["current_version"] == 0
     assert response.json()["pending_version"] == 1
-    assert client.get(f"/documents/{response.json()['id']}").status_code == 404
-    assert response.json()["id"] not in [doc["id"] for doc in client.get("/documents").json()]
+    assert client.get(f"/documents/{response.json()['id']}",
+                      headers={"Authorization": "Bearer workflow-internal-secret"}).status_code == 404
+    assert response.json()["id"] not in [doc["id"] for doc in client.get("/documents", headers={"Authorization": "Bearer workflow-internal-secret"}).json()]
 
 
 def test_internal_document_edit_checks_owner_and_adds_version(monkeypatch):
     monkeypatch.setenv("INTERNAL_API_SECRET", "workflow-internal-secret")
     job_response = client.post("/generate", json={"scope": "repository", "target": "acme/shop",
-                                                   "files": [CART, USERS]})
+                                                   "files": [CART, USERS]},
+                                 headers={"Authorization": "Bearer workflow-internal-secret"})
     job_id = job_response.json()["id"]
     created = client.post("/internal/documents/from-job", headers={
         "Authorization": "Bearer workflow-internal-secret", "X-User-Id": "73",
@@ -373,7 +376,8 @@ def create_internal_review_document(monkeypatch, source_snapshot=None):
     if source_snapshot is not None:
         payload["source_snapshot"] = source_snapshot
 
-    job_response = client.post("/generate", json=payload)
+    job_response = client.post("/generate", json=payload,
+                               headers={"Authorization": "Bearer workflow-internal-secret"})
     assert job_response.status_code == 202, job_response.text
 
     job_id = job_response.json()["id"]
@@ -454,7 +458,7 @@ def test_review_evidence_uses_requested_version(monkeypatch):
     doc = create_internal_review_document(monkeypatch, snapshot)
 
     # Tạo version 2 bằng chỉnh sửa thủ công.
-    # Version này không được kế thừa evidence/snapshot của version 1.
+    # LD-402: version này kế thừa evidence/snapshot của version 1 (evidence_from_version = 1).
     edit_response = client.put(
         f"/internal/documents/{doc['id']}/content",
         headers={
@@ -481,7 +485,7 @@ def test_review_evidence_uses_requested_version(monkeypatch):
     assert response_v1.status_code == 200, response_v1.text
     assert response_v1.json()["source_snapshot"]["commit_sha"] == "b" * 40
 
-    # Version 2 là bản chỉnh sửa thủ công, không có evidence.
+    # LD-402: version 2 là bản chỉnh sửa thủ công; staff vẫn review được với evidence của version 1.
     response_v2 = client.get(
         f"/internal/documents/{doc['id']}/review-evidence?version=2",
         headers={
@@ -489,43 +493,30 @@ def test_review_evidence_uses_requested_version(monkeypatch):
         },
     )
 
-    assert response_v2.status_code == 404
+    assert response_v2.status_code == 200, response_v2.text
+    assert response_v2.json()["source_snapshot"]["commit_sha"] == "b" * 40
+    assert edit_response.json()["evidence_from_version"] == 1
 
 
 def test_review_evidence_returns_404_when_report_is_missing(monkeypatch):
-    snapshot = {
-        "repository_id": "repo-no-evidence",
-        "repository_full_name": "acme/shop",
-        "branch": "main",
-        "commit_sha": "c" * 40,
-        "fetched_at": "2026-11-09T10:00:00Z",
-    }
+    # LD-402: an edit now keeps the evidence of its base, so "missing" means a version whose
+    # whole history has no review report (a document saved without a job report).
+    monkeypatch.setenv("INTERNAL_API_SECRET", "workflow-internal-secret")
+    store = DocumentStore()
+    out = JobOutput(scope=Scope.file, target="a.py", template_id="default", template_name=None,
+                    output_language="en", sections=[("a.py", "# A\n", "offline", 0.5)])
+    doc = store.create_from_job("no-report-job", out, actor="73", owner_user_id="73")
+    store.edit_owned(doc.id, "73", 1, "# Edited documentation")
+    monkeypatch.setattr("main.documents", store)
 
-    doc = create_internal_review_document(monkeypatch, snapshot)
-
-    # Tạo version chỉnh sửa thủ công không có review_report.
-    edit_response = client.put(
-        f"/internal/documents/{doc['id']}/content",
-        headers={
-            "Authorization": "Bearer workflow-internal-secret",
-            "X-User-Id": "73",
-        },
-        json={
-            "content": "# Edited documentation",
-            "expected_version": 1,
-        },
-    )
-
-    assert edit_response.status_code == 200, edit_response.text
-
-    response = client.get(
-        f"/internal/documents/{doc['id']}/review-evidence?version=2",
-        headers={
-            "Authorization": "Bearer workflow-internal-secret",
-        },
-    )
-
-    assert response.status_code == 404
+    for version in (1, 2):
+        response = client.get(
+            f"/internal/documents/{doc.id}/review-evidence?version={version}",
+            headers={
+                "Authorization": "Bearer workflow-internal-secret",
+            },
+        )
+        assert response.status_code == 404
 
 # ---------- Rollback approved document versions ----------
 
@@ -661,5 +652,3 @@ def test_rollback_retry_returns_existing_matching_proposal():
     assert retry.number == first.number
     assert store.get(doc.id).versions_total == 2
     assert len(store.history(doc.id)) == 3
-
-

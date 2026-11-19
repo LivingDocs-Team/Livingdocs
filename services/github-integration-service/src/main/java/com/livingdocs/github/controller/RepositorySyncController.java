@@ -74,6 +74,3 @@ public class RepositorySyncController {
         return AnalysisInput.from(syncService.latest(userId, id, verifiedWorkspaceId, verifiedAccess));
     }
 }
-
-
-

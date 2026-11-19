@@ -30,6 +30,3 @@ public record GitHubCommit(
     public record Account(String login) {
     }
 }
-
-
-

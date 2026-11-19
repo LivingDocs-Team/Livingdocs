@@ -129,6 +129,3 @@ public class DocumentationTemplateService {
         return parts.isEmpty() ? null : String.join("; ", parts);
     }
 }
-
-
-

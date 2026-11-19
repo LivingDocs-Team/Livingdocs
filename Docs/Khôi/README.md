@@ -1,5 +1,2 @@
 # Livingdocs
 BLCK
-
-
-

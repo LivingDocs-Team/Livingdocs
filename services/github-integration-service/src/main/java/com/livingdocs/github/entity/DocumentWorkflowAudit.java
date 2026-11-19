@@ -47,6 +47,34 @@ public class DocumentWorkflowAudit {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @Column(name = "document_version")
+    private Integer documentVersion;
+
+    @Column(name = "section_start_offset")
+    private Integer sectionStartOffset;
+
+    @Column(name = "section_end_offset")
+    private Integer sectionEndOffset;
+
+    @Column(name = "section_quote", length = 4000)
+    private String sectionQuote;
+
+    public Integer getSectionStartOffset() { return sectionStartOffset; }
+    public Integer getSectionEndOffset() { return sectionEndOffset; }
+    public String getSectionQuote() { return sectionQuote; }
+
+    public void setSectionFeedback(int startOffset, int endOffset, String quote) {
+        this.sectionStartOffset = startOffset;
+        this.sectionEndOffset = endOffset;
+        this.sectionQuote = quote;
+    }
+
+    public Integer getDocumentVersion() { return documentVersion; }
+
+    public void setDocumentVersion(Integer documentVersion) {
+        this.documentVersion = documentVersion;
+    }
+
     protected DocumentWorkflowAudit() { }
 
     public DocumentWorkflowAudit(UUID workflowId, String actorUserId, String action,
@@ -88,6 +116,3 @@ public class DocumentWorkflowAudit {
     public String getComment() { return comment; }
     public Instant getCreatedAt() { return createdAt; }
 }
-
-
-

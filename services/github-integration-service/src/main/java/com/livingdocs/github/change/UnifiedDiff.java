@@ -120,6 +120,3 @@ public final class UnifiedDiff {
     private record Hunk(int oldStart, int newStart, List<String> lines) {
     }
 }
-
-
-

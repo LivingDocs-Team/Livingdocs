@@ -6,6 +6,3 @@ public enum RepositoryStatus {
     ERROR,
     DISCONNECTED
 }
-
-
-

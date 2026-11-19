@@ -11,6 +11,8 @@ from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import Page, expect
 
+from rbac_nav import menu_link, open_screen
+
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 MANAGER_ID = "84"
 STAFF_ID = "42"
@@ -180,7 +182,7 @@ class FakeApi:
 def open_manager_approval(page: Page, api: FakeApi):
     page.route("**/api/**", api.handle)
     page.goto(FRONTEND_URL)
-    page.get_by_role("button", name="Documentation Management").first.click()
+    open_screen(page, "Approval Queue")
     expect(page.get_by_role("heading", name="Manager Approval")).to_be_visible()
     page.get_by_role("button", name="Open Manager Approval").click()
 
@@ -235,7 +237,7 @@ def test_approved_and_rejected_history_survives_reload_and_uses_backend_fields(p
     expect(detail).to_contain_text("Decision time")
 
     page.reload()
-    page.get_by_role("button", name="Documentation Management").first.click()
+    # The reload keeps the Approval Queue screen (hash URL).
     page.get_by_role("button", name="Open Manager Approval").click()
     history = page.get_by_label("Manager decision history")
     expect(history.get_by_role("button", name="Shop API Guide").filter(has_text="REJECTED")).to_have_count(2)
@@ -340,14 +342,16 @@ def test_manager_queue_page_change_shows_loading_without_previous_page_rows(page
         server_thread.join(timeout=2)
 
 
-def test_approve_posts_without_body_refreshes_queue_and_audit(page: Page):
+def test_approve_posts_an_empty_json_body_refreshes_queue_and_audit(page: Page):
     api = FakeApi(workflow())
     open_manager_approval(page, api)
     page.get_by_role("button", name="Approve document").click()
 
     expect(page.get_by_role("status").filter(has_text="Backend confirmed APPROVED")).to_be_visible()
     expect(page.get_by_label("Last Manager workflow result")).to_contain_text("APPROVED")
-    assert ("POST", f"/api/document-workflows/{WORKFLOW_ID}/approve", None) in api.requests
+    # An empty JSON body, so that the request carries Content-Type: application/json (a body-less POST is
+    # answered with HTTP 415 by the real GitHub Integration service).
+    assert ("POST", f"/api/document-workflows/{WORKFLOW_ID}/approve", {}) in api.requests
     expect(page.get_by_label("Approval audit history")).to_contain_text("APPROVED", timeout=7000)
     assert any(method == "GET" and path == f"/api/document-workflows/{WORKFLOW_ID}/history" for method, path, _ in api.requests)
     assert sum(method == "GET" and path == "/api/document-workflows/manager/queue" for method, path, _ in api.requests) >= 2
@@ -406,8 +410,12 @@ def test_backend_forbids_staff_and_user_without_manager_role(page: Page):
     api = FakeApi(user_role="STAFF", user_id=STAFF_ID)
     page.route("**/api/**", api.handle)
     page.goto(FRONTEND_URL)
-    page.get_by_role("button", name="Documentation Management").first.click()
+    expect(page.get_by_role("heading", name="Staff Review Queue")).to_be_visible()
+    expect(menu_link(page, "Approval Queue")).to_have_count(0)
 
+    # Typing the Manager URL directly is blocked by the route guard.
+    page.goto(f"{FRONTEND_URL}/#/approval/queue")
+    expect(page.get_by_role("heading", name="Access denied")).to_be_visible()
     expect(page.get_by_role("heading", name="Manager Approval")).to_have_count(0)
     expect(page.get_by_role("button", name="Open Manager Approval")).to_have_count(0)
     assert not any(path == "/api/document-workflows/manager/queue" for _, path, _ in api.requests)
@@ -423,7 +431,7 @@ def test_manager_queue_permission_denial_and_expired_session(page: Page):
     page2 = page.context.new_page()
     page2.route("**/api/**", expired.handle)
     page2.goto(FRONTEND_URL)
-    page2.get_by_role("button", name="Documentation Management").first.click()
+    open_screen(page2, "Approval Queue")
     page2.get_by_role("button", name="Open Manager Approval").click()
     expect(page2.get_by_role("alert").filter(has_text="Your LivingDocs session has expired")).to_be_visible()
 
@@ -471,18 +479,20 @@ def test_full_ld310_submit_to_staff_to_manager_approval_history(page: Page):
 
     page.route("**/api/**", full_cycle_route)
     page.goto(FRONTEND_URL)
-    page.get_by_role("button", name="Documentation Management").first.click()
+    open_screen(page, "Review Queue")
     page.get_by_role("button", name="Open Staff Review Queue").click()
     page.get_by_role("button", name="Claim review").click()
     expect(page.get_by_role("heading", name="Submit Staff review")).to_be_visible()
     page.get_by_label("Decision").select_option("PASSED")
-    page.get_by_label("Review comment").fill("Evidence is sufficient for approval.")
+    page.get_by_label("Review comment", exact=True).fill("Evidence is sufficient for approval.")
     page.get_by_role("button", name="Submit review").click()
     expect(page.get_by_label("Submitted Staff review result")).to_contain_text("PENDING_MANAGER_APPROVAL")
 
     role.update(id=int(MANAGER_ID), role="MANAGER")
     page.reload()
-    page.get_by_role("button", name="Documentation Management").first.click()
+    # The Staff screen stays in the URL; the Manager may not open it.
+    expect(page.get_by_role("heading", name="Access denied")).to_be_visible()
+    open_screen(page, "Approval Queue")
     page.get_by_role("button", name="Open Manager Approval").click()
     page.get_by_role("button", name="Approve document").click()
     expect(page.get_by_role("status").filter(has_text="Backend confirmed APPROVED")).to_be_visible()

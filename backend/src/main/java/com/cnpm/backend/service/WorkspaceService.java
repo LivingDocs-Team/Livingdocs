@@ -1,6 +1,7 @@
 package com.cnpm.backend.service;
 
 import java.util.List;
+import java.util.stream.Stream;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -78,6 +79,15 @@ public class WorkspaceService {
                 .map(WorkspaceMembership::getUser).toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<User> listCollectionOwnerCandidates(User actor, String workspaceId) {
+        Workspace workspace = getForMemberOrOwner(actor, workspaceId);
+        return Stream.concat(Stream.of(workspace.getOwner()),
+                membershipRepository.findAllByWorkspace_IdOrderByUser_IdAsc(workspaceId).stream()
+                        .map(WorkspaceMembership::getUser))
+                .filter(User::isActive).toList();
+    }
+
     @Transactional
     public User addMember(User owner, String workspaceId, Long targetUserId) {
         Workspace workspace = workspaceRepository.findByIdAndOwnerIdForUpdate(workspaceId, owner.getId())
@@ -137,6 +147,3 @@ public class WorkspaceService {
 
     private static ResponseStatusException notFoundException() { return notFound(); }
 }
-
-
-

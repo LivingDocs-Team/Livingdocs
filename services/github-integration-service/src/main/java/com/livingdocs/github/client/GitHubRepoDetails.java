@@ -26,6 +26,3 @@ public record GitHubRepoDetails(
     public record Owner(String login) {
     }
 }
-
-
-

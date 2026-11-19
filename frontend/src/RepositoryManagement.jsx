@@ -213,6 +213,7 @@ function RepositoryManagementForUser({ userId }) {
   }
 
   async function removeFromWorkspace(repository) {
+    if (!window.confirm(`Remove ${repository.fullName} from this workspace?`)) return;
     const operationUserId = userId;
     const operationWorkspaceId = workspaceId;
     setError('');
@@ -475,6 +476,3 @@ function RepositoryManagementForUser({ userId }) {
     </main>
   );
 }
-
-
-

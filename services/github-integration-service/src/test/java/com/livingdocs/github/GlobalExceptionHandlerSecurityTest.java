@@ -62,6 +62,3 @@ class GlobalExceptionHandlerSecurityTest {
         assertThat(response.getBody().message()).doesNotContain("HTTP 0");
     }
 }
-
-
-

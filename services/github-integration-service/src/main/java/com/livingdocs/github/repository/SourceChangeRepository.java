@@ -15,6 +15,3 @@ public interface SourceChangeRepository extends JpaRepository<SourceChange, UUID
 
     List<SourceChange> findByRepositoryIdOrderByCreatedAtDesc(UUID repositoryId, Pageable pageable);
 }
-
-
-

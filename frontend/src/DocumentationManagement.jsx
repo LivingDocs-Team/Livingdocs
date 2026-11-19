@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import './App.css';
 import { githubApi, githubApiText } from './githubApi';
 import { TemplateManager, TemplatePicker } from './DocumentationTemplates';
 import { useTemplates } from './templateApi';
 import DocumentationSuggestionReview from './DocumentationSuggestionReview';
+import DocumentationRevision from './DocumentationRevision';
 import StaffReviewQueue from './StaffReviewQueue';
 import ManagerApprovalQueue from './ManagerApprovalQueue';
+import Can from './rbac/Can';
 
 
 function escapeHtml(value) {
@@ -156,7 +158,16 @@ function workflowRequestError(error, resource) {
   return error?.message || `Could not load ${resource}. Please try again.`;
 }
 
-export default function DocumentationManagement({ userId, userRole }) {
+function submitErrorMessage(error, step) {
+  if (error?.status === 401) return 'Your session has expired. Sign in again to submit this document.';
+  if (error?.status === 403) return `You are not allowed to ${step}. Your role may not be permitted to submit documents.`;
+  if (error?.status === 404) {
+    return `Could not ${step}: the generation job was not found. It may have expired after a service restart, so generate the documentation again.`;
+  }
+  return error?.message || `Could not ${step}. Please try again.`;
+}
+
+export default function DocumentationManagement({ userId }) {
 
   const workspaceId = userId ? `ws-${userId}` : '';
 
@@ -190,6 +201,17 @@ export default function DocumentationManagement({ userId, userRole }) {
   const [isLoadingRepositories, setIsLoadingRepositories] = useState(Boolean(userId));
 
   const [jobId, setJobId] = useState('');
+  const [submittedDocumentId, setSubmittedDocumentId] = useState('');
+  const [createdWorkflowId, setCreatedWorkflowId] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const [submitNotice, setSubmitNotice] = useState('');
+  const [workflowsRefresh, setWorkflowsRefresh] = useState(0);
+  // Bumped by every new generation, by Reset and on unmount: a generation whose number is outdated stops
+  // instead of writing its late result over the screen.
+  const generationRun = useRef(0);
+  useEffect(() => () => { generationRun.current += 1; }, []);
   const [job, setJob] = useState(null);
 
   const [documentId, setDocumentId] = useState('');
@@ -335,6 +357,7 @@ export default function DocumentationManagement({ userId, userRole }) {
   const [history, setHistory] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [historyError, setHistoryError] = useState('');
+  const [revisionNotice, setRevisionNotice] = useState('');
 
   useEffect(() => {
     if (!userId) {
@@ -399,7 +422,7 @@ export default function DocumentationManagement({ userId, userRole }) {
       });
 
     return () => { cancelled = true; };
-  }, [userId, workflowPageIndex]);
+  }, [userId, workflowPageIndex, workflowsRefresh]);
 
   useEffect(() => {
     if (!userId || !selectedWorkflowId) {
@@ -436,7 +459,7 @@ export default function DocumentationManagement({ userId, userRole }) {
       });
 
     return () => { cancelled = true; };
-  }, [userId, selectedWorkflowId]);
+  }, [userId, selectedWorkflowId, workflowsRefresh]);
 
   const selectedWorkflow = workflowPage.content.find(
     (workflow) => String(workflow.id) === selectedWorkflowId
@@ -503,6 +526,9 @@ export default function DocumentationManagement({ userId, userRole }) {
 
     }
 
+    const runId = ++generationRun.current;
+    const isCurrent = () => runId === generationRun.current;
+
     setStatus('generating');
 
     setError('');
@@ -516,6 +542,8 @@ export default function DocumentationManagement({ userId, userRole }) {
    setSavedDocument('');
 
    setJob(null);
+
+   resetSubmission();
 
       setDocumentId('');
       setCodeEntities([]);
@@ -550,6 +578,8 @@ export default function DocumentationManagement({ userId, userRole }) {
 
       if (!createdJob?.id) throw new Error('The documentation service returned an invalid job.');
 
+      if (!isCurrent()) return;
+
       setJobId(createdJob.id);
       setJob(createdJob);
       setDocumentId(createdJob.documentId || '');
@@ -562,7 +592,12 @@ export default function DocumentationManagement({ userId, userRole }) {
 
         await new Promise((resolve) => window.setTimeout(resolve, 750));
 
+        if (!isCurrent()) return;
+
         currentJob = await githubApi(`/api/documentation/jobs/${encodeURIComponent(createdJob.id)}`, { userId });
+
+        if (!isCurrent()) return;
+
         setJob(currentJob);
       }
 
@@ -587,6 +622,8 @@ export default function DocumentationManagement({ userId, userRole }) {
         githubApi(`${jobPath}/report`, { userId }),
 
       ]);
+
+      if (!isCurrent()) return;
 
       if (!markdown.trim()) throw new Error('The documentation service returned an empty document.');
 
@@ -646,6 +683,8 @@ export default function DocumentationManagement({ userId, userRole }) {
         + (relationshipLoadError ? ` Related source code could not be loaded: ${relationshipLoadError}` : ''));
     } catch (requestError) {
 
+      if (!isCurrent()) return;
+
       setStatus('failed');
       if (requestError.code === 'TEMPLATE_NOT_FOUND') {
         templateList.reload();
@@ -657,7 +696,70 @@ export default function DocumentationManagement({ userId, userRole }) {
 
   }
 
+  function resetSubmission() {
+    setSubmittedDocumentId('');
+    setCreatedWorkflowId('');
+    setIsSubmitted(false);
+    setSubmitError('');
+    setSubmitNotice('');
+  }
+
+  // Saves the generated document, opens its review workflow and submits it for Staff review.
+  // Each step is remembered, so a retry after a failure continues from the step that failed.
+  async function handleSubmitForReview() {
+    if (!userId || !jobId || isSubmitting || isSubmitted) return;
+    setIsSubmitting(true);
+    setSubmitError('');
+    setSubmitNotice('');
+    let step = 'save the generated document';
+    try {
+      // The AI service document id used by the review workflow (not the code-relationship `documentId` state).
+      let savedDocumentId = submittedDocumentId;
+      if (!savedDocumentId) {
+        // An empty JSON body is required: a POST without Content-Type reaches GitHub Integration as
+        // form-urlencoded through the Backend and is answered with HTTP 415.
+        const saved = await githubApi(`/api/documentation/jobs/${encodeURIComponent(jobId)}/document`, {
+          method: 'POST', userId, body: {},
+        });
+        if (!saved?.id) throw new Error('The backend did not return the saved document.');
+        savedDocumentId = String(saved.id);
+        setSubmittedDocumentId(savedDocumentId);
+      }
+
+      step = 'create the review workflow';
+      let workflowId = createdWorkflowId;
+      if (!workflowId) {
+        const created = await githubApi('/api/document-workflows', {
+          method: 'POST', userId, body: { documentId: savedDocumentId },
+        });
+        if (!created?.id) throw new Error('The backend did not return the review workflow.');
+        workflowId = String(created.id);
+        setCreatedWorkflowId(workflowId);
+      }
+
+      step = 'submit the workflow for staff review';
+      const submitted = await githubApi(`/api/document-workflows/${encodeURIComponent(workflowId)}/submit`, {
+        method: 'POST', userId,
+      });
+      if (String(submitted?.id) !== workflowId || submitted?.status !== 'PENDING_STAFF_REVIEW') {
+        throw new Error('The backend did not confirm the submission. Refresh Approval History to verify the workflow.');
+      }
+
+      setIsSubmitted(true);
+      setSubmitNotice('Submitted for Staff review. Follow its progress in Approval History.');
+      setSelectedWorkflowId(workflowId);
+      setWorkflowPageIndex(0);
+      setWorkflowsRefresh((value) => value + 1);
+    } catch (requestError) {
+      setSubmitError(submitErrorMessage(requestError, step));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   function handleReset() {
+
+    generationRun.current += 1;
 
     setStatus('idle');
 
@@ -668,6 +770,8 @@ export default function DocumentationManagement({ userId, userRole }) {
     setSavedDocument('');
 
     setJob(null);
+
+    resetSubmission();
 
     setDocumentId('');
     setCodeEntities([]);
@@ -895,14 +999,16 @@ export default function DocumentationManagement({ userId, userRole }) {
 
           <div className="documentation-template-heading">
             <label id="documentation-template-label">Documentation template</label>
-            <button
-              type="button"
-              className="documentation-secondary-button"
-              aria-expanded={isManagingTemplates}
-              onClick={() => setIsManagingTemplates((open) => !open)}
-            >
-              {isManagingTemplates ? 'Close template manager' : 'Manage templates'}
-            </button>
+            <Can screen="templates" action="U">
+              <button
+                type="button"
+                className="documentation-secondary-button"
+                aria-expanded={isManagingTemplates}
+                onClick={() => setIsManagingTemplates((open) => !open)}
+              >
+                {isManagingTemplates ? 'Close template manager' : 'Manage templates'}
+              </button>
+            </Can>
           </div>
           <TemplatePicker
             templates={templateList.templates}
@@ -914,17 +1020,19 @@ export default function DocumentationManagement({ userId, userRole }) {
           />
 
           <div className="documentation-actions">
-            <button
-              type="submit"
-              disabled={
-                status === 'generating'
-                || isLoadingRepositories
-                || repositories.length === 0
-                || !templateList.templates.some((item) => item.id === template)
-              }
-            >
-              {status === 'generating' ? 'Generating…' : 'Generate documentation'}
-            </button>
+            <Can screen="documentation" action="C">
+              <button
+                type="submit"
+                disabled={
+                  status === 'generating'
+                  || isLoadingRepositories
+                  || repositories.length === 0
+                  || !templateList.templates.some((item) => item.id === template)
+                }
+              >
+                {status === 'generating' ? 'Generating…' : 'Generate documentation'}
+              </button>
+            </Can>
 
             <button
               type="button"
@@ -1092,6 +1200,17 @@ export default function DocumentationManagement({ userId, userRole }) {
 
         </section>
 
+        {revisionNotice && <p role="status">{revisionNotice}</p>}
+        {selectedWorkflow?.status === 'CHANGES_REQUESTED'
+          && String(selectedWorkflow.ownerUserId) === String(userId) && (
+          <DocumentationRevision key={`${userId}:${selectedWorkflowId}`}
+            userId={userId} workflowId={selectedWorkflowId}
+            onSubmitted={(message) => {
+              setRevisionNotice(message);
+              setWorkflowsRefresh((value) => value + 1);
+            }} />
+        )}
+
         <DocumentationSuggestionReview
           workflows={workflowPage.content}
           selectedWorkflowId={selectedWorkflowId}
@@ -1103,9 +1222,12 @@ export default function DocumentationManagement({ userId, userRole }) {
           workflowsError={workflowsError}
         />
 
-        <StaffReviewQueue userId={userId} />
+        {/* Working the Staff queue needs matrix row #10 U (Staff); a Developer only reads review feedback (R). */}
+        <Can screen="staffReview" action="U">
+          <StaffReviewQueue userId={userId} />
+        </Can>
 
-        <ManagerApprovalQueue userId={userId} userRole={userRole} />
+        <ManagerApprovalQueue userId={userId} />
 
         {isManagingTemplates && (
           <TemplateManager
@@ -1144,6 +1266,31 @@ export default function DocumentationManagement({ userId, userRole }) {
           <div className="documentation-result">
 
             <h2>Generated Documentation</h2>
+
+            <section className="documentation-panel" aria-labelledby="submit-review-heading">
+              <h3 id="submit-review-heading">Submit for review</h3>
+              <p className="documentation-hint">
+                Saves the generated document and sends it to Staff for review, then to a Manager for approval.
+              </p>
+              {markdown !== originalDocument && (
+                <p className="documentation-hint">
+                  Local edits are not part of the submission. Use Restore original to submit the generated version.
+                </p>
+              )}
+              <div className="documentation-actions">
+                <Can screen="workflowSubmission" action="C">
+                  <button
+                    type="button"
+                    onClick={handleSubmitForReview}
+                    disabled={!userId || isSubmitting || isSubmitted || markdown !== originalDocument}
+                  >
+                    {isSubmitting ? 'Submitting…' : isSubmitted ? 'Submitted for review' : 'Submit for review'}
+                  </button>
+                </Can>
+              </div>
+              {submitError && <p className="documentation-error" role="alert">{submitError}</p>}
+              {submitNotice && <p className="documentation-notice" role="status">{submitNotice}</p>}
+            </section>
 
             {documentId && (
               <section className="documentation-relationships" aria-labelledby="documentation-relationships-heading">
@@ -1319,13 +1466,15 @@ export default function DocumentationManagement({ userId, userRole }) {
       Restore original
     </button>
 
-    <button
-      type="button"
-      className="documentation-secondary-button"
-      onClick={handleExport}
-    >
-      Export Markdown
-    </button>
+    <Can screen="documentation" action="E">
+      <button
+        type="button"
+        className="documentation-secondary-button"
+        onClick={handleExport}
+      >
+        Export Markdown
+      </button>
+    </Can>
   </div>
 
   <p className="documentation-hint">
@@ -1437,19 +1586,21 @@ export default function DocumentationManagement({ userId, userRole }) {
 
                         <p>{selectedVersion.content.length} characters</p>
 
-                        <button
+                        <Can screen="documentRollback" action="U">
+                          <button
 
-                          type="button"
+                            type="button"
 
-                          className="documentation-secondary-button"
+                            className="documentation-secondary-button"
 
-                          onClick={handleRollback}
+                            onClick={handleRollback}
 
-                        >
+                          >
 
-                          Restore this version
+                            Restore this version
 
-                        </button>
+                          </button>
+                        </Can>
 
                       </div>
 
@@ -1636,6 +1787,3 @@ export default function DocumentationManagement({ userId, userRole }) {
   );
 
 }
-
-
-

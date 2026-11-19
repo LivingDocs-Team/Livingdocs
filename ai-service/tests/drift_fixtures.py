@@ -117,6 +117,3 @@ README = {"path": "README.md", "content": (
     "# Shop\n\nRead a total with `GET /carts/:id`.\n"
     "Implementation: [cart](shop/cart.py), see `clear_cart()`.\n"
     "We add items to a cart.\n")}
-
-
-
