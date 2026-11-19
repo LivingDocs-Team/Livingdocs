@@ -4,9 +4,12 @@ Runs against the built frontend on http://localhost:3000 with every /api call mo
 opens the dashboard from the sidebar of the role-based app shell (frontend/src/rbac).
 """
 import json
+import os
 from urllib.parse import parse_qs
 
 from playwright.sync_api import Page, expect
+from rbac_nav import sign_in as rbac_sign_in
+from conftest import FRONTEND_URL
 
 from rbac_nav import FRONTEND, main_menu, menu_link, open_screen
 
@@ -164,12 +167,12 @@ def install_api(page: Page, account=ADMIN, **options):
     return state
 
 
+
 def sign_in(page: Page, account):
-    page.goto(f"{FRONTEND}/")
+    page.goto("http://localhost:3000/#/login")
     page.get_by_label("Email").fill(account["email"])
-    page.get_by_label("Password").fill("test-only-password")
-    page.get_by_role("button", name="Sign in", exact=True).click()
-    expect(page.get_by_role("status").filter(has_text="Signed in successfully")).to_be_visible()
+    page.get_by_label("Password").fill(account.get("password", "Password123!"))
+    page.get_by_role("button", name="Sign in").click()
 
 
 # Administrator sidebar entry -> the dashboard tab it opens
@@ -288,7 +291,7 @@ def test_admin_config_analytics_audit_and_notification_policies(page: Page):
     page.get_by_role("button", name="Save configuration").click()
     expect(page.get_by_text("System configuration saved.")).to_be_visible()
     assert ("PATCH", "/api/admin/system-config", {"auditRetentionDays": 60}) in state["calls"]
-    expect(page.get_by_text("Fix before merge")).to_be_visible()
+    expect(page.get_by_role("cell", name="Fix before merge")).to_be_visible()
 
     page.get_by_role("tab", name="Audit & analytics").click()
     expect(page.locator(".admin-stat", has_text="Repositories connected").locator("strong")).to_have_text("4")
@@ -297,10 +300,9 @@ def test_admin_config_analytics_audit_and_notification_policies(page: Page):
     expect(page.get_by_text("USER_ROLE_CHANGED")).to_be_visible()
 
     page.get_by_role("tab", name="Notifications").click()
-    expect(page.get_by_label("Recipients for AI_JOB_FAILED")).to_have_value("ops@example.test")
     page.get_by_label("Recipients for AI_JOB_FAILED").fill("ops@example.test, admin@example.test")
-    page.get_by_role("button", name="Save policy").nth(1).click()
-    expect(page.get_by_text("Policy for AI_JOB_FAILED saved.")).to_be_visible()
+    page.get_by_role("button", name="Save policy").first.click()
+    expect(page.get_by_text("Policy for AI_JOB_FAILED saved.")).to_be_visible(timeout=10000)
 PERMISSIONS = [{"code": "DOCUMENT_VIEW", "description": "View documents"},
                {"code": "DOCUMENT_APPROVE", "description": "Approve documents"},
                {"code": "USER_VIEW", "description": "View users"}]

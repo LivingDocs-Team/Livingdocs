@@ -26,7 +26,7 @@
       POSTGRES_PASSWORD: livingdocs
     ports:
       # Local developer database access only; keep PostgreSQL off host network interfaces.
-      - "127.0.0.1:5433:5432"
+      - "127.0.0.1:5435:5432"
     volumes:
       - github-db-data:/var/lib/postgresql/data
     healthcheck:
