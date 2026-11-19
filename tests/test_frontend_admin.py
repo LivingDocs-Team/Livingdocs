@@ -300,10 +300,10 @@ def test_admin_config_analytics_audit_and_notification_policies(page: Page):
     expect(page.get_by_text("USER_ROLE_CHANGED")).to_be_visible()
 
     page.get_by_role("tab", name="Notifications").click()
-    page.get_by_label("Recipients for AI_JOB_FAILED").fill("ops@example.test, admin@example.test")
-    page.get_by_role("button", name="Save policy").first.click()
-    expect(page.locator("body")).to_be_visible()
-    import time; time.sleep(1)
+    policy_input = page.get_by_label("Recipients for AI_JOB_FAILED")
+    policy_input.fill("ops@example.test, admin@example.test")
+    policy_input.press("Enter")
+    page.wait_for_timeout(1000)
     assert ("PUT", "/api/admin/notification-policies/AI_JOB_FAILED",
             {"recipients": ["ops@example.test", "admin@example.test"], "enabled": True}) in state["calls"]
 PERMISSIONS = [{"code": "DOCUMENT_VIEW", "description": "View documents"},
