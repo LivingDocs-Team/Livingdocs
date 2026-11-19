@@ -246,6 +246,3 @@ class AdminUserControllerTest {
         return user;
     }
 }
-
-
-

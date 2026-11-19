@@ -256,6 +256,3 @@ public class IngestionService {
         }
     }
 }
-
-
-

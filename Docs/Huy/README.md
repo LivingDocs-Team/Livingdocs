@@ -47,7 +47,5 @@ Mỗi file gồm: mô tả, danh sách yêu cầu (FR-xx-yy.z), API, dữ liệu
 Kiểm thử và cấu hình hạ tầng CI/CD không phải chức năng giao diện người dùng nên không tạo file FR độc lập:
 
 - **LD-364 / LD-376 / LD-391:** Thiết lập và kiểm thử đường ống tích hợp liên tục GitHub Actions CI/CD Pipeline (job `test-ai-service` chạy `pytest tests/ -v`).
-- **LD-105-Tests / LD-390:** Kịch bản kiểm thử tích hợp giao diện Preview và Unit Test Backend cho các endpoints `GroundingEvidence` & `Submission` (tệp `ai-service/tests/test_evidence_submission.py`).
-
-
-
+- **LD-105-Tests / LD-390:** Kịch bản kiểm thử tích hợp giao diện Preview và Unit Test Backend cho các endpoints `GroundingEvidence` & `Submission` (tệp `tests/test_evidence_submission.py`).
+- **LD-150 / LD-155 / LD-160:** Bộ test phát hiện, phân loại và đánh giá mức độ drift (`ai-service/tests/test_drift*.py`, `tests/test_frontend_drift.py`); nội dung kiểm thử đã ghi trong mục 8 của FR-AI-05, FR-AI-06, FR-AI-07.

@@ -56,6 +56,3 @@ class RepositorySyncServiceAuthorizationTest {
         verifyNoInteractions(ingestion);
     }
 }
-
-
-

@@ -9,6 +9,3 @@ public enum DocumentWorkflowStatus {
     REJECTED,
     CHANGES_REQUESTED
 }
-
-
-

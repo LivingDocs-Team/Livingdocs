@@ -13,6 +13,3 @@ public record CodeEntityResponse(UUID id, String entityType, String name, String
                 entity.getSourceCommit());
     }
 }
-
-
-

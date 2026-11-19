@@ -16,6 +16,3 @@ public interface WorkspaceMembershipRepository extends JpaRepository<WorkspaceMe
 
     void deleteByWorkspace_IdAndUser_Id(String workspaceId, Long userId);
 }
-
-
-

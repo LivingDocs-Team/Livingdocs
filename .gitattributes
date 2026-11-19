@@ -1,4 +1,2 @@
 *.sh text eol=lf
 Dockerfile text eol=lf
-
-*.sql text eol=lf

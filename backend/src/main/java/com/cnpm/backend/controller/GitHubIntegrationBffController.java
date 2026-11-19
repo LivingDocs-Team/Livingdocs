@@ -7,6 +7,7 @@ import com.cnpm.backend.repository.UserRepository;
 import com.cnpm.backend.repository.RoleRepository;
 import com.cnpm.backend.repository.WorkspaceRepository;
 import com.cnpm.backend.repository.WorkspaceMembershipRepository;
+import com.cnpm.backend.security.ApiRoutePermissions;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,6 +50,10 @@ public class GitHubIntegrationBffController {
 
     private static final Pattern WORKSPACE_REPOSITORY_ROUTE =
             Pattern.compile("^/api/workspaces/([^/]+)/repositories(?:/([^/]+))?$");
+    private static final Pattern WORKSPACE_COLLECTION_ROUTE =
+            Pattern.compile("^/api/workspaces/([^/]+)/collections(?:/.*)?$");
+    private static final Pattern DOCUMENT_OWNER_ROUTE =
+            Pattern.compile("^/api/workspaces/([^/]+)/collections/[^/]+/documents/[^/]+/owner/([^/]+)$");
     private static final Pattern REPOSITORY_ID_ROUTE =
             Pattern.compile("^/api/repositories/([0-9a-fA-F-]{36})(?:/.*)?$");
     private static final List<String> FORWARDED_RESPONSE_HEADERS = List.of("Retry-After");
@@ -120,13 +125,22 @@ public class GitHubIntegrationBffController {
         }
 
         User user = authenticatedUser(authentication);
-        Set<String> authorities = currentAuthorities(user, authentication);
         String path = incoming.getRequestURI().substring(incoming.getContextPath().length());
+        // Screen Authorization matrix: the account's role must be allowed to use this route at all.
+        ApiRoutePermissions.Decision permission =
+                ApiRoutePermissions.evaluate(incoming.getMethod(), path, user.getRole());
+        if (!permission.allowed()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, permission.reason());
+        }
+        Set<String> authorities = currentAuthorities(user, authentication);
         WorkspaceAuthorization workspaceAuthorization = verifiedWorkspaceForRequest(
                 path, HttpMethod.valueOf(incoming.getMethod()), user, authorities);
         final String verifiedStaffTarget = HttpMethod.POST.matches(incoming.getMethod())
                 && path.matches("/api/document-workflows/[^/]+/reassign")
                         ? verifyReassignmentTarget(body, authorities) : null;
+        Matcher ownerRoute = DOCUMENT_OWNER_ROUTE.matcher(path);
+        final String verifiedDocumentOwner = HttpMethod.PUT.matches(incoming.getMethod()) && ownerRoute.matches()
+                ? verifyDocumentOwner(ownerRoute.group(1), ownerRoute.group(2)) : null;
         String query = incoming.getQueryString();
         URI target = URI.create(integrationBaseUrl + path + (query == null ? "" : "?" + query));
         HttpMethod method = HttpMethod.valueOf(incoming.getMethod());
@@ -145,6 +159,9 @@ public class GitHubIntegrationBffController {
             }
             if (verifiedStaffTarget != null) {
                 headers.set("X-Verified-Staff-User-Id", verifiedStaffTarget);
+            }
+            if (verifiedDocumentOwner != null) {
+                headers.set("X-Verified-Document-Owner-Id", verifiedDocumentOwner);
             }
             String contentType = incoming.getContentType();
             if (contentType != null) headers.set(HttpHeaders.CONTENT_TYPE, contentType);
@@ -173,6 +190,11 @@ public class GitHubIntegrationBffController {
 
     private WorkspaceAuthorization verifiedWorkspaceForRequest(String path, HttpMethod method,
             User actor, Set<String> authorities) {
+        Matcher collectionRoute = WORKSPACE_COLLECTION_ROUTE.matcher(path);
+        if (collectionRoute.matches()) {
+            String workspaceId = collectionRoute.group(1);
+            return new WorkspaceAuthorization(workspaceId, null, verifiedWorkspaceAccess(workspaceId, actor, authorities));
+        }
         Matcher workspaceRoute = WORKSPACE_REPOSITORY_ROUTE.matcher(path);
         if (workspaceRoute.matches()) {
             String targetWorkspaceId = workspaceRoute.group(1);
@@ -223,6 +245,28 @@ public class GitHubIntegrationBffController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Workspace not found");
         }
         return "MEMBER";
+    }
+
+    private String verifyDocumentOwner(String workspaceId, String rawTargetId) {
+        final long targetId;
+        try {
+            targetId = Long.parseLong(rawTargetId);
+        } catch (NumberFormatException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A valid owner user id is required.");
+        }
+        if (targetId <= 0 || !rawTargetId.equals(Long.toString(targetId))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A valid owner user id is required.");
+        }
+        User target = userRepository.findById(targetId).filter(User::isActive)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Select an active workspace owner or member."));
+        try {
+            verifiedWorkspaceAccess(workspaceId, target, Set.of());
+        } catch (ResponseStatusException exception) {
+            if (exception.getStatusCode() != HttpStatus.NOT_FOUND) throw exception;
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Select an active workspace owner or member.");
+        }
+        return rawTargetId;
     }
 
     private void requireWorkspaceOwner(String accessLevel) {

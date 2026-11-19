@@ -1,11 +1,22 @@
 """Documentation templates in the frontend: view, choose, create, edit, delete, apply.
 
+Matrix row #22: Developers read and choose templates (Generated Documents); Technical Leads create,
+edit and delete them (Knowledge Base > Documentation Templates).
+
 Runs against the built frontend on http://localhost:3000 with every /api call mocked, like
 test_frontend.py.
 """
 import json
+import re
 
 from playwright.sync_api import Page, expect
+
+from rbac_nav import LOGIN_URL, open_screen, sign_in
+
+# Radio names contain the whole card text, so a plain "Onboarding" also matches the built-in
+# "Brief summary" card (its description mentions onboarding) while the template list is still loading.
+# Only the custom card has the "Custom" badge right after its name.
+ONBOARDING_CARD = re.compile(r"Onboarding\s*Custom")
 
 REPOSITORY_ID = "11111111-1111-1111-1111-111111111111"
 WORKSPACE_ID = "ws-42"
@@ -38,7 +49,7 @@ def install_api(page: Page, state: dict):
         if path == "/api/auth/login":
             return route.fulfill(status=200, json={
                 "message": "Login successful", "id": 42, "email": "user@example.test", "username": "test-user",
-                "firstName": "Test", "lastName": "User", "role": "DEVELOPER"})
+                "firstName": "Test", "lastName": "User", "role": state.get("role", "DEVELOPER")})
         if path == "/api/github/connection":
             return route.fulfill(status=200, json={"connected": True, "githubLogin": "test-user", "status": "ACTIVE"})
         if path == "/api/github/repos/available":
@@ -89,13 +100,23 @@ def install_api(page: Page, state: dict):
     page.route("**/api/**", handle)
 
 
-def open_documentation(page: Page):
-    page.goto("http://localhost:3000/")
-    page.get_by_label("Email").fill("user@example.test")
-    page.get_by_label("Password").fill("test-only-password")
-    page.get_by_role("button", name="Sign in").click()
+def sign_in_as(page: Page, state: dict, role: str):
+    state["role"] = role
+    page.goto("about:blank")      # a fresh document, so the previous mocked sign-in is gone
+    page.goto(LOGIN_URL)
+    sign_in(page)
     expect(page.get_by_role("status").filter(has_text="Signed in successfully")).to_be_visible()
-    page.get_by_role("button", name="Documentation Management").first.click()
+
+
+def open_documentation(page: Page, state=None):
+    sign_in_as(page, {} if state is None else state, "DEVELOPER")
+    open_screen(page, "Generated Documents")
+
+
+def open_template_library(page: Page, state: dict):
+    sign_in_as(page, state, "TECHNICAL_LEAD")
+    open_screen(page, "Documentation Templates")
+    expect(page.get_by_role("heading", name="Documentation Templates")).to_be_visible()
 
 
 def test_user_views_and_chooses_template_and_it_is_applied(page: Page):
@@ -117,12 +138,17 @@ def test_user_views_and_chooses_template_and_it_is_applied(page: Page):
     assert state["generate_bodies"][-1] == {"templateId": "api-reference", "outputLanguage": "vi"}
 
 
-def test_user_manages_custom_templates(page: Page):
+def test_developer_can_choose_but_not_manage_templates(page: Page):
+    install_api(page, {})
+    open_documentation(page)
+    expect(page.get_by_role("radio", name="API reference")).to_be_visible()
+    expect(page.get_by_role("button", name="Manage templates")).to_have_count(0)
+
+
+def test_technical_lead_manages_custom_templates_and_developer_applies_them(page: Page):
     state = {}
     install_api(page, state)
-    open_documentation(page)
-
-    page.get_by_role("button", name="Manage templates").click()
+    open_template_library(page, state)
     expect(page.get_by_text("No custom templates yet.")).to_be_visible()
 
     # create: Overview + Functions, then move Functions first
@@ -137,7 +163,6 @@ def test_user_manages_custom_templates(page: Page):
     expect(page.get_by_role("status").filter(has_text='Template "Onboarding" saved.')).to_be_visible()
     assert state["custom"][0]["sections"] == ["Functions", "Overview"]
     assert state["custom"][0]["description"] == "For new team members"
-    expect(page.get_by_role("radio", name="Onboarding")).to_be_checked()     # new template is selected
 
     # duplicate name: API message is shown
     page.get_by_role("button", name="New template").click()
@@ -154,16 +179,23 @@ def test_user_manages_custom_templates(page: Page):
     expect(page.get_by_role("status").filter(has_text='Template "Onboarding" saved.')).to_be_visible()
     assert state["custom"][0]["sections"] == ["Functions", "Overview", "Classes"]
 
-    # apply the custom template
+    # a Developer applies the custom template
+    open_documentation(page, state)
+    page.get_by_role("radio", name=ONBOARDING_CARD).check()
     page.get_by_role("button", name="Generate documentation").click()
-    expect(page.get_by_role("status").filter(has_text='using the "Onboarding" template')).to_be_visible()
+    expect(page.get_by_role("status").filter(has_text='using the "Onboarding" template')).to_be_visible(timeout=15_000)
     assert state["generate_bodies"][-1]["templateId"] == "c1"
 
-    # delete needs a second click; selection falls back to the default template
+    # delete needs a second click
+    open_template_library(page, state)
     page.get_by_role("button", name="Delete Onboarding").click()
     page.get_by_role("button", name="Confirm delete Onboarding").click()
     expect(page.get_by_role("status").filter(has_text='Template "Onboarding" deleted.')).to_be_visible()
     assert state["custom"] == []
+
+    # the Developer's selection is back on the default template
+    open_documentation(page, state)
+    expect(page.get_by_role("radio", name=ONBOARDING_CARD)).to_have_count(0)
     expect(page.get_by_role("radio", name="Standard technical docs")).to_be_checked()
 
 
@@ -175,6 +207,3 @@ def test_built_in_templates_shown_when_template_list_unavailable(page: Page):
 
     expect(page.get_by_text("Could not load templates from the server")).to_be_visible()
     expect(page.get_by_role("radio", name="Brief summary")).to_be_visible()
-
-
-

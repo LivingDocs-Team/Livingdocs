@@ -200,6 +200,3 @@ public class User {
         this.githubId = githubId;
     }
 }
-
-
-

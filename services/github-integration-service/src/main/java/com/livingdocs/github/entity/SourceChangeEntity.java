@@ -43,6 +43,3 @@ public class SourceChangeEntity {
     public int getStartLine() { return startLine; }
     public int getEndLine() { return endLine; }
 }
-
-
-

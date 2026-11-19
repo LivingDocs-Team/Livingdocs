@@ -80,5 +80,3 @@ function NotificationPreferences() {
 }
 
 export default NotificationPreferences;
-
-

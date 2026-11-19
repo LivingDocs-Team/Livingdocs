@@ -94,6 +94,3 @@ public class GitHubConnection {
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 }
-
-
-

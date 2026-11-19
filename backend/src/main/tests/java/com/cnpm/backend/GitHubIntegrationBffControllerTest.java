@@ -45,6 +45,7 @@ class GitHubIntegrationBffControllerTest {
         UserRepository users = mock(UserRepository.class);
         WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
         User authenticatedUser = mock(User.class);
+        when(authenticatedUser.getRole()).thenReturn("DEVELOPER");
         when(authenticatedUser.getId()).thenReturn(73L);
         when(users.findByEmail("verified@example.test")).thenReturn(Optional.of(authenticatedUser));
         String workspaceId = "workspace-11111111-1111-1111-1111-111111111111";
@@ -74,6 +75,7 @@ class GitHubIntegrationBffControllerTest {
         UserRepository users = mock(UserRepository.class);
         WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
         User authenticatedUser = mock(User.class);
+        when(authenticatedUser.getRole()).thenReturn("DEVELOPER");
         when(authenticatedUser.getId()).thenReturn(73L);
         when(users.findByEmail("verified@example.test")).thenReturn(Optional.of(authenticatedUser));
         String workspaceId = "workspace-11111111-1111-1111-1111-111111111111";
@@ -98,6 +100,7 @@ class GitHubIntegrationBffControllerTest {
         WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
         WorkspaceMembershipRepository memberships = mock(WorkspaceMembershipRepository.class);
         User member = mock(User.class);
+        when(member.getRole()).thenReturn("DEVELOPER");
         when(member.getId()).thenReturn(91L);
         when(users.findByEmail("member@example.test")).thenReturn(Optional.of(member));
         String workspaceId = "workspace-11111111-1111-1111-1111-111111111111";
@@ -123,12 +126,69 @@ class GitHubIntegrationBffControllerTest {
     }
 
     @Test
+    void collectionOwnerAssignmentVerifiesRoleMembershipAndActiveTargetBeforeForwarding() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        UserRepository users = mock(UserRepository.class);
+        WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        WorkspaceMembershipRepository memberships = mock(WorkspaceMembershipRepository.class);
+        User actor = mock(User.class);
+        User target = mock(User.class);
+        when(users.findByEmail("lead@example.test")).thenReturn(Optional.of(actor));
+        when(users.findById(74L)).thenReturn(Optional.of(target));
+        when(actor.getId()).thenReturn(73L);
+        when(target.getId()).thenReturn(74L);
+        when(target.isActive()).thenReturn(true);
+        String workspace = "workspace-11111111-1111-1111-1111-111111111111";
+        String collection = "22222222-2222-2222-2222-222222222222";
+        String document = "33333333-3333-3333-3333-333333333333";
+        String path = "/api/workspaces/" + workspace + "/collections/" + collection
+                + "/documents/" + document + "/owner/74";
+        var controller = new GitHubIntegrationBffController(builder.build(), users,
+                "http://github.test:8082", "internal-test-credential");
+        controller.setWorkspaceRepository(workspaces);
+        controller.setWorkspaceMembershipRepository(memberships);
+        var incoming = new MockHttpServletRequest("PUT", path);
+        incoming.addHeader("X-Verified-Document-Owner-Id", "99");
+        incoming.addHeader("X-Verified-Workspace-Access", "OWNER");
+        Authentication auth = authenticatedEmail("lead@example.test");
+
+        when(actor.getRole()).thenReturn("DEVELOPER");
+        assertThatThrownBy(() -> controller.proxy(incoming, auth, null))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(403));
+        when(actor.getRole()).thenReturn("TECHNICAL_LEAD");
+        assertThatThrownBy(() -> controller.proxy(incoming, auth, null))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(404));
+        when(memberships.existsByWorkspace_IdAndUser_IdAndUser_ActiveTrue(workspace, 73L)).thenReturn(true);
+        assertThatThrownBy(() -> controller.proxy(incoming, auth, null))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(400));
+        when(memberships.existsByWorkspace_IdAndUser_IdAndUser_ActiveTrue(workspace, 74L)).thenReturn(true);
+        when(target.isActive()).thenReturn(false);
+        assertThatThrownBy(() -> controller.proxy(incoming, auth, null))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(400));
+
+        when(target.isActive()).thenReturn(true);
+        server.expect(requestTo("http://github.test:8082" + path))
+                .andExpect(method(HttpMethod.PUT))
+                .andExpect(header("X-Verified-Workspace-Access", "MEMBER"))
+                .andExpect(header("X-Verified-Document-Owner-Id", "74"))
+                .andRespond(withSuccess());
+        assertThat(controller.proxy(incoming, auth, null).getStatusCode().value()).isEqualTo(200);
+        server.verify();
+    }
+
+    @Test
     void memberCannotUseWorkspaceRepositoryMutationRoutes() {
         RestClient.Builder builder = RestClient.builder();
         UserRepository users = mock(UserRepository.class);
         WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
         WorkspaceMembershipRepository memberships = mock(WorkspaceMembershipRepository.class);
         User member = mock(User.class);
+        when(member.getRole()).thenReturn("DEVELOPER");
         when(member.getId()).thenReturn(91L);
         when(users.findByEmail("member@example.test")).thenReturn(Optional.of(member));
         String workspaceId = "workspace-11111111-1111-1111-1111-111111111111";
@@ -154,6 +214,7 @@ class GitHubIntegrationBffControllerTest {
         WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
         WorkspaceMembershipRepository memberships = mock(WorkspaceMembershipRepository.class);
         User member = mock(User.class);
+        when(member.getRole()).thenReturn("DEVELOPER");
         when(member.getId()).thenReturn(91L);
         when(users.findByEmail("member@example.test")).thenReturn(Optional.of(member));
         String repositoryId = "22222222-2222-2222-2222-222222222222";
@@ -185,6 +246,7 @@ class GitHubIntegrationBffControllerTest {
         UserRepository users = mock(UserRepository.class);
         WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
         User authenticatedUser = mock(User.class);
+        when(authenticatedUser.getRole()).thenReturn("DEVELOPER");
         when(authenticatedUser.getId()).thenReturn(73L);
         when(users.findByEmail("verified@example.test")).thenReturn(Optional.of(authenticatedUser));
         String repositoryId = "22222222-2222-2222-2222-222222222222";
@@ -222,6 +284,7 @@ class GitHubIntegrationBffControllerTest {
         UserRepository users = mock(UserRepository.class);
         WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
         User authenticatedUser = mock(User.class);
+        when(authenticatedUser.getRole()).thenReturn("DEVELOPER");
         when(authenticatedUser.getId()).thenReturn(73L);
         when(users.findByEmail("verified@example.test")).thenReturn(Optional.of(authenticatedUser));
         String repositoryId = "22222222-2222-2222-2222-222222222222";
@@ -247,6 +310,7 @@ class GitHubIntegrationBffControllerTest {
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         UserRepository users = mock(UserRepository.class);
         User authenticatedUser = mock(User.class);
+        when(authenticatedUser.getRole()).thenReturn("DEVELOPER");
         when(authenticatedUser.getId()).thenReturn(73L);
         when(users.findByEmail("verified@example.test")).thenReturn(Optional.of(authenticatedUser));
         Authentication authentication = authenticatedEmail("verified@example.test");
@@ -290,6 +354,7 @@ class GitHubIntegrationBffControllerTest {
         UserRepository users = mock(UserRepository.class);
         RoleRepository roles = mock(RoleRepository.class);
         User authenticatedUser = mock(User.class);
+        when(authenticatedUser.getRole()).thenReturn("DEVELOPER");
         when(authenticatedUser.getId()).thenReturn(73L);
         when(authenticatedUser.getRole()).thenReturn("DEVELOPER");
         when(users.findByEmail("verified@example.test")).thenReturn(Optional.of(authenticatedUser));
@@ -319,11 +384,13 @@ class GitHubIntegrationBffControllerTest {
         UserRepository users = mock(UserRepository.class);
         RoleRepository roles = mock(RoleRepository.class);
         User admin = mock(User.class);
+        when(admin.getRole()).thenReturn("DEVELOPER");
         when(admin.getId()).thenReturn(73L);
         when(admin.getRole()).thenReturn("ADMIN");
         when(users.findByEmail("verified@example.test")).thenReturn(Optional.of(admin));
 
         User staff = mock(User.class);
+        when(staff.getRole()).thenReturn("DEVELOPER");
         when(staff.isActive()).thenReturn(true);
         when(staff.getRole()).thenReturn("STAFF");
         when(users.findById(81L)).thenReturn(Optional.of(staff));
@@ -357,10 +424,12 @@ class GitHubIntegrationBffControllerTest {
         UserRepository users = mock(UserRepository.class);
         RoleRepository roles = mock(RoleRepository.class);
         User admin = mock(User.class);
+        when(admin.getRole()).thenReturn("DEVELOPER");
         when(admin.getId()).thenReturn(73L);
         when(admin.getRole()).thenReturn("ADMINISTRATOR");
         when(users.findByEmail("verified@example.test")).thenReturn(Optional.of(admin));
         User inactive = mock(User.class);
+        when(inactive.getRole()).thenReturn("DEVELOPER");
         when(inactive.isActive()).thenReturn(false);
         when(inactive.getRole()).thenReturn("STAFF");
         when(users.findById(81L)).thenReturn(Optional.of(inactive));
@@ -387,6 +456,7 @@ class GitHubIntegrationBffControllerTest {
                         e -> assertThat(e.getStatusCode().value()).isEqualTo(400));
 
         User manager = mock(User.class);
+        when(manager.getRole()).thenReturn("DEVELOPER");
         when(manager.getId()).thenReturn(74L);
         when(manager.getRole()).thenReturn("MANAGER");
         when(users.findByEmail("manager@example.test")).thenReturn(Optional.of(manager));
@@ -404,6 +474,7 @@ class GitHubIntegrationBffControllerTest {
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         UserRepository users = mock(UserRepository.class);
         User authenticatedUser = mock(User.class);
+        when(authenticatedUser.getRole()).thenReturn("DEVELOPER");
         when(authenticatedUser.getId()).thenReturn(73L);
         when(users.findByEmail("verified@example.test")).thenReturn(Optional.of(authenticatedUser));
         server.expect(requestTo("http://github.test:8082/api/github/connection"))
@@ -436,7 +507,99 @@ class GitHubIntegrationBffControllerTest {
         when(authentication.getPrincipal()).thenReturn(principal);
         return authentication;
     }
+
+    @Test
+    void commentRouteForwardsBodyAndOnlyBackendVerifiedStaffIdentity() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        UserRepository users = mock(UserRepository.class);
+        RoleRepository roles = mock(RoleRepository.class);
+        User staff = mock(User.class);
+        when(staff.getId()).thenReturn(81L);
+        when(staff.getRole()).thenReturn("STAFF");
+        when(users.findByEmail("staff@example.test")).thenReturn(Optional.of(staff));
+        Role role = new Role("STAFF", "Staff");
+        role.getPermissions().add(new Permission("DOCUMENT_REVIEW", "Review"));
+        when(roles.findWithPermissionsByName("STAFF")).thenReturn(Optional.of(role));
+        String path = "/api/document-workflows/11111111-1111-4111-8111-111111111111/comments";
+        String body = "{\"comment\":\"Clarify setup\",\"documentVersion\":2,"
+                + "\"section\":{\"startOffset\":0,\"endOffset\":5,\"quote\":\"Setup\"}}";
+        server.expect(requestTo("http://github.test:8082" + path))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("X-User-Id", "81"))
+                .andExpect(header("X-User-Authorities", "ROLE_STAFF,DOCUMENT_REVIEW"))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.content().string(body))
+                .andRespond(withSuccess("{\"id\":\"saved-comment\"}", MediaType.APPLICATION_JSON));
+        var controller = new GitHubIntegrationBffController(builder.build(), users, roles,
+                "http://github.test:8082", "internal-test-credential");
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
+        request.addHeader("Content-Type", "application/json");
+        request.addHeader("X-User-Id", "forged-owner");
+        request.addHeader("X-User-Authorities", "ROLE_MANAGER,DOCUMENT_APPROVE");
+        assertThat(controller.proxy(request, authenticatedEmail("staff@example.test"),
+                body.getBytes(java.nio.charset.StandardCharsets.UTF_8)).getStatusCode().value()).isEqualTo(200);
+        server.verify();
+    }
+
+    @Test
+    void refusesARouteTheRoleHasNoRowForWithoutCallingGitHubIntegration() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();   // no call is expected
+        UserRepository users = mock(UserRepository.class);
+        for (String[] denied : new String[][] {
+                {"STAFF", "GET", "/api/github/connection"},                          // GitHub connection is Developer only
+                {"MANAGER", "POST", "/api/repositories/11111111-1111-4111-8111-111111111111/documentation/generate"},
+                {"DEVELOPER", "POST", "/api/document-workflows/11111111-1111-4111-8111-111111111111/approve"},
+                {"STAFF", "POST", "/api/document-workflows/11111111-1111-4111-8111-111111111111/approve"},
+                {"DEVELOPER", "POST", "/api/document-workflows/11111111-1111-4111-8111-111111111111/comments"},
+                {"MANAGER", "POST", "/api/document-workflows/11111111-1111-4111-8111-111111111111/comments"},
+                {"MANAGER", "POST", "/api/documentation/templates"},
+                {"DEVELOPER", "GET", "/api/document-workflows/manager/queue"},
+                {"DEVELOPER", "POST", "/api/repositories/11111111-1111-4111-8111-111111111111/drift/analyze"},
+                {"DEVELOPER", "GET", "/api/documentation/no/such/route/here"}}) {
+            User actor = mock(User.class);
+            when(actor.getId()).thenReturn(73L);
+            when(actor.getRole()).thenReturn(denied[0]);
+            when(users.findByEmail(denied[0].toLowerCase() + "@example.test")).thenReturn(Optional.of(actor));
+            var controller = new GitHubIntegrationBffController(builder.build(), users,
+                    "http://github.test:8082", "internal-test-credential");
+            MockHttpServletRequest incoming = new MockHttpServletRequest(denied[1], denied[2]);
+
+            assertThatThrownBy(() -> controller.proxy(incoming, authenticatedEmail(denied[0].toLowerCase() + "@example.test"), null))
+                    .as(denied[0] + " " + denied[1] + " " + denied[2])
+                    .isInstanceOfSatisfying(org.springframework.web.server.ResponseStatusException.class,
+                            exception -> assertThat(exception.getStatusCode().value()).isEqualTo(403));
+        }
+        server.verify();
+    }
+
+    @Test
+    void forwardsARouteTheRoleHasARowFor() throws Exception {
+        for (String[] allowed : new String[][] {
+                {"STAFF", "GET", "http://github.test:8082/api/document-workflows/staff/queue"},
+                {"MANAGER", "GET", "http://github.test:8082/api/document-workflows/manager/queue"},
+                {"DEVELOPER", "GET", "http://github.test:8082/api/document-workflows/11111111-1111-4111-8111-111111111111/comments"},
+                {"STAFF", "GET", "http://github.test:8082/api/document-workflows/11111111-1111-4111-8111-111111111111/change-requests"},
+                {"TECHNICAL_LEAD", "GET", "http://github.test:8082/api/documentation/templates"},
+                {"ADMIN", "GET", "http://github.test:8082/api/github/repos/available"}}) {
+            RestClient.Builder builder = RestClient.builder();
+            MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+            UserRepository users = mock(UserRepository.class);
+            User actor = mock(User.class);
+            when(actor.getId()).thenReturn(73L);
+            when(actor.getRole()).thenReturn(allowed[0]);
+            when(users.findByEmail("who@example.test")).thenReturn(Optional.of(actor));
+            server.expect(requestTo(allowed[2])).andExpect(method(HttpMethod.GET))
+                    .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+            var controller = new GitHubIntegrationBffController(builder.build(), users,
+                    "http://github.test:8082", "internal-test-credential");
+            MockHttpServletRequest incoming = new MockHttpServletRequest(allowed[1],
+                    allowed[2].substring("http://github.test:8082".length()));
+
+            var response = controller.proxy(incoming, authenticatedEmail("who@example.test"), null);
+
+            assertThat(response.getStatusCode().value()).as(allowed[0] + " " + allowed[2]).isEqualTo(200);
+            server.verify();
+        }
+    }
 }
-
-
-

@@ -50,6 +50,3 @@ public class UserRegistrationService {
         return userRepository.save(user);
     }
 }
-
-
-

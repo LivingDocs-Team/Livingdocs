@@ -1121,11 +1121,21 @@ function NotificationPoliciesPanel() {
   );
 }
 
-export default function AdminDashboard({ userId }) {
-  const [tab, setTab] = useState('users');
+// Each Administrator screen of the role-based shell opens the dashboard on its own section; the tabs
+// stay available to move between the sections that belong to the same page.
+const TAB_BY_SCREEN = {
+  'user-management': 'users',
+  'workspace-administration': 'workspaces',
+  'system-configuration': 'config',
+  monitoring: 'health',
+  'notification-policies': 'notifications',
+};
+
+function AdministrationTabs({ userId, initialTab }) {
+  const [tab, setTab] = useState(initialTab);
 
   return (
-    <main className="admin-dashboard">
+    <div className="admin-dashboard">
       <h1>Administration</h1>
       <p className="admin-subtitle">Manage users, workspaces, system settings and monitoring.</p>
       <div className="admin-tabs" role="tablist" aria-label="Administration sections">
@@ -1148,6 +1158,12 @@ export default function AdminDashboard({ userId }) {
         {tab === 'audit' && <AuditPanel />}
         {tab === 'notifications' && <NotificationPoliciesPanel />}
       </div>
-    </main>
+    </div>
   );
+}
+
+export default function AdminDashboard({ userId, node }) {
+  // The shell keeps this component mounted while the Administrator moves between admin screens, so the
+  // screen key resets the selected tab.
+  return <AdministrationTabs key={node?.key} userId={userId} initialTab={TAB_BY_SCREEN[node?.key] || 'users'} />;
 }

@@ -52,6 +52,3 @@ export function githubApi(path, options) {
 export function githubApiText(path, options) {
   return request(path, { ...options, text: true });
 }
-
-
-

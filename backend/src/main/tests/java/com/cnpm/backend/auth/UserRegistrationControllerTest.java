@@ -115,5 +115,3 @@ class UserRegistrationControllerTest {
                 .register(any(RegisterRequest.class));
     }
 }
-
-

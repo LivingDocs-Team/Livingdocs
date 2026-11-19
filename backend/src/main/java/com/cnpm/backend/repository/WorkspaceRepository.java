@@ -30,6 +30,3 @@ public interface WorkspaceRepository extends JpaRepository<Workspace, String> {
             """)
     List<Workspace> findAllAccessibleByUserId(@org.springframework.data.repository.query.Param("userId") Long userId);
 }
-
-
-

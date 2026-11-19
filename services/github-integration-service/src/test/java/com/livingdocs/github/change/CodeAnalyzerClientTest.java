@@ -28,6 +28,3 @@ class CodeAnalyzerClientTest {
                 new CodeEntity("ENDPOINT", "GET /items", 16, 17));
     }
 }
-
-
-

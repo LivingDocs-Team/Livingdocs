@@ -39,6 +39,3 @@ public class Role {
     public void setDescription(String description) { this.description = description; }
     public Set<Permission> getPermissions() { return permissions; }
 }
-
-
-

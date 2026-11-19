@@ -62,6 +62,3 @@ public class AccountStatusFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 }
-
-
-

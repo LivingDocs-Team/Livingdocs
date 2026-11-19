@@ -12,6 +12,3 @@ public record ChangedEntity(String kind, String name, String change, int startLi
     public static final String MODIFIED = "MODIFIED";
     public static final String REMOVED = "REMOVED";
 }
-
-
-

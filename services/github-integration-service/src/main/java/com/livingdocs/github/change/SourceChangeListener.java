@@ -46,6 +46,3 @@ public class SourceChangeListener {
         executor.shutdown();
     }
 }
-
-
-

@@ -104,6 +104,3 @@ public class RepositoryController {
 
     public record WorkspaceIdentityResponse(String workspaceId) { }
 }
-
-
-

@@ -15,6 +15,3 @@ public record GitHubTokenResponse(
         @JsonProperty("error") String error,
         @JsonProperty("error_description") String errorDescription) {
 }
-
-
-

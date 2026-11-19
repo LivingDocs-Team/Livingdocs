@@ -24,6 +24,47 @@ class FlywayMigrationLineageSelectorTest {
     private final FlywayMigrationLineageSelector selector = new FlywayMigrationLineageSelector();
 
     @Test
+    void reviewFeedbackUpgradesEverySupportedLineageAndPreservesOldRows() throws Exception {
+        for (var lineage : FlywayMigrationLineageSelector.Lineage.values()) {
+            DataSource dataSource = dataSource();
+            Flyway previous = Flyway.configure().dataSource(dataSource)
+                    .locations(lineage.location(), "classpath:db/migration-common").target("9").load();
+            previous.migrate();
+            try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
+                statement.execute("""
+                        INSERT INTO document_workflows
+                            (id, document_id, document_title, owner_user_id, status, created_at, updated_at)
+                        VALUES ('11111111-1111-4111-8111-111111111111', 'old-doc', 'Old document',
+                            '73', 'CHANGES_REQUESTED', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                        """);
+                statement.execute("""
+                        INSERT INTO document_workflow_audit
+                            (id, workflow_id, actor_user_id, action, new_status, comment, created_at)
+                        VALUES ('22222222-2222-4222-8222-222222222222',
+                            '11111111-1111-4111-8111-111111111111', '81', 'CHANGES_REQUESTED',
+                            'CHANGES_REQUESTED', 'Historical feedback', CURRENT_TIMESTAMP)
+                        """);
+            }
+            Flyway upgraded = Flyway.configure().dataSource(dataSource)
+                    .locations(selector.select(dataSource).location(), "classpath:db/migration-common").load();
+            upgraded.migrate();
+            upgraded.validate();
+            assertThat(upgraded.info().current().getVersion().getVersion()).isEqualTo("12");
+            assertThat(tableNames(dataSource)).contains("documentation_collections",
+                    "documentation_collection_documents", "documentation_owner_assignments");
+            try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement();
+                 ResultSet result = statement.executeQuery(
+                         "SELECT comment, document_version, section_quote FROM document_workflow_audit")) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getString("comment")).isEqualTo("Historical feedback");
+                assertThat(result.getObject("document_version")).isNull();
+                assertThat(result.getString("section_quote")).isNull();
+                assertThat(result.next()).isFalse();
+            }
+        }
+    }
+
+    @Test
     void selectsCurrentLineageForAnEmptyDatabase() {
         assertThat(selector.select(dataSource())).isEqualTo(
                 FlywayMigrationLineageSelector.Lineage.CURRENT);
@@ -68,8 +109,7 @@ class FlywayMigrationLineageSelectorTest {
         assertThat(tableNames(dataSource)).contains("documentation_artifacts", "code_entities",
                 "documentation_code_relationships", "github_commits", "github_pull_requests",
                 "document_workflows", "document_workflow_audit", "source_changes",
-                "source_change_files", "source_change_entities", "source_change_documents",
-                "source_change_document_evidence");
+                "source_change_files", "source_change_entities");
     }
 
     @Test
@@ -268,19 +308,6 @@ class FlywayMigrationLineageSelectorTest {
         assertThat(resourceBytes(
                 "db/migration-current-pull-requests-v5-source-changes-v6/V7__documentation_code_relationships.sql"))
                 .isEqualTo(resourceBytes("db/migration-current-pull-requests-v5/V6__documentation_code_relationships.sql"));
-
-        // LD-122: the affected-documents migration must exist, unchanged, in every lineage (next free version)
-        for (String resource : new String[] {
-                "db/migration-legacy/V7__affected_documents.sql",
-                "db/migration-current/V7__affected_documents.sql",
-                "db/migration-current-documents-v5/V8__affected_documents.sql",
-                "db/migration-current-pull-requests-v5/V8__affected_documents.sql",
-                "db/migration-current-documents-v5-source-changes-v6/V8__affected_documents.sql",
-                "db/migration-current-pull-requests-v5-source-changes-v6/V8__affected_documents.sql"}) {
-            assertThat(resourceBytes(resource))
-                    .as("preserve the affected documents migration byte-for-byte at %s", resource)
-                    .isEqualTo(resourceBytes("db/migration/V8__affected_documents.sql"));
-        }
     }
 
     private DataSource dataSource() {

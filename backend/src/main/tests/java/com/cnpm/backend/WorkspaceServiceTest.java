@@ -174,6 +174,3 @@ class WorkspaceServiceTest {
         return user;
     }
 }
-
-
-
