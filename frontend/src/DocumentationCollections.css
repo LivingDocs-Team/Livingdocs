@@ -1,0 +1,53 @@
+.collections-page .collection-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.collections-page .collection-field select {
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+  max-width: 100%;
+}
+
+.collection-panel {
+  margin-top: 1rem;
+}
+
+.collection-toolbar {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.collection-list {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+.collection-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.collection-list button[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+
+.collection-documents {
+  padding: 0;
+  list-style: none;
+}
+
+.collection-documents > li {
+  border-top: 1px solid var(--line);
+  padding: 0.75rem 0;
+  overflow-wrap: anywhere;
+}

@@ -4,8 +4,10 @@ import { githubApi, githubApiText } from './githubApi';
 import { TemplateManager, TemplatePicker } from './DocumentationTemplates';
 import { useTemplates } from './templateApi';
 import DocumentationSuggestionReview from './DocumentationSuggestionReview';
+import DocumentationRevision from './DocumentationRevision';
 import StaffReviewQueue from './StaffReviewQueue';
 import ManagerApprovalQueue from './ManagerApprovalQueue';
+import Can from './rbac/Can';
 
 
 function escapeHtml(value) {
@@ -165,7 +167,7 @@ function submitErrorMessage(error, step) {
   return error?.message || `Could not ${step}. Please try again.`;
 }
 
-export default function DocumentationManagement({ userId, userRole }) {
+export default function DocumentationManagement({ userId }) {
 
   const workspaceId = userId ? `ws-${userId}` : '';
 
@@ -355,6 +357,7 @@ export default function DocumentationManagement({ userId, userRole }) {
   const [history, setHistory] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [historyError, setHistoryError] = useState('');
+  const [revisionNotice, setRevisionNotice] = useState('');
 
   useEffect(() => {
     if (!userId) {
@@ -456,7 +459,7 @@ export default function DocumentationManagement({ userId, userRole }) {
       });
 
     return () => { cancelled = true; };
-  }, [userId, selectedWorkflowId]);
+  }, [userId, selectedWorkflowId, workflowsRefresh]);
 
   const selectedWorkflow = workflowPage.content.find(
     (workflow) => String(workflow.id) === selectedWorkflowId
@@ -996,14 +999,16 @@ export default function DocumentationManagement({ userId, userRole }) {
 
           <div className="documentation-template-heading">
             <label id="documentation-template-label">Documentation template</label>
-            <button
-              type="button"
-              className="documentation-secondary-button"
-              aria-expanded={isManagingTemplates}
-              onClick={() => setIsManagingTemplates((open) => !open)}
-            >
-              {isManagingTemplates ? 'Close template manager' : 'Manage templates'}
-            </button>
+            <Can screen="templates" action="U">
+              <button
+                type="button"
+                className="documentation-secondary-button"
+                aria-expanded={isManagingTemplates}
+                onClick={() => setIsManagingTemplates((open) => !open)}
+              >
+                {isManagingTemplates ? 'Close template manager' : 'Manage templates'}
+              </button>
+            </Can>
           </div>
           <TemplatePicker
             templates={templateList.templates}
@@ -1015,17 +1020,19 @@ export default function DocumentationManagement({ userId, userRole }) {
           />
 
           <div className="documentation-actions">
-            <button
-              type="submit"
-              disabled={
-                status === 'generating'
-                || isLoadingRepositories
-                || repositories.length === 0
-                || !templateList.templates.some((item) => item.id === template)
-              }
-            >
-              {status === 'generating' ? 'Generating…' : 'Generate documentation'}
-            </button>
+            <Can screen="documentation" action="C">
+              <button
+                type="submit"
+                disabled={
+                  status === 'generating'
+                  || isLoadingRepositories
+                  || repositories.length === 0
+                  || !templateList.templates.some((item) => item.id === template)
+                }
+              >
+                {status === 'generating' ? 'Generating…' : 'Generate documentation'}
+              </button>
+            </Can>
 
             <button
               type="button"
@@ -1193,6 +1200,17 @@ export default function DocumentationManagement({ userId, userRole }) {
 
         </section>
 
+        {revisionNotice && <p role="status">{revisionNotice}</p>}
+        {selectedWorkflow?.status === 'CHANGES_REQUESTED'
+          && String(selectedWorkflow.ownerUserId) === String(userId) && (
+          <DocumentationRevision key={`${userId}:${selectedWorkflowId}`}
+            userId={userId} workflowId={selectedWorkflowId}
+            onSubmitted={(message) => {
+              setRevisionNotice(message);
+              setWorkflowsRefresh((value) => value + 1);
+            }} />
+        )}
+
         <DocumentationSuggestionReview
           workflows={workflowPage.content}
           selectedWorkflowId={selectedWorkflowId}
@@ -1204,9 +1222,12 @@ export default function DocumentationManagement({ userId, userRole }) {
           workflowsError={workflowsError}
         />
 
-        <StaffReviewQueue userId={userId} />
+        {/* Working the Staff queue needs matrix row #10 U (Staff); a Developer only reads review feedback (R). */}
+        <Can screen="staffReview" action="U">
+          <StaffReviewQueue userId={userId} />
+        </Can>
 
-        <ManagerApprovalQueue userId={userId} userRole={userRole} />
+        <ManagerApprovalQueue userId={userId} />
 
         {isManagingTemplates && (
           <TemplateManager
@@ -1257,13 +1278,15 @@ export default function DocumentationManagement({ userId, userRole }) {
                 </p>
               )}
               <div className="documentation-actions">
-                <button
-                  type="button"
-                  onClick={handleSubmitForReview}
-                  disabled={!userId || isSubmitting || isSubmitted || markdown !== originalDocument}
-                >
-                  {isSubmitting ? 'Submitting…' : isSubmitted ? 'Submitted for review' : 'Submit for review'}
-                </button>
+                <Can screen="workflowSubmission" action="C">
+                  <button
+                    type="button"
+                    onClick={handleSubmitForReview}
+                    disabled={!userId || isSubmitting || isSubmitted || markdown !== originalDocument}
+                  >
+                    {isSubmitting ? 'Submitting…' : isSubmitted ? 'Submitted for review' : 'Submit for review'}
+                  </button>
+                </Can>
               </div>
               {submitError && <p className="documentation-error" role="alert">{submitError}</p>}
               {submitNotice && <p className="documentation-notice" role="status">{submitNotice}</p>}
@@ -1443,13 +1466,15 @@ export default function DocumentationManagement({ userId, userRole }) {
       Restore original
     </button>
 
-    <button
-      type="button"
-      className="documentation-secondary-button"
-      onClick={handleExport}
-    >
-      Export Markdown
-    </button>
+    <Can screen="documentation" action="E">
+      <button
+        type="button"
+        className="documentation-secondary-button"
+        onClick={handleExport}
+      >
+        Export Markdown
+      </button>
+    </Can>
   </div>
 
   <p className="documentation-hint">
@@ -1561,19 +1586,21 @@ export default function DocumentationManagement({ userId, userRole }) {
 
                         <p>{selectedVersion.content.length} characters</p>
 
-                        <button
+                        <Can screen="documentRollback" action="U">
+                          <button
 
-                          type="button"
+                            type="button"
 
-                          className="documentation-secondary-button"
+                            className="documentation-secondary-button"
 
-                          onClick={handleRollback}
+                            onClick={handleRollback}
 
-                        >
+                          >
 
-                          Restore this version
+                            Restore this version
 
-                        </button>
+                          </button>
+                        </Can>
 
                       </div>
 
