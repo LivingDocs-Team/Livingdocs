@@ -79,6 +79,7 @@
       TEMPLATES_FILE: /app/data/templates.json
       DOCUMENTS_FILE: /app/data/documents.json
       INTERNAL_API_SECRET: ${GITHUB_INTEGRATION_INTERNAL_SECRET:?GITHUB_INTEGRATION_INTERNAL_SECRET must be set in .env}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - ai-templates:/app/data
     ports:
