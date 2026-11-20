@@ -126,6 +126,82 @@ class DocumentWorkflowAuditRepositoryTest {
     }
 
     @Test
+    void fullReviewRevisionAndApprovalPreserveFeedbackInDatabase() {
+        DocumentationGenerationService documents = org.mockito.Mockito.mock(DocumentationGenerationService.class);
+        var document = new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode()
+                .put("owner_user_id", "73").put("title", "Review integration")
+                .put("current_version", 1).put("pending_version", 1).put("versions_total", 1);
+        org.mockito.Mockito.when(documents.getDocument(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.eq("review-integration"))).thenReturn(document);
+        org.mockito.Mockito.when(documents.getDocumentContent("81", "review-integration", 1))
+                .thenReturn("# Setup\nUse token.");
+        org.mockito.Mockito.when(documents.editOwnedDocument("73", "review-integration", 1,
+                "# Setup\nUse a GitHub access token.", "Clarified token"))
+                .thenAnswer(invocation -> document.put("pending_version", 2).put("versions_total", 2));
+        DocumentWorkflowService service = new DocumentWorkflowService(workflows, audit, documents);
+        java.util.Set<String> owner = java.util.Set.of("DOCUMENT_CREATE", "DOCUMENT_SUBMIT",
+                "DOCUMENT_UPDATE", "DOCUMENT_VIEW");
+        java.util.Set<String> staff = java.util.Set.of("ROLE_STAFF", "DOCUMENT_CLAIM", "DOCUMENT_REVIEW");
+        UUID id = service.create("73", owner, "review-integration").id();
+        service.submit("73", owner, id, 1);
+        service.claim("81", staff, id);
+        var section = new com.livingdocs.github.dto.WorkflowDtos.SectionFeedback(0, 7, "# Setup");
+        var comment = service.addComment("81", staff, id,
+                new com.livingdocs.github.dto.WorkflowDtos.ReviewCommentRequest("Which token?", 1, section));
+        service.staffReview("81", staff, id, new com.livingdocs.github.dto.WorkflowDtos.StaffReviewRequest(
+                StaffReviewResult.CHANGES_REQUESTED, "Explain authentication"));
+        entityManager.flush();
+        entityManager.clear();
+        assertThat(service.changeRequests("73", owner, id)).singleElement().satisfies(request -> {
+            assertThat(request.documentVersion()).isEqualTo(1);
+            assertThat(request.relatedComments()).singleElement().satisfies(related -> {
+                assertThat(related.id()).isEqualTo(comment.id());
+                assertThat(related.section()).isEqualTo(section);
+            });
+        });
+        service.editAfterChanges("73", owner, id,
+                new com.livingdocs.github.dto.WorkflowDtos.EditDocumentRequest(
+                        "# Setup\nUse a GitHub access token.", "Clarified token", 1));
+        var submitted = service.submit("73", owner, id, 2);
+        assertThat(submitted.id()).isEqualTo(id);
+        assertThat(submitted.submittedDocumentVersion()).isEqualTo(2);
+        service.claim("81", staff, id);
+        service.staffReview("81", staff, id, new com.livingdocs.github.dto.WorkflowDtos.StaffReviewRequest(
+                StaffReviewResult.PASSED, "Token is documented"));
+        service.decide("92", java.util.Set.of("ROLE_MANAGER", "DOCUMENT_APPROVE"), id,
+                ManagerDecision.APPROVED, "Approved");
+        entityManager.flush();
+        entityManager.clear();
+        assertThat(workflows.findById(id).orElseThrow().getStatus()).isEqualTo(DocumentWorkflowStatus.APPROVED);
+        assertThat(service.comments("73", owner, id)).singleElement()
+                .satisfies(saved -> assertThat(saved.section()).isEqualTo(section));
+        assertThat(service.history("73", owner, id)).extracting(event -> event.action())
+                .containsSubsequence("REVIEW_COMMENT", "CHANGES_REQUESTED", "DOCUMENT_EDITED",
+                        "SUBMITTED", "PASSED", "APPROVED");
+        assertThat(service.changeRequests("73", owner, id)).singleElement()
+                .satisfies(request -> assertThat(request.documentVersion()).isEqualTo(1));
+        org.mockito.Mockito.verify(documents).resolveDocumentVersion("92", "73", "review-integration",
+                2, "APPROVED", "Approved");
+    }
+
+    @Test
+    void sectionFeedbackPersistsWithItsDocumentVersion() {
+        DocumentWorkflow workflow = workflows.saveAndFlush(
+                new DocumentWorkflow("section-doc", "Section document", "73"));
+        DocumentWorkflowAudit comment = new DocumentWorkflowAudit(workflow.getId(), "81",
+                "REVIEW_COMMENT", "STAFF_REVIEWING", "STAFF_REVIEWING", "Clarify this section");
+        comment.setDocumentVersion(2);
+        comment.setSectionFeedback(0, 5, "Setup");
+        UUID id = audit.saveAndFlush(comment).getId();
+        entityManager.clear();
+        DocumentWorkflowAudit loaded = audit.findById(id).orElseThrow();
+        assertThat(loaded.getDocumentVersion()).isEqualTo(2);
+        assertThat(loaded.getSectionStartOffset()).isZero();
+        assertThat(loaded.getSectionEndOffset()).isEqualTo(5);
+        assertThat(loaded.getSectionQuote()).isEqualTo("Setup");
+    }
+
+    @Test
     void v4PreservesAuditRowsCreatedByV3() throws Exception {
         String url = "jdbc:h2:mem:ld256_v4_" + UUID.randomUUID().toString().replace("-", "")
                 + ";MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1";
