@@ -65,7 +65,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * LD-121: phát hiện thay đổi mã nguồn (LD-116) với database H2, GitHub và Code Analyzer giả.
- * Mỗi test dùng user và workspace riêng vì database được dùng chung giữa các class test.
+ * Mỗi test dùng user và workspace riêng để tách kết quả trong cùng database.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
