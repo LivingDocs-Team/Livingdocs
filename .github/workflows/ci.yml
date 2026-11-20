@@ -56,15 +56,12 @@ jobs:
           test -s backend/pom.xml
           test -s .github/workflows/ci.yml
 
-      - name: Make Maven Wrapper executable
-        run: chmod +x backend/mvnw
-
       - name: Build and test backend
         env:
           DB_URL: "jdbc:postgresql://localhost:5432/cnpm"
           DB_USERNAME: "postgres"
           DB_PASSWORD: "postgres"
-        run: ./backend/mvnw --batch-mode --no-transfer-progress -f backend/pom.xml clean verify
+        run: mvn --batch-mode --no-transfer-progress -f backend/pom.xml clean verify
 
       - name: Report CI result
         if: success()
@@ -295,7 +292,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      TOKEN_ENCRYPTION_KEY: "ci-validation-placeholder-only"
+      TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
       GITHUB_INTEGRATION_INTERNAL_SECRET: "ci-validation-placeholder-only"
       # compose.yaml requires the sign-in OAuth App credentials (no default), like the two variables above
       SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID: "ci-validation-placeholder-only"
