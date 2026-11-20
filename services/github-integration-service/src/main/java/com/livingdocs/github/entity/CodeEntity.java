@@ -6,12 +6,19 @@ import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "code_entities")
+@Table(
+        name = "code_entities",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uq_code_entities_repository_key",
+                columnNames = {"repository_id", "stable_key"}
+        )
+)
 public class CodeEntity {
     @Id
     private UUID id;
@@ -50,10 +57,15 @@ public class CodeEntity {
     private Instant lastSeenAt;
 
     @PrePersist
-    void onCreate() { if (id == null) id = UUID.randomUUID(); if (lastSeenAt == null) lastSeenAt = Instant.now(); }
+    void onCreate() {
+        if (id == null) id = UUID.randomUUID();
+        if (lastSeenAt == null) lastSeenAt = Instant.now();
+    }
 
     @PreUpdate
-    void onUpdate() { lastSeenAt = Instant.now(); }
+    void onUpdate() {
+        lastSeenAt = Instant.now();
+    }
 
     public UUID getId() { return id; }
     public UUID getRepositoryId() { return repositoryId; }

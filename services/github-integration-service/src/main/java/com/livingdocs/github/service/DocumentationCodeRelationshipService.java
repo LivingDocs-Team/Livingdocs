@@ -19,11 +19,16 @@ import org.springframework.web.util.UriUtils;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class DocumentationCodeRelationshipService {
@@ -32,8 +37,10 @@ public class DocumentationCodeRelationshipService {
     private final CodeEntityRepository codeEntityRepository;
     private final DocumentationCodeRelationshipRepository relationshipRepository;
 
-    public DocumentationCodeRelationshipService(RepositorySyncService repositorySyncService,
-            DocumentationArtifactRepository documentationRepository, CodeEntityRepository codeEntityRepository,
+    public DocumentationCodeRelationshipService(
+            RepositorySyncService repositorySyncService,
+            DocumentationArtifactRepository documentationRepository,
+            CodeEntityRepository codeEntityRepository,
             DocumentationCodeRelationshipRepository relationshipRepository) {
         this.repositorySyncService = repositorySyncService;
         this.documentationRepository = documentationRepository;
@@ -54,38 +61,57 @@ public class DocumentationCodeRelationshipService {
         documentationRepository.save(artifact);
 
         Set<String> presentPaths = new LinkedHashSet<>();
-        for (RepositorySnapshot.SourceFile file : snapshot.files()) presentPaths.add(file.path());
+        for (RepositorySnapshot.SourceFile file : snapshot.files()) {
+            presentPaths.add(file.path());
+        }
         if (snapshot.stats() != null && !snapshot.stats().treeTruncated() && !snapshot.stats().fileLimitReached()) {
-            codeEntityRepository.findAll().stream()
-                    .filter(entity -> entity.getRepositoryId().equals(repositoryId) && !presentPaths.contains(entity.getPath()))
+            codeEntityRepository.findByRepositoryIdAndActiveTrue(repositoryId).stream()
+                    .filter(entity -> !presentPaths.contains(entity.getPath()))
                     .forEach(entity -> entity.setActive(false));
         }
 
         JsonNode files = analysis.path("files");
         if (files.isArray()) {
+            Set<String> seenKeys = new HashSet<>();
             for (JsonNode file : files) {
                 String path = text(file, "path");
-                if (path == null) continue;
+                if (path == null || path.isBlank()) continue;
                 String analysisStatus = text(file, "status");
                 if (analysisStatus != null && !analysisStatus.equals("ok") && !analysisStatus.equals("empty")) continue;
-                codeEntityRepository.findAll().stream()
-                        .filter(entity -> entity.getRepositoryId().equals(repositoryId) && entity.getPath().equals(path))
+
+                codeEntityRepository.findByRepositoryIdAndPathAndActiveTrue(repositoryId, path)
                         .forEach(entity -> entity.setActive(false));
+
                 for (JsonNode item : file.path("classes")) {
-                    upsert(repo, snapshot, path, "class", text(item, "name"), item.path("lineno").isInt() ? item.path("lineno").intValue() : null,
-                            item.path("end_lineno").isInt() ? item.path("end_lineno").intValue() : null);
-                    String parent = text(item, "name");
+                    String className = text(item, "name");
+                    upsert(repo, snapshot, path, "class", className,
+                            firstInteger(item, "lineno", "line_start"),
+                            firstInteger(item, "end_lineno", "line_end"),
+                            seenKeys);
                     for (JsonNode method : item.path("methods")) {
-                        upsert(repo, snapshot, path, "method", qualify(parent, text(method, "name")),
-                                integer(method, "lineno"), integer(method, "end_lineno"));
+                        upsert(repo, snapshot, path, "method", qualify(className, text(method, "name")),
+                                firstInteger(method, "lineno", "line_start"),
+                                firstInteger(method, "end_lineno", "line_end"),
+                                seenKeys);
                     }
                 }
                 for (JsonNode item : file.path("functions")) {
-                    upsert(repo, snapshot, path, "function", text(item, "name"), integer(item, "lineno"), integer(item, "end_lineno"));
+                    upsert(repo, snapshot, path, "function", text(item, "name"),
+                            firstInteger(item, "lineno", "line_start"),
+                            firstInteger(item, "end_lineno", "line_end"),
+                            seenKeys);
                 }
                 for (JsonNode item : file.path("endpoints")) {
-                    String name = text(item, "http_method") + " " + text(item, "path");
-                    upsert(repo, snapshot, path, "endpoint", name, integer(item, "lineno"), integer(item, "end_lineno"));
+                    String httpMethod = text(item, "http_method");
+                    String routePath = text(item, "path");
+                    if (httpMethod == null || httpMethod.isBlank() || routePath == null || routePath.isBlank()) {
+                        continue;
+                    }
+                    String name = httpMethod.trim() + " " + routePath.trim();
+                    upsert(repo, snapshot, path, "endpoint", name,
+                            firstInteger(item, "lineno", "line_start"),
+                            firstInteger(item, "end_lineno", "line_end"),
+                            seenKeys);
                 }
             }
         }
@@ -124,28 +150,43 @@ public class DocumentationCodeRelationshipService {
         DocumentationArtifact document = requireDocument(userId, documentId);
         Set<UUID> uniqueIds = new LinkedHashSet<>(ids);
         List<CodeEntity> targets = uniqueIds.isEmpty() ? List.of()
-                : codeEntityRepository.findByIdInAndRepositoryIdAndActiveTrue(List.copyOf(uniqueIds), document.getRepositoryId());
+                : codeEntityRepository.findByIdInAndRepositoryIdAndActiveTrue(
+                        List.copyOf(uniqueIds), document.getRepositoryId());
         if (targets.size() != uniqueIds.size()) {
-            throw ApiException.badRequest("One or more code entities are missing, inactive, or belong to another repository.");
+            throw ApiException.badRequest(
+                    "One or more code entities are missing, inactive, or belong to another repository.");
         }
         relationshipRepository.deleteByDocumentationId(documentId);
         relationshipRepository.flush();
-        for (CodeEntity target : targets) {
+        Map<UUID, CodeEntity> targetById = targets.stream()
+                .collect(Collectors.toMap(CodeEntity::getId, Function.identity()));
+        for (UUID targetId : uniqueIds) {
             DocumentationCodeRelationship relation = new DocumentationCodeRelationship();
             relation.setDocumentationId(documentId);
-            relation.setCodeEntityId(target.getId());
+            relation.setCodeEntityId(targetId);
             relationshipRepository.save(relation);
         }
-        return targets.stream().map(CodeEntityResponse::from).toList();
+        return uniqueIds.stream()
+                .map(targetById::get)
+                .map(CodeEntityResponse::from)
+                .toList();
     }
 
     @Transactional(readOnly = true)
     public List<CodeEntityResponse> relatedCode(String userId, UUID documentId) {
         DocumentationArtifact document = requireDocument(userId, documentId);
-        return relationshipRepository.findByDocumentationId(documentId).stream()
-                .map(link -> codeEntityRepository.findById(link.getCodeEntityId()).orElse(null))
-                .filter(entity -> entity != null && entity.isActive() && entity.getRepositoryId().equals(document.getRepositoryId()))
-                .map(CodeEntityResponse::from).toList();
+        List<DocumentationCodeRelationship> links = relationshipRepository.findByDocumentationId(documentId);
+        if (links.isEmpty()) return List.of();
+
+        List<UUID> entityIds = links.stream().map(DocumentationCodeRelationship::getCodeEntityId).toList();
+        Map<UUID, CodeEntity> entitiesById = codeEntityRepository.findAllById(entityIds).stream()
+                .filter(entity -> entity.isActive() && entity.getRepositoryId().equals(document.getRepositoryId()))
+                .collect(Collectors.toMap(CodeEntity::getId, Function.identity()));
+        return entityIds.stream()
+                .map(entitiesById::get)
+                .filter(Objects::nonNull)
+                .map(CodeEntityResponse::from)
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -154,10 +195,19 @@ public class DocumentationCodeRelationshipService {
                 .filter(CodeEntity::isActive)
                 .orElseThrow(() -> ApiException.notFound("Code entity not found."));
         repositorySyncService.requireOwnedRepository(userId, entity.getRepositoryId());
-        return relationshipRepository.findByCodeEntityId(entityId).stream()
-                .map(link -> documentationRepository.findByIdAndOwnerUserId(link.getDocumentationId(), userId).orElse(null))
-                .filter(document -> document != null && document.getRepositoryId().equals(entity.getRepositoryId()))
-                .map(DocumentationArtifactResponse::from).toList();
+        List<DocumentationCodeRelationship> links = relationshipRepository.findByCodeEntityId(entityId);
+        if (links.isEmpty()) return List.of();
+
+        List<UUID> documentIds = links.stream().map(DocumentationCodeRelationship::getDocumentationId).toList();
+        Map<UUID, DocumentationArtifact> docsById = documentationRepository
+                .findByIdInAndOwnerUserId(documentIds, userId).stream()
+                .filter(document -> document.getRepositoryId().equals(entity.getRepositoryId()))
+                .collect(Collectors.toMap(DocumentationArtifact::getId, Function.identity()));
+        return documentIds.stream()
+                .map(docsById::get)
+                .filter(Objects::nonNull)
+                .map(DocumentationArtifactResponse::from)
+                .toList();
     }
 
     private DocumentationArtifact requireDocument(String userId, UUID documentId) {
@@ -168,10 +218,14 @@ public class DocumentationCodeRelationshipService {
     }
 
     private void upsert(ConnectedRepository repository, RepositorySnapshot snapshot, String path,
-                        String type, String name, Integer lineStart, Integer lineEnd) {
+                        String type, String name, Integer lineStart, Integer lineEnd,
+                        Set<String> seenKeys) {
         if (name == null || name.isBlank()) return;
         String naturalKey = path + "\u0000" + type + "\u0000" + name;
         String key = sha256(naturalKey);
+        if (!seenKeys.add(key)) {
+            return;
+        }
         CodeEntity entity = codeEntityRepository.findByRepositoryIdAndStableKey(repository.getId(), key)
                 .orElseGet(CodeEntity::new);
         entity.setRepositoryId(repository.getId());
@@ -184,22 +238,28 @@ public class DocumentationCodeRelationshipService {
         entity.setSourceCommit(snapshot.headCommit() == null ? null : snapshot.headCommit().sha());
         entity.setSourceUrl(sourceUrl(repository.getHtmlUrl(), snapshot, path, lineStart, lineEnd));
         entity.setActive(true);
-        codeEntityRepository.save(entity);
+        codeEntityRepository.saveAndFlush(entity);
     }
 
     private String sourceUrl(String base, RepositorySnapshot snapshot, String path, Integer start, Integer end) {
-        String repoUrl = (base == null || base.isBlank())
-                ? "https://github.com/" + snapshot.repository().fullName() : base;
-        String ref = snapshot.headCommit() != null && snapshot.headCommit().sha() != null
-                ? snapshot.headCommit().sha() : snapshot.branch();
-        String url = repoUrl.replaceAll("/$", "") + "/blob/" + ref + "/" + UriUtils.encodePath(path, StandardCharsets.UTF_8);
-        if (start != null && start > 0) url += "#L" + start + (end != null && end >= start ? "-L" + end : "");
-        return url;
+    String repoUrl = (base == null || base.isBlank())
+            ? "https://github.com/" + snapshot.repository().fullName()
+            : base;
+    String ref = snapshot.headCommit() != null && snapshot.headCommit().sha() != null
+            ? snapshot.headCommit().sha()
+            : snapshot.branch();
+    String url = repoUrl.replaceAll("/$", "") + "/blob/" + ref + "/"
+            + UriUtils.encodePath(path, StandardCharsets.UTF_8);
+    if (start != null && start > 0) {
+        url += "#L" + start + (end != null && end >= start ? "-L" + end : "");
     }
+    return url;
+}
 
     private String sha256(String value) {
         try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
+            return HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 is unavailable", e);
         }
@@ -210,8 +270,11 @@ public class DocumentationCodeRelationshipService {
         return value.isTextual() ? value.asText() : null;
     }
 
-    private Integer integer(JsonNode node, String field) {
-        return node.path(field).isInt() ? node.path(field).intValue() : null;
+    private Integer firstInteger(JsonNode node, String primaryField, String fallbackField) {
+        if (node.path(primaryField).isInt()) {
+            return node.path(primaryField).intValue();
+        }
+        return node.path(fallbackField).isInt() ? node.path(fallbackField).intValue() : null;
     }
 
     private String qualify(String parent, String name) {
