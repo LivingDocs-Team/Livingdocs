@@ -29,7 +29,7 @@ MENUS = {
     },
     "MANAGER": {
         "modules": ["Account Management", "Final Approval", "Approval Policies"],
-        "screens": ["Profile & Settings", "Approval Queue", "Approval History", "Approval Delegation",
+        "screens": ["Profile & Settings", "GitHub Connection", "Approval Queue", "Approval History", "Approval Delegation",
                     "Approval Policy", "Merge Policy"],
         "landing": "#/approval/queue",
     },

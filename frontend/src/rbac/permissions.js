@@ -19,7 +19,7 @@ const ROWS = [
   [1, 'authentication', 'Authentication', 'R', FULL, FULL, FULL, FULL, FULL],
   [2, 'profile', 'Own Profile & Notification Preferences', 'RU', FULL, FULL, FULL, FULL, FULL],
   [3, 'notifications', 'Notifications', 'R', 'R', '', '', '', ''],
-  [5, 'githubConnection', 'GitHub Connection', 'CRD', 'CRD', '', '', '', ''],
+  [5, 'githubConnection', 'GitHub Connection', 'CRD', 'CRD', '', 'CRD', '', ''],
   [6, 'repositories', 'Repository Management & Synchronization', 'CRUD', 'CRUD', '', '', '', 'CRUD'],
   [7, 'pullRequests', 'Pull Request & Commit data', 'R', 'R', '', '', 'R', ''],
   [8, 'documentation', 'Documentation Generation & Editing', 'CRUE', 'CRUE', 'RU', '', 'R', ''],
