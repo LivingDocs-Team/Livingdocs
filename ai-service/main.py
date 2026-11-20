@@ -27,13 +27,13 @@ from app.generator import get_generator
 from app.jobs import jobs, run_job
 from app.models import (SECTION_KINDS, SECTION_NAMES, FileRetrieval, GenerateRequest, IndexSummary,
                         Job, JobReport, RetrievalHit, RetrievalPreview,
-                        JobStatus, ReviewEvidenceResponse, Template, TemplateIn,
+                        JobStatus, Template, TemplateIn,
                         TemplateSections, TemplateVersion)
 from app.normalize import normalize
 from app.retrieval import build_index, retrieve
 from app.templates import TemplateNameTaken, templates
 from app.version_models import (Document, DocumentContentEdit, DocumentCreate, DocumentVersion,
-                                FileSection, HistoryEvent, InternalDocumentCreate, InternalVersionDecision, PreparedRevision, RevisionDraftCommit, RevisionDraftRequest,
+                                FileSection, HistoryEvent, InternalDocumentCreate, InternalVersionDecision, PreparedRevision, RevisionDraftCommit, RevisionDraftRequest, RevisionReviewEvidence,
                                 InternalRollbackRequest, VersionComparison,
                                 VersionSummary)
 from app.versions import VersionError, documents
@@ -317,16 +317,17 @@ def _generate_revision(doc_id: str, data: RevisionDraftRequest, user_id: str):
         tpl = templates.at_version(doc.template_id, doc.template_version)
         if tpl is None:
             raise VersionError(409, "The original documentation template is unavailable")
-        generator = get_generator()
-        request = GenerateRequest(
-            scope=doc.scope, target=doc.target, files=files, template_id=tpl.id,
-            template_version=tpl.version, output_language=doc.output_language,
-            source_snapshot=data.source_snapshot,
-        )
-        for file in files:
-            normalize(file)
-        index = build_index(request)
         replacements, reports = {}, []
+        if files:
+            generator = get_generator()
+            request = GenerateRequest(
+                scope=doc.scope, target=doc.target, files=data.files, template_id=tpl.id,
+                template_version=tpl.version, output_language=doc.output_language,
+                source_snapshot=data.source_snapshot,
+            )
+            for file in request.files:
+                normalize(file)
+            index = build_index(request)
         for file in files:
             if file.status.value != "ok":
                 raise VersionError(503, "The source file could not be analyzed")
@@ -362,7 +363,7 @@ def get_internal_document_content(doc_id: str, version: Optional[int] = Query(No
     return PlainTextResponse(v.content, media_type="text/markdown")
 @app.get(
     "/internal/documents/{doc_id}/review-evidence",
-    response_model=ReviewEvidenceResponse,
+    response_model=RevisionReviewEvidence,
     dependencies=[Depends(require_internal_service)],
 )
 def get_internal_document_review_evidence(
@@ -378,9 +379,10 @@ def get_internal_document_review_evidence(
             detail="Review evidence is not available for this document version",
         )
 
-    return ReviewEvidenceResponse(
+    return RevisionReviewEvidence(
         **v.review_report.model_dump(),
         source_snapshot=v.source_snapshot,
+        revision_files=v.revision_files,
     )
 
 

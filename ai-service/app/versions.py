@@ -24,7 +24,7 @@ from .generator import DocGenerator
 from .jobs import JobOutput
 from .models import JobReport, Scope, now
 from .renderer import render_overview
-from .version_models import (Document, DocumentVersion, FileSection, PreparedRevision, HistoryAction, HistoryEvent,
+from .version_models import (Document, DocumentVersion, FileSection, PreparedRevision, RevisionFileChange, HistoryAction, HistoryEvent,
                              RevisionDraftRequest, SectionAction, SectionChange, SkippedFile, SourceChangeRef, VersionOrigin,
                              VersionStatus, VersionSummary)
 
@@ -80,6 +80,7 @@ def inherit_evidence(version: DocumentVersion, source: Optional[DocumentVersion]
     for f in EVIDENCE_FIELDS:
         value = getattr(source, f)
         setattr(version, f, value.model_copy(deep=True) if value is not None else None)
+    version.revision_files = [item.model_copy(deep=True) for item in source.revision_files]
     version.evidence_from_version = source.evidence_from_version or source.number
 
 
@@ -332,6 +333,41 @@ class DocumentStore:
             raise VersionError(409, "The document changed or already has a pending version")
         return doc, base, None
 
+    @staticmethod
+    def _revision_operations(doc: Document, base: DocumentVersion, request: RevisionDraftRequest):
+        paths = {section.path for section in base.sections}
+        if not request.file_changes:
+            return [RevisionFileChange(path=file.path, action="updated")
+                    for file in request.files if file.path in paths]
+
+        files = {file.path for file in request.files}
+        targets, sources = set(), set()
+        operations = []
+        module = doc.target.replace(".", "/").rstrip("/") + "/"
+        for change in request.file_changes:
+            path, action, previous = change.path, change.action, change.previous_path
+            if (path in targets or (action == "renamed") != bool(previous)
+                    or (action == "removed") != (change.blob_sha is None)
+                    or (action != "removed" and path not in files)):
+                raise VersionError(409, "Invalid source evidence for the revision")
+            targets.add(path)
+            if action == "added":
+                if path not in paths and (doc.scope == Scope.repository
+                        or doc.scope == Scope.module and path.startswith(module)):
+                    operations.append(change)
+            elif action == "renamed":
+                if previous in paths:
+                    if path in paths or previous in sources:
+                        raise VersionError(409, "The rename overlaps another document section")
+                    operations.append(change)
+                    sources.add(previous)
+            elif path in paths:
+                operations.append(change)
+                sources.add(path)
+        if any(change.previous_path in targets for change in operations if change.previous_path):
+            raise VersionError(409, "The rename source also has a revision operation")
+        return operations
+
     def prepare_revision(self, doc_id: str, owner: str, request: RevisionDraftRequest, generate):
         with self._lock:
             doc, base, existing = self._revision_base(doc_id, owner, request)
@@ -339,10 +375,11 @@ class DocumentStore:
                 return PreparedRevision()
             if not base.sections_match_content:
                 return None
-            paths = {section.path for section in base.sections}
-            files = [file for file in request.files if file.path in paths]
-            if not files:
+            operations = self._revision_operations(doc, base, request)
+            if not operations:
                 return None
+            paths = {change.path for change in operations if change.action != "removed"}
+            files = [file for file in request.files if file.path in paths]
 
         replacements, report = generate(doc, files)
         return PreparedRevision(replacements=replacements, report=report)
@@ -363,25 +400,39 @@ class DocumentStore:
             replacements, report = prepared.replacements, prepared.report
             if report is None or not base.sections_match_content:
                 return None
-            paths = {section.path for section in base.sections}
-            expected = {file.path for file in request.files if file.path in paths}
+            operations = self._revision_operations(doc, base, request)
+            expected = {change.path for change in operations if change.action != "removed"}
             if replacements.keys() != expected or any(path != section.path for path, section in replacements.items()):
                 raise VersionError(409, "Prepared sections do not match the revision")
-            sections = [replacements.get(section.path, section) for section in base.sections]
-            content = assemble(doc, sections, base.skipped, report.template_name)
-            if content == base.content:
+            by_source = {change.previous_path or change.path: change for change in operations
+                         if change.action != "added"}
+            sections = []
+            for section in base.sections:
+                change = by_source.get(section.path)
+                if change is None:
+                    sections.append(section)
+                elif change.action != "removed":
+                    sections.append(replacements[change.path])
+            sections.extend(replacements[change.path] for change in operations if change.action == "added")
+            obsolete = set(by_source) | expected
+            skipped = [item for item in base.skipped if item.path not in obsolete]
+            content = assemble(doc, sections, skipped, report.template_name)
+            if content == base.content and all(change.action in ("updated", "dependent") for change in operations):
                 return None
             number = doc.versions_total + 1
             version = DocumentVersion(
                 number=number, status=VersionStatus.proposed, origin=VersionOrigin.source_change,
-                base_version=base.number, content=content, sections=sections, skipped=base.skipped,
+                base_version=base.number, content=content, sections=sections, skipped=skipped,
                 created_by="AI", source_snapshot=request.source_snapshot,
                 evidence_report=report, review_report=report,
                 source_changes=[SourceChangeRef(
                     id=request.source_change_id, trigger=request.trigger,
                     commit_sha=request.source_snapshot.commit_sha,
                     pull_request_number=request.pull_request_number)],
-                changes=[SectionChange(path=path, action=SectionAction.updated) for path in replacements],
+                revision_files=operations if request.file_changes else [],
+                changes=[SectionChange(path=change.path, previous_path=change.previous_path,
+                                       action=SectionAction.updated if change.action == "dependent"
+                                       else SectionAction(change.action)) for change in operations],
             )
             self._require_revision_lease(lease_expires_at)
             previous = doc.model_copy(deep=True)

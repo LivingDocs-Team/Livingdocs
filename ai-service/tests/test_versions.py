@@ -719,6 +719,95 @@ def test_revision_draft_is_grounded_idempotent_and_only_exact_version_can_publis
     assert store.version(doc.id).number == 2
     assert [event.actor for event in store.history(doc.id)][-2:] == ["AI", "manager"]
 
+def test_revision_operations_preserve_evidence_and_require_exact_generated_sections():
+    from app.models import SourceSnapshot
+    from app.version_models import FileSection, RevisionDraftRequest
+
+    store = DocumentStore()
+    snapshot = SourceSnapshot(repository_id="repo", repository_full_name="org/repo",
+                              branch="main", commit_sha="a" * 40)
+    doc = store.create_from_job(
+        "seed", JobOutput(
+            scope=Scope.repository, target="org/repo", template_id="default",
+            template_name="Standard", output_language="en",
+            sections=[(path, f"# {path}", "generated", 0.8)
+                      for path in ("old.py", "deleted.py", "consumer.py", "unchanged.py")],
+            source_snapshot=snapshot,
+        ), owner_user_id="owner",
+    )
+    store.resolve_workflow_version(doc.id, "owner", 1, "APPROVED", "manager")
+    blob = "c" * 40
+    request = RevisionDraftRequest(
+        source_change_id="change", trigger="COMMIT", base_version=1,
+        source_snapshot=snapshot.model_copy(update={"commit_sha": "b" * 40}),
+        files=[{"path": path} for path in ("new.py", "renamed.py", "consumer.py")],
+        file_changes=[
+            {"path": "new.py", "action": "added", "blob_sha": blob},
+            {"path": "deleted.py", "action": "removed"},
+            {"path": "renamed.py", "action": "renamed", "previous_path": "old.py", "blob_sha": blob},
+            {"path": "consumer.py", "action": "dependent", "blob_sha": blob},
+        ],
+    )
+
+    def generate(document, files):
+        assert {file.path for file in files} == {"new.py", "renamed.py", "consumer.py"}
+        return {file.path: FileSection(path=file.path, markdown=f"# New {file.path}", status="generated")
+                for file in files}, REVIEW_REPORT
+
+    prepared = store.prepare_revision(doc.id, "owner", request, generate)
+    invalid = prepared.model_copy(update={"replacements": {"new.py": prepared.replacements["new.py"]}})
+    with pytest.raises(VersionError, match="Prepared sections do not match"):
+        store.commit_revision(doc.id, "owner", request, invalid)
+    assert store.get(doc.id).pending_version is None
+
+    version = store.commit_revision(doc.id, "owner", request, prepared)
+    assert [section.path for section in version.sections] == [
+        "renamed.py", "consumer.py", "unchanged.py", "new.py",
+    ]
+    assert [(change.path, change.action.value, change.previous_path) for change in version.changes] == [
+        ("new.py", "added", None), ("deleted.py", "removed", None),
+        ("renamed.py", "renamed", "old.py"), ("consumer.py", "updated", None),
+    ]
+    assert version.revision_files[-1].action == "dependent"
+    assert version.revision_files[-1].blob_sha == blob
+    assert version.source_snapshot.commit_sha == "b" * 40
+    assert store.version(doc.id).number == 1
+
+
+def test_revision_delete_only_never_calls_generator(monkeypatch):
+    from datetime import timedelta
+    from app.models import SourceSnapshot, now
+
+    monkeypatch.setenv("INTERNAL_API_SECRET", "workflow-internal-secret")
+    store, doc = create_approved_owned_document()
+    source = SourceSnapshot(repository_id="repo", repository_full_name="org/repo",
+                            branch="main", commit_sha="a" * 40)
+    store.version(doc.id).source_snapshot = source
+    monkeypatch.setattr("main.documents", store)
+    monkeypatch.setattr("main.get_generator", lambda: pytest.fail("Delete-only draft called AI"))
+    headers = {"Authorization": "Bearer workflow-internal-secret", "X-User-Id": "73"}
+    url = f"/internal/documents/{doc.id}/revision-drafts"
+    body = {
+        "source_change_id": "delete", "trigger": "COMMIT", "base_version": 1,
+        "source_snapshot": source.model_dump(mode="json") | {"commit_sha": "b" * 40},
+        "files": [], "file_changes": [{"path": "a.py", "action": "removed"}],
+    }
+    response = client.post(f"{url}/prepare", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    assert store.version(doc.id).sections[0].path == "a.py"
+    body.update(prepared=response.json(), lease_expires_at=(now() + timedelta(minutes=15)).isoformat())
+    response = client.post(f"{url}/commit", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    assert response.json()["sections"] == []
+    assert response.json()["changes"] == [{"path": "a.py", "action": "removed",
+                                            "previous_path": None, "entities": []}]
+
+    evidence = client.get(f"/internal/documents/{doc.id}/review-evidence?version=2", headers=headers)
+    assert evidence.status_code == 200
+    assert evidence.json()["source_snapshot"]["commit_sha"] == "b" * 40
+    assert evidence.json()["revision_files"][0]["action"] == "removed"
+
+
 def test_concurrent_revision_drafts_persist_one_version_and_rollback_requires_review(tmp_path):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
