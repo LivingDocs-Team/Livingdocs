@@ -242,16 +242,19 @@ public class DocumentationCodeRelationshipService {
     }
 
     private String sourceUrl(String base, RepositorySnapshot snapshot, String path, Integer start, Integer end) {
-        String repoUrl = (base == null || base.isBlank())
-                ? "[https://github.com/](https://github.com/)" + snapshot.repository().fullName() : base;
-        String ref = snapshot.headCommit() != null && snapshot.headCommit().sha() != null
-                ? snapshot.headCommit().sha() : snapshot.branch();
-        String url = repoUrl.replaceAll("/$", "") + "/blob/" + ref + "/" + UriUtils.encodePath(path, StandardCharsets.UTF_8);
-        if (start != null && start > 0) {
-            url += "#L" + start + (end != null && end >= start ? "-L" + end : "");
-        }
-        return url;
+    String repoUrl = (base == null || base.isBlank())
+            ? "https://github.com/" + snapshot.repository().fullName()
+            : base;
+    String ref = snapshot.headCommit() != null && snapshot.headCommit().sha() != null
+            ? snapshot.headCommit().sha()
+            : snapshot.branch();
+    String url = repoUrl.replaceAll("/$", "") + "/blob/" + ref + "/"
+            + UriUtils.encodePath(path, StandardCharsets.UTF_8);
+    if (start != null && start > 0) {
+        url += "#L" + start + (end != null && end >= start ? "-L" + end : "");
     }
+    return url;
+}
 
     private String sha256(String value) {
         try {

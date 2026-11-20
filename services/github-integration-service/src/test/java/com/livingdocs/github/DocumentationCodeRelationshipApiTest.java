@@ -61,6 +61,7 @@ class DocumentationCodeRelationshipApiTest {
     private UUID repositoryId;
     private UUID documentId;
     private UUID entityId;
+    private ConnectedRepository repository; // <-- SỬA LỖI: Đưa lên làm biến instance
 
     @BeforeEach
     void setUp() throws Exception {
@@ -77,7 +78,7 @@ class DocumentationCodeRelationshipApiTest {
         connection.setStatus(ConnectionStatus.ACTIVE);
         connection = connectionRepository.save(connection);
 
-        ConnectedRepository repository = new ConnectedRepository();
+        repository = new ConnectedRepository(); // <-- SỬA LỖI: Gán vào biến instance, bỏ chữ ConnectedRepository
         repository.setWorkspaceId("ws-relationship-user");
         repository.setConnectionId(connection.getId());
         repository.setGithubRepoId(202L);
@@ -210,5 +211,63 @@ class DocumentationCodeRelationshipApiTest {
         mvc.perform(get("/api/documentation/{id}/code-entities", documentId).header("X-User-Id", USER))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(entityId.toString()));
+    }
+
+    @Test
+    void sourceUrl_fallsBackToPlainHttps_whenHtmlUrlIsNull() throws Exception {
+        repository.setHtmlUrl(null);
+        repositoryRepository.save(repository);
+
+        String analysis = """
+                {"files":[{"path":"src/App.java","status":"ok",
+                  "classes":[{"name":"App","lineno":2,"end_lineno":10,
+                    "methods":[{"name":"run","lineno":4,"end_lineno":7}]}],
+                  "functions":[],"endpoints":[]}]}
+                """;
+        RepositorySnapshot snapshot = new RepositorySnapshot(
+                new RepositorySnapshot.RepositoryInfo(202L, "acme/sample", "acme", "sample", null,
+                        false, false, "main", null, "java", 1L, Instant.now()), // htmlUrl trong snapshot cũng null
+                "main", new RepositorySnapshot.CommitInfo("abc123", "test", "A", null, Instant.now(), null),
+                Map.of(), List.of(new RepositorySnapshot.SourceFile("src/App.java", "blob1", 1,
+                        "java", "class App {}", null)), List.of(),
+                new RepositorySnapshot.SyncStats(1, 1, 1, 0, false, false), List.of(), Instant.now());
+        relationshipService.recordGeneration(USER, repositoryId, "job-null-url", objectMapper.readTree(analysis), snapshot);
+
+        var entities = codeEntityRepository.findByRepositoryIdAndActiveTrueOrderByPathAscLineStartAsc(repositoryId);
+        assertThat(entities).isNotEmpty();
+        String url = entities.get(0).getSourceUrl();
+
+        assertThat(url)
+                .as("Fallback URL phải là HTTPS thuần, không chứa Markdown")
+                .startsWith("https://github.com/acme/sample/blob/")
+                .doesNotContain("[https://github.com/]")
+                .endsWith("#L2-L10");
+    }
+
+    @Test
+    void sourceUrl_encodesPathAndIncludesLineFragment_whenHtmlUrlIsBlank() throws Exception {
+        repository.setHtmlUrl("");
+        repositoryRepository.save(repository);
+
+        String analysis = """
+                {"files":[{"path":"src/App Space.java","status":"ok",
+                  "classes":[{"name":"App","lineno":2,"end_lineno":10,"methods":[]}],
+                  "functions":[],"endpoints":[]}]}
+                """;
+        RepositorySnapshot snapshot = new RepositorySnapshot(
+                new RepositorySnapshot.RepositoryInfo(202L, "acme/sample", "acme", "sample", null,
+                        false, false, "main", "", "java", 1L, Instant.now()),
+                "main", new RepositorySnapshot.CommitInfo("abc123", "test", "A", null, Instant.now(), null),
+                Map.of(), List.of(new RepositorySnapshot.SourceFile("src/App Space.java", "blob1", 1,
+                        "java", "class App {}", null)), List.of(),
+                new RepositorySnapshot.SyncStats(1, 1, 1, 0, false, false), List.of(), Instant.now());
+        relationshipService.recordGeneration(USER, repositoryId, "job-blank-url", objectMapper.readTree(analysis), snapshot);
+
+        var entities = codeEntityRepository.findByRepositoryIdAndActiveTrueOrderByPathAscLineStartAsc(repositoryId);
+        String url = entities.get(0).getSourceUrl();
+
+        assertThat(url)
+                .contains("src/App%20Space.java") 
+                .endsWith("#L2-L10");             
     }
 }
