@@ -24,7 +24,7 @@ from .generator import DocGenerator
 from .jobs import JobOutput
 from .models import JobReport, Scope, now
 from .renderer import render_overview
-from .version_models import (Document, DocumentVersion, FileSection, HistoryAction, HistoryEvent,
+from .version_models import (Document, DocumentVersion, FileSection, PreparedRevision, HistoryAction, HistoryEvent,
                              RevisionDraftRequest, SectionAction, SectionChange, SkippedFile, SourceChangeRef, VersionOrigin,
                              VersionStatus, VersionSummary)
 
@@ -332,11 +332,11 @@ class DocumentStore:
             raise VersionError(409, "The document changed or already has a pending version")
         return doc, base, None
 
-    def propose_revision(self, doc_id: str, owner: str, request: RevisionDraftRequest, generate):
+    def prepare_revision(self, doc_id: str, owner: str, request: RevisionDraftRequest, generate):
         with self._lock:
             doc, base, existing = self._revision_base(doc_id, owner, request)
             if existing is not None:
-                return existing
+                return PreparedRevision()
             if not base.sections_match_content:
                 return None
             paths = {section.path for section in base.sections}
@@ -345,10 +345,28 @@ class DocumentStore:
                 return None
 
         replacements, report = generate(doc, files)
+        return PreparedRevision(replacements=replacements, report=report)
+
+    def propose_revision(self, doc_id: str, owner: str, request: RevisionDraftRequest, generate):
+        prepared = self.prepare_revision(doc_id, owner, request, generate)
+        if prepared is None:
+            return None
+        return self.commit_revision(doc_id, owner, request, prepared)
+
+    def commit_revision(self, doc_id: str, owner: str, request: RevisionDraftRequest,
+                        prepared: PreparedRevision, lease_expires_at: Optional[datetime] = None):
         with self._lock:
+            self._require_revision_lease(lease_expires_at)
             doc, base, existing = self._revision_base(doc_id, owner, request)
             if existing is not None:
                 return existing
+            replacements, report = prepared.replacements, prepared.report
+            if report is None or not base.sections_match_content:
+                return None
+            paths = {section.path for section in base.sections}
+            expected = {file.path for file in request.files if file.path in paths}
+            if replacements.keys() != expected or any(path != section.path for path, section in replacements.items()):
+                raise VersionError(409, "Prepared sections do not match the revision")
             sections = [replacements.get(section.path, section) for section in base.sections]
             content = assemble(doc, sections, base.skipped, report.template_name)
             if content == base.content:
@@ -365,6 +383,7 @@ class DocumentStore:
                     pull_request_number=request.pull_request_number)],
                 changes=[SectionChange(path=path, action=SectionAction.updated) for path in replacements],
             )
+            self._require_revision_lease(lease_expires_at)
             previous = doc.model_copy(deep=True)
             self._versions[doc_id].append(version)
             doc.pending_revision = request.source_snapshot
@@ -380,6 +399,11 @@ class DocumentStore:
                 self._docs[doc_id] = previous
                 raise
             return version
+
+    @staticmethod
+    def _require_revision_lease(lease_expires_at: Optional[datetime]) -> None:
+        if lease_expires_at is not None and now() >= lease_expires_at:
+            raise VersionError(409, "The revision job lease expired")
 
     def get_owned(self, doc_id: str, owner_user_id: str) -> Document:
         with self._lock:

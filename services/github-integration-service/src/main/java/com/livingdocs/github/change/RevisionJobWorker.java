@@ -15,6 +15,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 @Component
 public class RevisionJobWorker {
@@ -49,7 +51,22 @@ public class RevisionJobWorker {
 
     @Scheduled(fixedDelayString = "${revision-jobs.poll-interval-ms:250}")
     public void poll() {
-        jobs.claim(now()).ifPresent(this::run);
+        jobs.claim(now()).ifPresent(lease -> {
+            try (var heartbeat = Executors.newSingleThreadScheduledExecutor()) {
+                var renewal = heartbeat.scheduleWithFixedDelay(() -> {
+                    try {
+                        jobs.renew(lease, now());
+                    } catch (RuntimeException exception) {
+                        log.warn("Could not renew revision job {}", lease.id(), exception);
+                    }
+                }, 1, 1, TimeUnit.MINUTES);
+                try {
+                    run(lease);
+                } finally {
+                    renewal.cancel(false);
+                }
+            }
+        });
     }
 
     private void run(RevisionJobQueue.Lease lease) {
@@ -65,6 +82,10 @@ public class RevisionJobWorker {
             }
         } catch (SourceChangeException exception) {
             errorCode = exception.getCode();
+            if ("DRAFT_COMMIT_UNCERTAIN".equals(errorCode)) {
+                // Keep the lease until its deadline while AI may still be writing.
+                return;
+            }
         } catch (RuntimeException exception) {
             log.warn("Revision job {} failed with {}", lease.id(), exception.getClass().getSimpleName());
             errorCode = "UNEXPECTED_FAILURE";
