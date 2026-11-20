@@ -33,13 +33,14 @@ public class RevisionDraftGenerator {
     private final ConnectedRepositoryRepository repositories;
     private final DocumentWorkflowService workflows;
     private final RevisionJobQueue jobs;
+    private final AutoUpdatePolicies policies;
     private final TransactionTemplate transaction;
 
     public RevisionDraftGenerator(@Qualifier("codeAnalyzerRestClient") RestClient analyzer,
             @Qualifier("aiServiceRestClient") RestClient ai,
             @Qualifier("revisionAiRestClient") RestClient revisionAi, SourceChangeService source,
             ConnectedRepositoryRepository repositories, DocumentWorkflowService workflows,
-            RevisionJobQueue jobs, PlatformTransactionManager manager) {
+            RevisionJobQueue jobs, AutoUpdatePolicies policies, PlatformTransactionManager manager) {
         this.analyzer = analyzer;
         this.ai = ai;
         this.revisionAi = revisionAi;
@@ -47,6 +48,7 @@ public class RevisionDraftGenerator {
         this.repositories = repositories;
         this.workflows = workflows;
         this.jobs = jobs;
+        this.policies = policies;
         this.transaction = new TransactionTemplate(manager);
     }
 
@@ -87,7 +89,10 @@ public class RevisionDraftGenerator {
 
         for (JsonNode candidate : candidates) {
             String id = candidate.path("id").asText();
-            if (!workflows.acceptsRevisionDraft(id)) {
+            String scope = candidate.path("scope").asText();
+            String target = candidate.path("target").asText();
+            if (!policies.allows(repo.getId(), request.trigger(), id, scope, target)
+                    || !workflows.acceptsRevisionDraft(id)) {
                 continue;
             }
             String owner = candidate.path("owner_user_id").asText();
@@ -139,7 +144,7 @@ public class RevisionDraftGenerator {
                     () -> new SourceChangeException("LEASE_EXPIRED", "Revision job lease is no longer current."));
             transaction.executeWithoutResult(status -> workflows.submitRevisionDraft(candidate, request, () -> {
                 var connected = repositories.lockById(request.repositoryId());
-                if (connected.isEmpty()) {
+                if (connected.isEmpty() || !policies.allows(repo.getId(), request.trigger(), id, scope, target)) {
                     return null;
                 }
                 if (!Objects.equals(revision.pullRequestBaseSha(),
