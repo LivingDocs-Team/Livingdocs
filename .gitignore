@@ -30,3 +30,10 @@ Thumbs.db
 
 # Local Python analysis environment
 .venv-analysis/
+
+# LD-404 smoke artifacts
+artifacts/
+.env
+artifacts/smoke-state.json
+artifacts/ld-404-smoke-report.log
+artifacts/smoke-*-result.json
