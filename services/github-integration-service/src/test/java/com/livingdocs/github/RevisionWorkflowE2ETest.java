@@ -16,6 +16,7 @@ import com.livingdocs.github.client.GitHubBlob;
 import com.livingdocs.github.client.GitHubChangedFile;
 import com.livingdocs.github.client.GitHubClient;
 import com.livingdocs.github.client.GitHubRepo;
+import com.livingdocs.github.client.GitHubPullRequest;
 import com.livingdocs.github.entity.ConnectionStatus;
 import com.livingdocs.github.entity.GitHubConnection;
 import com.livingdocs.github.repository.GitHubConnectionRepository;
@@ -101,6 +102,85 @@ class RevisionWorkflowE2ETest {
     @MockitoBean CodeAnalyzerClient analyzerClient;
     @MockitoBean(name = "codeAnalyzerRestClient", answers = org.mockito.Answers.RETURNS_DEEP_STUBS)
     RestClient revisionAnalyzer;
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"accept", "edit", "dismiss"})
+    @org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable(named = "LIVINGDOCS_E2E_RESTART_PHASE", matches = ".+")
+    void driftDecisionUsesRealAiHttpAndExactReviewVersion(String decision) throws Exception {
+        String owner = Long.toString(java.util.concurrent.ThreadLocalRandom.current().nextLong(1, Long.MAX_VALUE));
+        var repo = connectAndAddRepo(owner);
+        var ai = aiService.mutate().defaultHeader(USER_HEADER, owner).build();
+        String base = newSha(), head = newSha();
+        var previousFile = Map.of("path", PATH, "language", "java",
+                "classes", List.of(Map.of("name", "Invoice", "lineno", 1)));
+        var job = ai.post().uri("/generate").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("scope", "file", "target", PATH, "output_language", "en",
+                        "files", List.of(previousFile), "source_snapshot",
+                        Map.of("repository_id", repo.id(), "repository_full_name", "acme/docs",
+                                "branch", "main", "commit_sha", base)))
+                .retrieve().body(JsonNode.class);
+        String jobId = job.path("id").asText();
+        await(() -> ai.get().uri("/jobs/{id}", jobId).retrieve().body(JsonNode.class)
+                .path("status").asText().equals("completed"));
+        var document = ai.post().uri("/internal/documents/from-job").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("job_id", jobId)).retrieve().body(JsonNode.class);
+        String documentId = document.path("id").asText();
+        var staff = Set.of("ROLE_STAFF", "DOCUMENT_CLAIM", "DOCUMENT_REVIEW");
+        var manager = Set.of("ROLE_MANAGER", "DOCUMENT_APPROVE");
+        var developer = Set.of("DOCUMENT_CREATE", "DOCUMENT_SUBMIT");
+        UUID workflow = workflows.create(owner, developer, documentId).id();
+        workflows.submit(owner, developer, workflow, 1);
+        workflows.claim("staff", staff, workflow);
+        workflows.staffReview("staff", staff, workflow, new StaffReviewRequest(StaffReviewResult.PASSED, null));
+        workflows.decide("manager", manager, workflow, ManagerDecision.APPROVED, null, 1);
+
+        var report = ai.post().uri("/drift/analyze").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("repository", "acme/docs", "document_ids", List.of(documentId),
+                        "pull_request", Map.of("number", 7, "head_branch", "feature", "base_branch", "main",
+                                "head_sha", head, "base_sha", base, "base_head_sha", base),
+                        "files", List.of(Map.of("path", PATH, "status", "modified", "before", previousFile,
+                                "after", Map.of("path", PATH, "language", "java",
+                                        "classes", List.of(Map.of("name", "Receipt", "lineno", 1)))))))
+                .retrieve().body(JsonNode.class);
+        String reportId = report.path("id").asText();
+        String findingId = report.path("findings").get(0).path("id").asText();
+        revisionJdbc.update("INSERT INTO drift_report_owners (report_id, repository_id, owner_user_id) VALUES (?, ?, ?)",
+                reportId, UUID.fromString(repo.id()), owner);
+        String endpoint = "/api/repositories/{repo}/drift/reports/{report}/findings/{finding}/resolution";
+        boolean dismiss = decision.equals("dismiss");
+        var body = json.writeValueAsBytes(Map.of("status", dismiss ? "dismissed" : "acknowledged",
+                "decision", decision, "note", "Reviewed drift", "proposed", "## Receipt"));
+        var request = put(endpoint, repo.id(), reportId, findingId).header(USER_HEADER, owner)
+                .contentType(MediaType.APPLICATION_JSON).content(body);
+        if (!dismiss) {
+            var stale = new GitHubPullRequest.Ref("feature", newSha());
+            when(gitHubClient.getPullRequest(TOKEN, "acme", "docs", 7)).thenReturn(new GitHubPullRequest(
+                    7, "Rename Invoice", null, "open", null, null, stale, new GitHubPullRequest.Ref("main", base),
+                    null, null, null, null));
+            mvc.perform(request).andExpect(status().isConflict());
+        }
+        when(gitHubClient.getPullRequest(TOKEN, "acme", "docs", 7)).thenReturn(new GitHubPullRequest(
+                7, "Rename Invoice", null, "open", null, null, new GitHubPullRequest.Ref("feature", head),
+                new GitHubPullRequest.Ref("main", base), null, null, null, null));
+        var result = mvc.perform(request).andExpect(status().isOk());
+        mvc.perform(request).andExpect(status().isOk()).andExpect(jsonPath("$.resolution.history.length()").value(1));
+        if (dismiss) {
+            result.andExpect(jsonPath("$.resolution.draft_version").doesNotExist());
+            assertThat(workflowRows.findById(workflow).orElseThrow().getSubmittedDocumentVersion()).isEqualTo(1);
+            return;
+        }
+        result.andExpect(jsonPath("$.resolution.draft_version").value(2));
+        var draft = ai.get().uri("/internal/documents/{id}/versions/2", documentId).retrieve().body(JsonNode.class);
+        assertThat(draft.path("source_snapshot").path("commit_sha").asText()).isEqualTo(head);
+        assertThat(draft.path("drift_finding").path("evidence").isEmpty()).isFalse();
+        workflows.claim("staff", staff, workflow);
+        workflows.staffReview("staff", staff, workflow, new StaffReviewRequest(StaffReviewResult.PASSED, null));
+        assertThatThrownBy(() -> workflows.decide("manager", manager, workflow, ManagerDecision.APPROVED, null, 1))
+                .isInstanceOf(com.livingdocs.github.exception.ApiException.class);
+        workflows.decide("manager", manager, workflow, ManagerDecision.APPROVED, null, 2);
+        assertThat(ai.get().uri("/internal/documents/{id}", documentId).retrieve().body(JsonNode.class)
+                .path("current_version").asInt()).isEqualTo(2);
+    }
 
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.EnumSource(value = Scenario.class,

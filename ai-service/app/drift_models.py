@@ -41,6 +41,7 @@ class PullRequestInfo(BaseModel):
     base_branch: Optional[str] = Field(default=None, max_length=300)
     head_sha: Optional[str] = Field(default=None, max_length=64)   # commit the PR is checked at
     base_sha: Optional[str] = Field(default=None, max_length=64)
+    base_head_sha: Optional[str] = Field(default=None, max_length=64)
 
 
 class ChangedFile(BaseModel):
@@ -338,6 +339,7 @@ class FindingResolution(BaseModel):
     note: Optional[str] = None
     decision: Optional[Literal["accept", "edit", "dismiss"]] = None
     proposed: Optional[str] = None
+    draft_version: Optional[int] = None
     updated_at: Optional[datetime] = None
     history: List[ResolutionEvent] = Field(default_factory=list)
 

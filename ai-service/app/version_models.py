@@ -154,6 +154,7 @@ class RevisionDraftCommit(RevisionDraftRequest):
 
 class DocumentVersion(VersionSummary):
     content: str
+    drift_finding: Optional[dict] = None
     sections: List[FileSection] = Field(default_factory=list)
     revision_files: List[RevisionFileChange] = Field(default_factory=list)
     skipped: List[SkippedFile] = Field(default_factory=list)

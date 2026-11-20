@@ -245,7 +245,7 @@ public class DocumentationGenerationService {
 
     public JsonNode getExactDocumentVersion(String userId, String documentId, int version) {
         try {
-            JsonNode result = aiServiceClient.get().uri("/documents/{id}/versions/{version}", documentId, version)
+            JsonNode result = aiServiceClient.get().uri("/internal/documents/{id}/versions/{version}", documentId, version)
                     .header("X-User-Id", userId).retrieve().body(JsonNode.class);
             if (result == null || !result.isObject() || result.path("number").asInt() != version) {
                 throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid version.");
