@@ -26,6 +26,7 @@ import com.cnpm.backend.dto.WorkspaceMemberRequest;
 import com.cnpm.backend.dto.WorkspaceMemberResponse;
 import com.cnpm.backend.entity.User;
 import com.cnpm.backend.repository.UserRepository;
+import com.cnpm.backend.security.ScreenPermissions;
 import com.cnpm.backend.service.WorkspaceService;
 
 import jakarta.validation.Valid;
@@ -72,6 +73,18 @@ public class WorkspaceController {
     public List<WorkspaceMemberResponse> members(@PathVariable String workspaceId,
             Authentication authentication) {
         return workspaceService.listMembers(authenticatedUser(authentication), workspaceId).stream()
+                .map(WorkspaceMemberResponse::from).toList();
+    }
+
+    @GetMapping("/{workspaceId}/collection-owner-candidates")
+    @Transactional(readOnly = true)
+    public List<WorkspaceMemberResponse> collectionOwnerCandidates(@PathVariable String workspaceId,
+            Authentication authentication) {
+        User actor = authenticatedUser(authentication);
+        if (!ScreenPermissions.can(actor.getRole(), "collections", 'U')) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        }
+        return workspaceService.listCollectionOwnerCandidates(actor, workspaceId).stream()
                 .map(WorkspaceMemberResponse::from).toList();
     }
 
