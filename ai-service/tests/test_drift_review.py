@@ -190,6 +190,29 @@ def test_store_resolve_and_list():
     assert row.review.resolved == 1 and row.review.status == ReviewStatus.in_progress
 
 
+def test_report_and_developer_review_survive_store_restart(tmp_path, monkeypatch):
+    path = tmp_path / "drift-reports.json"
+    store = DriftReportStore(path=str(path))
+    report = store.add(report_with(ai_review=False))
+    store.resolve(report.id, "F1", ResolutionUpdate(status="acknowledged", decision="edit",
+                                                    proposed="Pass qty instead.", actor="42"))
+    restored = DriftReportStore(path=str(path))
+    [row] = restored.list(repository=report.repository)
+    assert row.id == report.id
+    finding = restored.get(report.id).findings[0]
+    assert finding.resolution.history[-1].actor == "42"
+    assert finding.resolution.proposed == "Pass qty instead."
+
+    def unavailable(*args):
+        raise OSError("fixture write failure")
+
+    monkeypatch.setattr("app.drift.os.replace", unavailable)
+    with pytest.raises(OSError, match="fixture write failure"):
+        restored.resolve(report.id, "F1", ResolutionUpdate(status="dismissed", note="stale"))
+    assert restored.get(report.id).findings[0].resolution.decision == "edit"
+    assert DriftReportStore(path=str(path)).get(report.id).findings[0].resolution.decision == "edit"
+
+
 def test_markdown_shows_ai_review_and_resolution():
     r = report_with(DriftReviewer(FakeModel()))
     resolve(r, "F1", ResolutionUpdate(status="resolved", actor="an", note="Fixed in #43"))
