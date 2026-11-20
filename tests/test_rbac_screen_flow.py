@@ -182,6 +182,47 @@ def test_removed_functions_are_not_reachable_by_any_role(page: Page, role, path)
     expect(page.get_by_role("heading", name="Documentation Drift")).to_have_count(0)
 
 
+def test_repository_owner_configures_auto_update_policies(page: Page):
+    path = f"/api/repositories/{REPOSITORY_ID}/auto-update-policies"
+
+    class PolicyApi(Api):
+        saved = None
+
+        def handle(self, route):
+            if route.request.method == "PUT" and route.request.url.endswith(path):
+                self.saved = route.request.post_data_json
+                return route.fulfill(status=200, json=self.saved)
+            return super().handle(route)
+
+    api = PolicyApi("DEVELOPER", {
+        **SAVED_DOCUMENT_ROUTES,
+        "/api/managed-workspaces": [],
+        "/api/github/connection": {"connected": True},
+        "/api/github/repos/available": [],
+        path: [],
+    })
+    start(page, api, f"{FRONTEND}/#/github/repositories")
+    page.get_by_role("button", name="Workspace (1)").click()
+    page.get_by_role("button", name="Auto-update policies").click()
+    editor = page.get_by_role("region", name="Auto-update policies")
+    editor.get_by_role("button", name="Add rule").click()
+    editor.get_by_role("group", name="Repository policy").get_by_label("Default-branch push").uncheck()
+    editor.get_by_role("button", name="Add rule").click()
+    module = editor.get_by_role("group", name="Module policy")
+    module.get_by_label("Module path").fill("src/main")
+    module.get_by_label("Pull request").uncheck()
+    editor.get_by_role("button", name="Add rule").click()
+    editor.get_by_label("Scope").last.select_option("DOCUMENT")
+    editor.get_by_label("Document identifier").fill("a" * 32)
+    editor.get_by_role("button", name="Save policies").click()
+    expect(editor.get_by_role("status")).to_have_text("Auto-update policies saved.")
+    assert api.saved == [
+        {"scope": "REPOSITORY", "target": "", "onCommit": False, "onPullRequest": True},
+        {"scope": "MODULE", "target": "src/main", "onCommit": True, "onPullRequest": False},
+        {"scope": "DOCUMENT", "target": "a" * 32, "onCommit": True, "onPullRequest": True},
+    ]
+
+
 def test_developer_reviews_drift_alert(page: Page):
     base = f"/api/repositories/{REPOSITORY_ID}/drift"
     finding = {"id": "F1", "message": "Outdated parameter", "file": "shop/cart.py",
