@@ -33,7 +33,7 @@ from app.normalize import normalize
 from app.retrieval import build_index, retrieve
 from app.templates import TemplateNameTaken, templates
 from app.version_models import (Document, DocumentContentEdit, DocumentCreate, DocumentVersion,
-                                FileSection, HistoryEvent, InternalDocumentCreate, InternalVersionDecision, RevisionDraftRequest,
+                                FileSection, HistoryEvent, InternalDocumentCreate, InternalVersionDecision, PreparedRevision, RevisionDraftCommit, RevisionDraftRequest,
                                 InternalRollbackRequest, VersionComparison,
                                 VersionSummary)
 from app.versions import VersionError, documents
@@ -295,10 +295,21 @@ def revision_draft_candidates(repository_id: str):
     return documents.revision_candidates(repository_id)
 
 
-@app.post("/internal/documents/{doc_id}/revision-drafts", response_model=Optional[DocumentVersion],
+@app.post("/internal/documents/{doc_id}/revision-drafts/prepare", response_model=Optional[PreparedRevision],
           dependencies=[Depends(require_internal_service)])
-def propose_revision_draft(doc_id: str, data: RevisionDraftRequest,
+def prepare_revision_draft(doc_id: str, data: RevisionDraftRequest,
                            user_id: str = Header(alias="X-User-Id")):
+    return _generate_revision(doc_id, data, user_id)
+
+
+@app.post("/internal/documents/{doc_id}/revision-drafts/commit", response_model=Optional[DocumentVersion],
+          dependencies=[Depends(require_internal_service)])
+def commit_revision_draft(doc_id: str, data: RevisionDraftCommit,
+                          user_id: str = Header(alias="X-User-Id")):
+    return _call(documents.commit_revision, doc_id, user_id, data, data.prepared, data.lease_expires_at)
+
+
+def _generate_revision(doc_id: str, data: RevisionDraftRequest, user_id: str):
     def generate(doc, files):
         from app.confidence import METHOD, average, level_of
         from app.models import FileResultStatus
@@ -335,7 +346,7 @@ def propose_revision_draft(doc_id: str, data: RevisionDraftRequest,
             method=METHOD, files=reports,
         )
 
-    return _call(documents.propose_revision, doc_id, user_id, data, generate)
+    return _call(documents.prepare_revision, doc_id, user_id, data, generate)
 
 
 @app.get("/internal/documents/{doc_id}", response_model=Document,

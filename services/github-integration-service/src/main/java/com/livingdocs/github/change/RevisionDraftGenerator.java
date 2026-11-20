@@ -14,6 +14,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.client.RestClientException;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -24,6 +25,7 @@ import java.util.Objects;
 public class RevisionDraftGenerator {
     private final RestClient analyzer;
     private final RestClient ai;
+    private final RestClient revisionAi;
     private final SourceChangeService source;
     private final ConnectedRepositoryRepository repositories;
     private final DocumentWorkflowService workflows;
@@ -31,11 +33,13 @@ public class RevisionDraftGenerator {
     private final TransactionTemplate transaction;
 
     public RevisionDraftGenerator(@Qualifier("codeAnalyzerRestClient") RestClient analyzer,
-            @Qualifier("aiServiceRestClient") RestClient ai, SourceChangeService source,
+            @Qualifier("aiServiceRestClient") RestClient ai,
+            @Qualifier("revisionAiRestClient") RestClient revisionAi, SourceChangeService source,
             ConnectedRepositoryRepository repositories, DocumentWorkflowService workflows,
             RevisionJobQueue jobs, PlatformTransactionManager manager) {
         this.analyzer = analyzer;
         this.ai = ai;
+        this.revisionAi = revisionAi;
         this.source = source;
         this.repositories = repositories;
         this.workflows = workflows;
@@ -69,43 +73,66 @@ public class RevisionDraftGenerator {
         }
 
         for (JsonNode candidate : candidates) {
+            String id = candidate.path("id").asText();
+            if (!workflows.acceptsRevisionDraft(id)) {
+                continue;
+            }
+            String owner = candidate.path("owner_user_id").asText();
+            ObjectNode body = JsonNodeFactory.instance.objectNode();
+            body.put("source_change_id", change.getId().toString());
+            body.put("trigger", request.trigger().name());
+            body.put("pull_request_number", request.pullRequestNumber());
+            body.put("base_version", candidate.path("current_version").asInt());
+            body.set("files", analysis.path("files"));
+            ObjectNode snapshot = body.putObject("source_snapshot");
+            snapshot.put("repository_id", repo.getId().toString());
+            snapshot.put("repository_full_name", repo.getFullName());
+            snapshot.put("branch", revision.branch());
+            snapshot.put("commit_sha", request.commitSha());
+            snapshot.put("fetched_at", Instant.now().toString());
+            snapshot.put("pull_request_number", request.pullRequestNumber());
+            snapshot.put("pull_request_base_sha", revision.pullRequestBaseSha());
+
+            JsonNode prepared = callDraft(revisionAi, "prepare", id, owner, body);
+            if (prepared == null || prepared.isNull()) {
+                continue;
+            }
+            var deadline = jobs.renew(lease, OffsetDateTime.now(ZoneOffset.UTC)).orElseThrow(
+                    () -> new SourceChangeException("LEASE_EXPIRED", "Revision job lease is no longer current."));
             transaction.executeWithoutResult(status -> workflows.submitRevisionDraft(candidate, request, () -> {
                 var connected = repositories.lockById(request.repositoryId());
-                if (connected.isEmpty() || !jobs.lockCurrentLease(lease, OffsetDateTime.now(ZoneOffset.UTC))) {
+                if (connected.isEmpty()) {
                     return null;
                 }
                 if (!Objects.equals(revision.pullRequestBaseSha(),
                         source.requireCurrentRevision(connected.get(), request))) {
                     throw new SourceChangeException("PULL_REQUEST_BASE_CHANGED", "The pull request base changed.");
                 }
-                ObjectNode body = JsonNodeFactory.instance.objectNode();
-                body.put("source_change_id", change.getId().toString());
-                body.put("trigger", request.trigger().name());
-                body.put("pull_request_number", request.pullRequestNumber());
-                body.put("base_version", candidate.path("current_version").asInt());
-                body.set("files", analysis.path("files"));
-                ObjectNode snapshot = body.putObject("source_snapshot");
-                snapshot.put("repository_id", repo.getId().toString());
-                snapshot.put("repository_full_name", repo.getFullName());
-                snapshot.put("branch", revision.branch());
-                snapshot.put("commit_sha", request.commitSha());
-                snapshot.put("fetched_at", Instant.now().toString());
-                snapshot.put("pull_request_number", request.pullRequestNumber());
-                snapshot.put("pull_request_base_sha", revision.pullRequestBaseSha());
-                String id = candidate.path("id").asText();
-                String owner = candidate.path("owner_user_id").asText();
-                return createDraft(id, owner, body);
+                if (!jobs.lockCurrentLease(lease, OffsetDateTime.now(ZoneOffset.UTC), deadline)) {
+                    throw new SourceChangeException("LEASE_EXPIRED", "Revision job lease is no longer current.");
+                }
+                body.set("prepared", prepared);
+                body.put("lease_expires_at", deadline.toString());
+                return callDraft(ai, "commit", id, owner, body);
             }));
         }
     }
 
-    private JsonNode createDraft(String id, String owner, ObjectNode body) {
+    private JsonNode callDraft(RestClient client, String action, String id, String owner, ObjectNode body) {
         try {
-            return ai.post().uri("/internal/documents/{id}/revision-drafts", id)
+            return client.post().uri("/internal/documents/{id}/revision-drafts/" + action, id)
                     .header("X-User-Id", owner).body(body).retrieve().body(JsonNode.class);
         } catch (RestClientResponseException exception) {
+            if ("commit".equals(action) && exception.getStatusCode().is5xxServerError()) {
+                throw new SourceChangeException("DRAFT_COMMIT_UNCERTAIN", "The AI draft commit response was lost.");
+            }
             if (exception.getStatusCode().value() == 409) {
                 throw new SourceChangeException("DRAFT_VERSION_CONFLICT", "The document changed during drafting.");
+            }
+            throw new SourceChangeException("AI_SERVICE_UNAVAILABLE", "Could not generate a grounded revision draft.");
+        } catch (RestClientException exception) {
+            if ("commit".equals(action)) {
+                throw new SourceChangeException("DRAFT_COMMIT_UNCERTAIN", "The AI draft commit response was lost.");
             }
             throw new SourceChangeException("AI_SERVICE_UNAVAILABLE", "Could not generate a grounded revision draft.");
         }
