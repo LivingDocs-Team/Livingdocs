@@ -16,6 +16,7 @@ import com.livingdocs.github.entity.GitHubConnection;
 import com.livingdocs.github.entity.SourceChange;
 import com.livingdocs.github.exception.GitHubApiException;
 import com.livingdocs.github.repository.GitHubConnectionRepository;
+import com.livingdocs.github.repository.SourceChangeRepository;
 import com.livingdocs.github.service.SourceChangeService;
 import com.livingdocs.github.sync.AnalysisInput;
 import org.junit.jupiter.api.Test;
@@ -40,6 +41,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,6 +58,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -91,6 +96,7 @@ class SourceChangeDetectionTest {
     @Autowired ObjectMapper json;
     @Autowired GitHubConnectionRepository connectionRepository;
     @Autowired SourceChangeService sourceChangeService;
+    @Autowired SourceChangeRepository sourceChangeRepository;
 
     @MockitoBean GitHubClient gitHubClient;
     @MockitoBean CodeAnalyzerClient analyzerClient;
@@ -189,6 +195,86 @@ class SourceChangeDetectionTest {
                 .andExpect(jsonPath("$[0].files.length()").value(0));
         verify(analyzerClient, never()).analyze(eq("acme/docs"), anyList());
         verify(documentsClient, never()).find(eq("acme/docs"), anyList());
+    }
+
+    @Test
+    void baseChangingDuringFileFetch_isRejectedAndCanBeRetried() throws Exception {
+        String user = "change-stale-base";
+        Repo repo = connectAndAddRepo(user);
+        String head = newSha();
+        var newBase = pullRequestRevision(12, head, newSha());
+        when(gitHubClient.getPullRequest(TOKEN, "acme", "docs", 12))
+                .thenReturn(pullRequestRevision(12, head, newSha()), newBase);
+        when(gitHubClient.listPullRequestChangedFiles(TOKEN, "acme", "docs", 12))
+                .thenReturn(List.of(invoiceFile(PATCH)));
+        mockInvoiceContentAndAnalyzer();
+
+        UUID repositoryId = UUID.fromString(repo.id());
+        sourceChangeService.detect(new SourceChangeRequest(repositoryId, SourceChange.Trigger.PULL_REQUEST, head, 12));
+
+        var failed = sourceChangeRepository.findByRepositoryIdAndTriggerTypeAndCommitSha(
+                repositoryId, SourceChange.Trigger.PULL_REQUEST, head).orElseThrow();
+        assertThat(failed.getStatus()).isEqualTo(SourceChange.Status.FAILED);
+        assertThat(failed.getErrorCode()).isEqualTo("PULL_REQUEST_BASE_CHANGED");
+        verify(analyzerClient, never()).analyze(eq("acme/docs"), anyList());
+        verify(documentsClient, never()).find(eq("acme/docs"), anyList());
+
+        mvc.perform(post(sourceChangesUrl(repo.id()) + "/" + failed.getId() + "/retry").header(USER_HEADER, user))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(failed.getId().toString()))
+                .andExpect(jsonPath("$.documentsStatus").value("FOUND"));
+    }
+
+    @Test
+    void concurrentProcessingOfSameEvent_persistsOneCompletedAnalysis() throws Exception {
+        String user = "change-concurrent";
+        Repo repo = connectAndAddRepo(user);
+        String sha = newSha();
+        var bothFetching = new CyclicBarrier(2);
+        when(gitHubClient.getCommitFiles(TOKEN, "acme", "docs", sha)).thenAnswer(call -> {
+            bothFetching.await(5, TimeUnit.SECONDS);
+            return List.of(invoiceFile(PATCH));
+        });
+        mockInvoiceContentAndAnalyzer();
+
+        SourceChangeRequest request = commit(repo.id(), sha);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(() -> sourceChangeService.detect(request));
+            var second = executor.submit(() -> sourceChangeService.detect(request));
+            first.get(10, TimeUnit.SECONDS);
+            second.get(10, TimeUnit.SECONDS);
+        }
+
+        mvc.perform(get(sourceChangesUrl(repo.id())).header(USER_HEADER, user))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].commitSha").value(sha))
+                .andExpect(jsonPath("$[0].documentsStatus").value("FOUND"))
+                .andExpect(jsonPath("$[0].files[0].entities.length()").value(4));
+    }
+
+    @Test
+    void repositoryDisconnectedDuringDocumentLookup_doesNotRecreateSourceChange() throws Exception {
+        String user = "change-disconnected";
+        Repo repo = connectAndAddRepo(user);
+        String sha = newSha();
+        SourceChangeRequest request = commit(repo.id(), sha);
+        when(gitHubClient.getCommitFiles(TOKEN, "acme", "docs", sha)).thenReturn(List.of(invoiceFile(PATCH)));
+        mockInvoiceContentAndAnalyzer();
+        when(documentsClient.find(eq("acme/docs"), anyList())).thenAnswer(call -> {
+            assertThat(sourceChangeRepository.findByRepositoryIdAndTriggerTypeAndCommitSha(
+                    request.repositoryId(), request.trigger(), sha)).isPresent();
+            mvc.perform(delete("/api/repositories/" + repo.id()).header(USER_HEADER, user))
+                    .andExpect(status().isNoContent());
+            return List.of();
+        });
+
+        sourceChangeService.detect(request);
+
+        assertThat(sourceChangeRepository.findByRepositoryIdAndTriggerTypeAndCommitSha(
+                request.repositoryId(), request.trigger(), sha)).isEmpty();
+        mvc.perform(get(sourceChangesUrl(repo.id())).header(USER_HEADER, user))
+                .andExpect(status().isNotFound());
     }
 
     @Test
