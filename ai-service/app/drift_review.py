@@ -292,6 +292,8 @@ def resolve(report: DriftReport, finding_id: str, update: ResolutionUpdate) -> D
     r: FindingResolution = f.resolution
     if (r.status, r.note, r.decision, r.proposed) == (update.status, note, update.decision, proposed):
         return f                                   # no change: no new history entry
+    if r.draft_version is not None:
+        raise ResolutionError(409, "This finding already has a draft in the review workflow")
     at = now()
     r.history.append(ResolutionEvent(status=update.status, actor=update.actor, note=note, at=at,
                                      decision=update.decision, proposed=proposed))

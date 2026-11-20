@@ -223,10 +223,12 @@ def test_repository_owner_configures_auto_update_policies(page: Page):
     ]
 
 
-def test_developer_reviews_drift_alert(page: Page):
+@pytest.mark.parametrize("decision", ["accept", "edit", "dismiss"])
+def test_developer_reviews_drift_alert(page: Page, decision):
     base = f"/api/repositories/{REPOSITORY_ID}/drift"
     finding = {"id": "F1", "message": "Outdated parameter", "file": "shop/cart.py",
-               "severity": "high", "suggestion": "Use qty.", "resolution": {"status": "open"}}
+               "severity": "high", "suggestion": "Use qty.", "resolution": {"status": "open"},
+               "document": {"document_id": DOCUMENT_ID, "version": 1, "path": "shop/cart.py"}}
     report = {"id": "report-1", "pull_request": {"number": 7}, "findings": [finding]}
 
     class DriftApi(Api):
@@ -239,7 +241,9 @@ def test_developer_reviews_drift_alert(page: Page):
                 body = request.post_data_json
                 self.requests.append((request.method, request.url, body))
                 proposed = finding["suggestion"] if body["decision"] == "accept" else body.get("proposed")
-                return route.fulfill(status=200, json={**finding, "resolution": {**body, "proposed": proposed}})
+                return route.fulfill(status=200, json={**finding, "resolution": {
+                    **body, "proposed": proposed, "draft_version": None if decision == "dismiss" else 2,
+                }})
             return super().handle(route)
 
     api = DriftApi("DEVELOPER", {
@@ -257,17 +261,18 @@ def test_developer_reviews_drift_alert(page: Page):
     expect(page.get_by_role("button", name="Review current PR #8")).to_have_count(0)
     page.get_by_role("button", name="Review current PR #7").click()
     expect(page.get_by_role("heading", name="Outdated parameter")).to_be_visible()
-    page.get_by_role("button", name="Accept", exact=True).click()
-    expect(page.get_by_role("status").filter(has_text="Accepted")).to_be_visible()
-    page.get_by_role("button", name="Edit", exact=True).click()
-    page.get_by_label("Proposed text").fill("Pass qty as an integer.")
-    page.get_by_role("button", name="Save edit").click()
-    expect(page.get_by_role("status").filter(has_text="Pass qty as an integer.")).to_be_visible()
-    page.get_by_role("button", name="Dismiss", exact=True).click()
-    page.get_by_label("Dismissal reason").fill("Already handled elsewhere.")
-    page.get_by_role("button", name="Confirm dismissal").click()
-    expect(page.get_by_role("status").filter(has_text="Dismissed")).to_be_visible()
-    assert [body["decision"] for method, _, body in api.requests if method == "PUT"] == ["accept", "edit", "dismiss"]
+    page.get_by_role("button", name=decision.capitalize(), exact=True).click()
+    if decision == "edit":
+        page.get_by_label("Proposed text").fill("Pass qty as an integer.")
+        page.get_by_role("button", name="Save edit").click()
+    if decision == "dismiss":
+        page.get_by_label("Dismissal reason").fill("Already handled elsewhere.")
+        page.get_by_role("button", name="Confirm dismissal").click()
+        expect(page.get_by_role("status").filter(has_text="Dismissed")).to_be_visible()
+    else:
+        expect(page.get_by_role("status").filter(has_text="Draft v2")).to_be_visible()
+        expect(page.get_by_role("button", name="Accept", exact=True)).to_have_count(0)
+    assert [body["decision"] for method, _, body in api.requests if method == "PUT"] == [decision]
 
 
 @pytest.mark.parametrize("role", ["DEVELOPER", "TECHNICAL_LEAD"])

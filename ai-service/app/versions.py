@@ -22,7 +22,7 @@ from typing import Dict, List, Optional
 
 from .generator import DocGenerator
 from .jobs import JobOutput
-from .models import JobReport, Scope, now
+from .models import Evidence, EvidenceKind, FileReport, FileResultStatus, JobReport, Scope, SourceSnapshot, now
 from .renderer import render_overview
 from .version_models import (Document, DocumentVersion, FileSection, PreparedRevision, RevisionFileChange, HistoryAction, HistoryEvent,
                              RevisionDraftRequest, SectionAction, SectionChange, SkippedFile, SourceChangeRef, VersionOrigin,
@@ -455,6 +455,66 @@ class DocumentStore:
     def _require_revision_lease(lease_expires_at: Optional[datetime]) -> None:
         if lease_expires_at is not None and now() >= lease_expires_at:
             raise VersionError(409, "The revision job lease expired")
+
+    def propose_drift(self, owner, repository_id, report, finding):
+        target = finding.document
+        pr = report.pull_request
+        if not (target.document_id and target.version and report.repository and pr.head_sha and pr.head_branch):
+            raise VersionError(409, "This finding has no versioned document or source revision")
+        snapshot = SourceSnapshot(repository_id=repository_id, repository_full_name=report.repository,
+                                  branch=pr.head_branch, commit_sha=pr.head_sha,
+                                  pull_request_number=pr.number, pull_request_base_sha=pr.base_head_sha)
+        key = f"drift:{report.id}:{finding.id}"
+        request = RevisionDraftRequest(source_change_id=key, trigger="PULL_REQUEST",
+                                       pull_request_number=pr.number, source_snapshot=snapshot,
+                                       base_version=target.version, files=[])
+        resolution = finding.resolution
+        audit = {"report_id": report.id, "finding_id": finding.id, "decision": resolution.decision,
+                 "proposed": resolution.proposed, "evidence": [
+                     item.model_dump(mode="json") for item in finding.evidence]}
+        with self._lock:
+            doc, base, existing = self._revision_base(target.document_id, owner, request)
+            if existing is not None:
+                if existing.drift_finding != audit:
+                    raise VersionError(409, "This finding already has a different draft decision")
+                return existing.number
+            section = next((item for item in base.sections if item.path == target.path), None)
+            if (not base.sections_match_content or section is None or not section.markdown
+                    or base.content.count(section.markdown) != 1):
+                raise VersionError(409, "The affected section cannot be updated safely")
+            sections = [item.model_copy(update={"markdown": resolution.proposed, "status": "manual"})
+                        if item.path == target.path else item for item in base.sections]
+            evidence = [Evidence(id=item.id, kind=EvidenceKind.doc if item.kind == "documentation"
+                                 else EvidenceKind.source, path=item.path or finding.file,
+                                 line_start=item.line_start, line_end=item.line_end, excerpt=item.excerpt)
+                        for item in finding.evidence]
+            review = JobReport(job_id=key, template_id=doc.template_id, method="drift",
+                               files=[FileReport(path=finding.file, status=FileResultStatus.generated,
+                                                 context_used=evidence)])
+            number = doc.versions_total + 1
+            version = DocumentVersion(
+                number=number, status=VersionStatus.proposed, origin=VersionOrigin.source_change,
+                base_version=base.number, created_by=owner, manual=True,
+                content=base.content.replace(section.markdown, resolution.proposed, 1),
+                sections=sections, skipped=base.skipped, source_snapshot=snapshot,
+                source_changes=[SourceChangeRef(id=key, trigger="PULL_REQUEST", commit_sha=pr.head_sha,
+                                               pull_request_number=pr.number)],
+                changes=[SectionChange(path=target.path, action=SectionAction.edited)],
+                evidence_report=review, review_report=review, drift_finding=audit)
+            previous = doc.model_copy(deep=True)
+            self._versions[doc.id].append(version)
+            doc.pending_version = doc.versions_total = number
+            doc.pending_revision = snapshot
+            doc.updated_at = now()
+            self._event(doc.id, HistoryAction.proposed, number, owner, key, related=base.number)
+            try:
+                self._save()
+            except OSError:
+                self._versions[doc.id].pop()
+                self._events[doc.id].pop()
+                self._docs[doc.id] = previous
+                raise
+            return number
 
     def get_owned(self, doc_id: str, owner_user_id: str) -> Document:
         with self._lock:
