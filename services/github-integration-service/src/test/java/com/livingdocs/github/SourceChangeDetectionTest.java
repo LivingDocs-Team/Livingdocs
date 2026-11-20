@@ -9,6 +9,7 @@ import com.livingdocs.github.change.SourceChangeRequest;
 import com.livingdocs.github.client.GitHubBlob;
 import com.livingdocs.github.client.GitHubChangedFile;
 import com.livingdocs.github.client.GitHubClient;
+import com.livingdocs.github.client.GitHubPullRequest;
 import com.livingdocs.github.client.GitHubRepo;
 import com.livingdocs.github.entity.ConnectionStatus;
 import com.livingdocs.github.entity.GitHubConnection;
@@ -147,6 +148,8 @@ class SourceChangeDetectionTest {
         String user = "change-pull-request";
         Repo repo = connectAndAddRepo(user);
         String head = newSha();
+        when(gitHubClient.getPullRequest(TOKEN, "acme", "docs", 12))
+                .thenReturn(pullRequestRevision(12, head, newSha()));
         when(gitHubClient.listPullRequestChangedFiles(TOKEN, "acme", "docs", 12)).thenReturn(List.of(invoiceFile(PATCH)));
         mockInvoiceContentAndAnalyzer();
 
@@ -163,6 +166,57 @@ class SourceChangeDetectionTest {
                 .andExpect(jsonPath("$[0].pullRequestNumber").value(12))
                 .andExpect(jsonPath("$[0].commitSha").value(head))
                 .andExpect(jsonPath("$[0].files[0].entities[?(@.name == 'Invoice.tax')].change", contains("ADDED")));
+    }
+
+    @Test
+    void headChangingDuringFileFetch_isRejectedBeforeAnalyzing() throws Exception {
+        String user = "change-stale-head";
+        Repo repo = connectAndAddRepo(user);
+        String head = newSha();
+        String base = newSha();
+        when(gitHubClient.getPullRequest(TOKEN, "acme", "docs", 12))
+                .thenReturn(pullRequestRevision(12, head, base), pullRequestRevision(12, newSha(), base));
+        when(gitHubClient.listPullRequestChangedFiles(TOKEN, "acme", "docs", 12))
+                .thenReturn(List.of(invoiceFile(PATCH)));
+
+        sourceChangeService.detect(
+                new SourceChangeRequest(UUID.fromString(repo.id()), SourceChange.Trigger.PULL_REQUEST, head, 12));
+
+        mvc.perform(get(sourceChangesUrl(repo.id())).header(USER_HEADER, user))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].status").value("FAILED"))
+                .andExpect(jsonPath("$[0].errorCode").value("PULL_REQUEST_HEAD_CHANGED"))
+                .andExpect(jsonPath("$[0].files.length()").value(0));
+        verify(analyzerClient, never()).analyze(eq("acme/docs"), anyList());
+        verify(documentsClient, never()).find(eq("acme/docs"), anyList());
+    }
+
+    @Test
+    void replay_skipsGitHubAndKeepsPreviouslyCompletedAnalysis() throws Exception {
+        String user = "change-replay";
+        Repo repo = connectAndAddRepo(user);
+        String sha = newSha();
+        when(gitHubClient.getCommitFiles(TOKEN, "acme", "docs", sha))
+                .thenReturn(List.of(invoiceFile(PATCH)));
+        mockInvoiceContentAndAnalyzer();
+
+        sourceChangeService.detect(commit(repo.id(), sha));
+        sourceChangeService.detect(commit(repo.id(), sha));
+
+        mvc.perform(get(sourceChangesUrl(repo.id())).header(USER_HEADER, user))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].status").value("PENDING"))
+                .andExpect(jsonPath("$[0].documentsStatus").value("FOUND"))
+                .andExpect(jsonPath("$[0].files[0].entities.length()").value(4));
+        verify(documentsClient, times(1)).find(eq("acme/docs"), anyList());
+        verify(gitHubClient, times(1)).getCommitFiles(TOKEN, "acme", "docs", sha);
+    }
+
+    private static GitHubPullRequest pullRequestRevision(int number, String head, String base) {
+        return new GitHubPullRequest(number, null, null, "open", null, null,
+                new GitHubPullRequest.Ref("feature", head), new GitHubPullRequest.Ref("main", base),
+                null, null, null, null);
     }
 
     // ------------------------------------------------------------------ Không có mã nguồn, lỗi, thử lại

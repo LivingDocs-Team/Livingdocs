@@ -11,6 +11,7 @@ import com.livingdocs.github.change.UnifiedDiff;
 import com.livingdocs.github.client.GitHubBlob;
 import com.livingdocs.github.client.GitHubChangedFile;
 import com.livingdocs.github.client.GitHubClient;
+import com.livingdocs.github.client.GitHubPullRequest;
 import com.livingdocs.github.dto.SourceChangeResponse;
 import com.livingdocs.github.entity.AffectedDocument;
 import com.livingdocs.github.entity.ConnectedRepository;
@@ -94,6 +95,15 @@ public class SourceChangeService {
         if (repo == null) {
             return; // repo vừa bị gỡ khỏi workspace
         }
+        Optional<SourceChange> existing = sourceChangeRepository.findByRepositoryIdAndTriggerTypeAndCommitSha(
+                request.repositoryId(), request.trigger(), request.commitSha());
+        if (existing.isPresent() && existing.get().getStatus() == SourceChange.Status.PENDING) {
+            SourceChange change = existing.get();
+            if (change.getDocumentsStatus() != SourceChange.DocumentsStatus.FOUND) {
+                findAffectedDocuments(repo, change.getId());
+            }
+            return;
+        }
         Result result;
         try {
             result = Result.found(findChangedFiles(repo, request));
@@ -106,7 +116,7 @@ public class SourceChangeService {
         }
         UUID pending = save(request, result);
         if (pending != null) {
-            findAffectedDocuments(repo.getFullName(), pending);
+            findAffectedDocuments(repo, pending);
         }
     }
 
@@ -128,7 +138,7 @@ public class SourceChangeService {
                 && change.getDocumentsStatus() == SourceChange.DocumentsStatus.FAILED) {
             ConnectedRepository repo = repositoryRepository.findById(repositoryId)
                     .orElseThrow(() -> ApiException.notFound("Repository " + repositoryId + " was not found."));
-            findAffectedDocuments(repo.getFullName(), changeId);
+            findAffectedDocuments(repo, changeId);
             return transaction.execute(status -> sourceChangeRepository.findById(changeId).map(SourceChangeResponse::from));
         }
         if (change.getStatus() != SourceChange.Status.FAILED) {
@@ -150,7 +160,7 @@ public class SourceChangeService {
         String name = ownerAndName[1];
         List<GitHubChangedFile> changed = request.trigger() == SourceChange.Trigger.COMMIT
                 ? gitHubClient.getCommitFiles(token, owner, name, request.commitSha())
-                : gitHubClient.listPullRequestChangedFiles(token, owner, name, request.pullRequestNumber());
+                : pullRequestFiles(token, owner, name, request);
         List<GitHubChangedFile> sources = changed.stream().filter(SourceChangeService::isSourceFile).toList();
 
         List<SourceChangeFile> rows = new ArrayList<>();
@@ -211,6 +221,31 @@ public class SourceChangeService {
             }
         }
         return rows;
+    }
+
+    private List<GitHubChangedFile> pullRequestFiles(String token, String owner, String name,
+                                                    SourceChangeRequest request) {
+        int number = request.pullRequestNumber();
+        String base = verifiedPullRequestBase(token, owner, name, number, request.commitSha());
+        List<GitHubChangedFile> files = gitHubClient.listPullRequestChangedFiles(token, owner, name, number);
+        if (!base.equals(verifiedPullRequestBase(token, owner, name, number, request.commitSha()))) {
+            throw new SourceChangeException("PULL_REQUEST_BASE_CHANGED",
+                    "The pull request base changed while loading files. Retry the analysis.");
+        }
+        return files;
+    }
+
+    private String verifiedPullRequestBase(String token, String owner, String name, int number, String headSha) {
+        GitHubPullRequest pullRequest = gitHubClient.getPullRequest(token, owner, name, number);
+        if (pullRequest == null || pullRequest.head() == null || pullRequest.head().sha() == null
+                || pullRequest.base() == null || pullRequest.base().sha() == null) {
+            throw new SourceChangeException("GITHUB_INVALID_RESPONSE", "GitHub returned an incomplete pull request.");
+        }
+        if (!headSha.equals(pullRequest.head().sha())) {
+            throw new SourceChangeException("PULL_REQUEST_HEAD_CHANGED",
+                    "The pull request no longer points to the requested source revision.");
+        }
+        return pullRequest.base().sha();
     }
 
     /** Không gọi Code Analyzer khi không có file nào để phân tích (vd. commit chỉ sửa README, hoặc chỉ thêm file mới). */
@@ -292,14 +327,20 @@ public class SourceChangeService {
     // ------------------------------------------------------------------ tài liệu bị ảnh hưởng (LD-122)
 
     /** Đọc source change và lưu kết quả trong transaction ngắn; gọi ai-service ở giữa, ngoài transaction. */
-    private void findAffectedDocuments(String repository, UUID changeId) {
+    private void findAffectedDocuments(ConnectedRepository repository, UUID changeId) {
         List<AffectedDocumentsClient.ChangedFile> files = transaction.execute(status ->
                 sourceChangeRepository.findById(changeId).map(SourceChangeService::changedFiles).orElse(null));
         if (files == null) {
             return; // source change vừa bị xoá
         }
-        Consumer<SourceChange> result = lookUpDocuments(repository, files);
-        transaction.executeWithoutResult(status -> sourceChangeRepository.findById(changeId).ifPresent(result));
+        Consumer<SourceChange> result = lookUpDocuments(repository.getFullName(), files);
+        transaction.executeWithoutResult(status -> {
+            if (repositoryRepository.lockById(repository.getId()).isPresent()) {
+                sourceChangeRepository.findById(changeId)
+                        .filter(change -> change.getDocumentsStatus() != SourceChange.DocumentsStatus.FOUND)
+                        .ifPresent(result);
+            }
+        });
     }
 
     private Consumer<SourceChange> lookUpDocuments(String repository, List<AffectedDocumentsClient.ChangedFile> files) {
@@ -338,8 +379,14 @@ public class SourceChangeService {
     /** Trả về id của source change nếu nó được lưu ở trạng thái PENDING. */
     private UUID save(SourceChangeRequest request, Result result) {
         return transaction.execute(status -> {
+            if (repositoryRepository.lockById(request.repositoryId()).isEmpty()) {
+                return null;
+            }
             SourceChange change = sourceChangeRepository.findByRepositoryIdAndTriggerTypeAndCommitSha(
                     request.repositoryId(), request.trigger(), request.commitSha()).orElse(null);
+            if (change != null && change.getStatus() == SourceChange.Status.PENDING) {
+                return change.getDocumentsStatus() == SourceChange.DocumentsStatus.FOUND ? null : change.getId();
+            }
             if (result.files() != null && result.files().isEmpty()) {
                 if (change != null) {
                     sourceChangeRepository.delete(change); // chạy lại và không còn file mã nguồn nào thay đổi
