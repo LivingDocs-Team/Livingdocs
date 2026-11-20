@@ -108,6 +108,7 @@ Frontend gọi qua Backend BFF → GitHub Integration, cùng cấu trúc dưới
 
 ## 8. Kiểm thử
 
+- AI Service (LD-228): `ai-service/tests/test_template_management.py` (21 test, TM-01 … TM-08: giới hạn độ dài, mọi thứ tự mục, vòng đời có phiên bản, sửa đồng thời, khởi động lại, job giữ phiên bản, mẫu có sẵn không đổi). Báo cáo: [LD-228-Kiem-thu-quan-ly-mau.md](LD-228-Kiem-thu-quan-ly-mau.md).
 - AI Service (LD-227): `ai-service/tests/test_template_versions.py` (11 test: phiên bản 1, mỗi lần sửa một phiên bản, nội dung giống không tạo phiên bản, khôi phục, trùng tên khi khôi phục, mẫu có sẵn, 404, job/báo cáo/tài liệu ghi phiên bản, sinh theo phiên bản cũ, lưu file và file cũ, xoá mẫu).
 - AI Service: `ai-service/tests/test_templates.py` (24 test: xem, kiểm tra hợp lệ, trùng tên, sửa/xoá, mẫu có sẵn chỉ đọc, lưu file và khởi động lại, file hỏng, tài liệu đúng mục và thứ tự, phạm vi prompt và điểm, chụp mẫu cho job).
 - GitHub Integration: `DocumentationTemplateServiceTest` (thêm `listsReadsAndRestoresTemplateVersions`, `mapsMissingVersionAndReadOnlyRestore`), `DocumentationTemplateControllerTest` (thêm `listsReadsAndRestoresVersions`), `DocumentationGenerationServiceTest.reportsUnknownTemplateAsBadRequest`.
