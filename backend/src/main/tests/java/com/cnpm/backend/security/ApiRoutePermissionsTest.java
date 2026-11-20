@@ -69,6 +69,11 @@ class ApiRoutePermissionsTest {
             Map.entry("POST /api/documentation/templates", List.of("TECHNICAL_LEAD")),
             Map.entry("PUT /api/documentation/templates/abc", List.of("TECHNICAL_LEAD")),
             Map.entry("DELETE /api/documentation/templates/abc", List.of("TECHNICAL_LEAD")),
+            // template versions (LD-227): read with the templates screen, restore = update
+            Map.entry("GET /api/documentation/templates/abc/versions", List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD")),
+            Map.entry("GET /api/documentation/templates/abc/versions/2",
+                    List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD")),
+            Map.entry("POST /api/documentation/templates/abc/versions/1/restore", List.of("TECHNICAL_LEAD")),
             // drift: analysis was removed for every role, thresholds stay for Technical Lead
             Map.entry("GET /api/documentation/drift/severity-rules", List.of("TECHNICAL_LEAD")),
             Map.entry("POST /api/repositories/" + ID + "/drift/analyze", List.of()),
