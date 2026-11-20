@@ -59,6 +59,24 @@ public class DocumentationTemplateController {
         return templateService.update(templateId, request);
     }
 
+    @GetMapping("/{templateId}/versions")
+    @Operation(summary = "List the saved versions of a template, newest first")
+    public JsonNode versions(@PathVariable String templateId) {
+        return templateService.versions(templateId);
+    }
+
+    @GetMapping("/{templateId}/versions/{number}")
+    @Operation(summary = "Read one version of a template")
+    public JsonNode version(@PathVariable String templateId, @PathVariable int number) {
+        return templateService.version(templateId, number);
+    }
+
+    @PostMapping("/{templateId}/versions/{number}/restore")
+    @Operation(summary = "Restore an older version (saved as a new version; history is kept)")
+    public JsonNode restore(@PathVariable String templateId, @PathVariable int number) {
+        return templateService.restore(templateId, number);
+    }
+
     @DeleteMapping("/{templateId}")
     @Operation(summary = "Delete a custom template")
     public ResponseEntity<Void> delete(@PathVariable String templateId) {
