@@ -17,6 +17,10 @@ import jakarta.persistence.LockModeType;
 
 @Repository
 public interface DocumentWorkflowRepository extends JpaRepository<DocumentWorkflow, UUID> {
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select w from DocumentWorkflow w where w.documentId = :documentId")
+    java.util.Optional<DocumentWorkflow> lockByDocumentId(@Param("documentId") String documentId);
+
     boolean existsByDocumentId(String documentId);
     Page<DocumentWorkflow> findByOwnerUserIdOrderByCreatedAtDesc(String ownerUserId, Pageable pageable);
     Page<DocumentWorkflow> findByStatusOrderBySubmittedAtAsc(DocumentWorkflowStatus status, Pageable pageable);

@@ -25,7 +25,7 @@ from .jobs import JobOutput
 from .models import JobReport, Scope, now
 from .renderer import render_overview
 from .version_models import (Document, DocumentVersion, FileSection, HistoryAction, HistoryEvent,
-                             SectionAction, SectionChange, SkippedFile, VersionOrigin,
+                             RevisionDraftRequest, SectionAction, SectionChange, SkippedFile, SourceChangeRef, VersionOrigin,
                              VersionStatus, VersionSummary)
 
 log = logging.getLogger(__name__)
@@ -300,6 +300,87 @@ class DocumentStore:
             self._save()
             return doc
 
+    def revision_candidates(self, repository_id: str) -> List[Document]:
+        with self._lock:
+            return [
+                doc.model_copy(deep=True)
+                for doc in self._docs.values()
+                if doc.owner_user_id and doc.current_version
+                and (snapshot := self.version(doc.id).source_snapshot)
+                and snapshot.repository_id == repository_id
+            ]
+
+    def _revision_base(self, doc_id: str, owner: str, request: RevisionDraftRequest):
+        """Called under the store lock, before generation and again before persisting."""
+        doc = self.get_owned(doc_id, owner)
+        base = self.version(doc_id, request.base_version)
+        snapshot = request.source_snapshot
+        if (not base.source_snapshot
+                or base.source_snapshot.repository_id != snapshot.repository_id
+                or base.source_snapshot.repository_full_name.casefold() != snapshot.repository_full_name.casefold()):
+            raise VersionError(409, "Document belongs to a different repository")
+        for version in self._versions[doc_id]:
+            if (version.origin == VersionOrigin.source_change
+                    and any(
+                        ref.id == request.source_change_id
+                        and ref.trigger == request.trigger
+                        and ref.commit_sha == snapshot.commit_sha
+                        and ref.pull_request_number == request.pull_request_number
+                        for ref in version.source_changes)):
+                return doc, base, version
+        if doc.current_version != request.base_version or doc.pending_version is not None:
+            raise VersionError(409, "The document changed or already has a pending version")
+        return doc, base, None
+
+    def propose_revision(self, doc_id: str, owner: str, request: RevisionDraftRequest, generate):
+        with self._lock:
+            doc, base, existing = self._revision_base(doc_id, owner, request)
+            if existing is not None:
+                return existing
+            if not base.sections_match_content:
+                return None
+            paths = {section.path for section in base.sections}
+            files = [file for file in request.files if file.path in paths]
+            if not files:
+                return None
+
+        replacements, report = generate(doc, files)
+        with self._lock:
+            doc, base, existing = self._revision_base(doc_id, owner, request)
+            if existing is not None:
+                return existing
+            sections = [replacements.get(section.path, section) for section in base.sections]
+            content = assemble(doc, sections, base.skipped, report.template_name)
+            if content == base.content:
+                return None
+            number = doc.versions_total + 1
+            version = DocumentVersion(
+                number=number, status=VersionStatus.proposed, origin=VersionOrigin.source_change,
+                base_version=base.number, content=content, sections=sections, skipped=base.skipped,
+                created_by="AI", source_snapshot=request.source_snapshot,
+                evidence_report=report, review_report=report,
+                source_changes=[SourceChangeRef(
+                    id=request.source_change_id, trigger=request.trigger,
+                    commit_sha=request.source_snapshot.commit_sha,
+                    pull_request_number=request.pull_request_number)],
+                changes=[SectionChange(path=path, action=SectionAction.updated) for path in replacements],
+            )
+            previous = doc.model_copy(deep=True)
+            self._versions[doc_id].append(version)
+            doc.pending_revision = request.source_snapshot
+            doc.pending_version = doc.versions_total = number
+            doc.updated_at = now()
+            self._event(doc_id, HistoryAction.proposed, number, "AI",
+                        f"Source revision {request.source_snapshot.commit_sha}", related=base.number)
+            try:
+                self._save()
+            except OSError:
+                self._versions[doc_id].pop()
+                self._events[doc_id].pop()
+                self._docs[doc_id] = previous
+                raise
+            return version
+
     def get_owned(self, doc_id: str, owner_user_id: str) -> Document:
         with self._lock:
             doc = self.get(doc_id)
@@ -334,6 +415,7 @@ class DocumentStore:
                 sections=list(base.sections),
                 skipped=list(base.skipped),
                 sections_match_content=False,
+                source_changes=[ref.model_copy(deep=True) for ref in base.source_changes],
                 manual=True,
                 note=note,
                 created_by=owner_user_id,
@@ -458,6 +540,7 @@ class DocumentStore:
             version.decided_by = actor_user_id
             version.decided_at = now()
             version.note = note or version.note
+            doc.pending_revision = None
             doc.pending_version = None
             doc.updated_at = now()
             self._event(doc_id, action, version_number, actor_user_id, note)

@@ -9,7 +9,7 @@ from enum import Enum
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
-from .models import JobReport, Scope, SourceSnapshot, now
+from .models import FileAnalysis, JobReport, Scope, SourceSnapshot, now
 
 
 class SourceChangeRef(BaseModel):
@@ -20,6 +20,15 @@ class SourceChangeRef(BaseModel):
 
 
 # ---------- Requests ----------
+
+class RevisionDraftRequest(BaseModel):
+    source_change_id: str = Field(min_length=1)
+    trigger: str = Field(pattern="^(COMMIT|PULL_REQUEST)$")
+    pull_request_number: Optional[int] = Field(default=None, ge=1)
+    source_snapshot: SourceSnapshot
+    base_version: int = Field(ge=1)
+    files: List[FileAnalysis] = Field(min_length=1, max_length=20)
+
 
 class _Actor(BaseModel):
     actor: Optional[str] = Field(default=None, max_length=200)   # who did it (user id / name)
@@ -147,6 +156,7 @@ class Document(BaseModel):
     owner_user_id: Optional[str] = None
     current_version: int = 1               # newest accepted version
     pending_version: Optional[int] = None  # proposal waiting for review, if any
+    pending_revision: Optional[SourceSnapshot] = None
     versions_total: int = 1
     created_at: datetime = Field(default_factory=now)
     updated_at: datetime = Field(default_factory=now)

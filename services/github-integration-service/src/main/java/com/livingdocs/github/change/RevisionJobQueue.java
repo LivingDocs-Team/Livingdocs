@@ -56,6 +56,14 @@ public class RevisionJobQueue {
                 lease.attempt() - 1) == 1);
     }
 
+    public boolean lockCurrentLease(Lease lease, OffsetDateTime now) {
+        return !jdbc.queryForList("""
+                SELECT id FROM revision_jobs
+                WHERE id = ? AND lease_token = ? AND status = 'RUNNING' AND available_at > ?
+                FOR UPDATE
+                """, UUID.class, lease.id(), lease.token(), now).isEmpty();
+    }
+
     public void finish(Lease lease, OffsetDateTime now, String errorCode, boolean retryable) {
         String status = "COMPLETED";
         if (errorCode != null) {

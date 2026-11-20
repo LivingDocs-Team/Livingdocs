@@ -1,6 +1,17 @@
 package com.livingdocs.github;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Set;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.web.client.RestClient;
+import com.livingdocs.github.service.DocumentWorkflowService;
+import com.livingdocs.github.service.DocumentationGenerationService;
+import com.livingdocs.github.repository.DocumentWorkflowRepository;
+import com.livingdocs.github.entity.StaffReviewResult;
+import com.livingdocs.github.entity.ManagerDecision;
+import com.livingdocs.github.dto.WorkflowDtos.StaffReviewRequest;
+import com.livingdocs.github.client.GitHubCommit;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.livingdocs.github.change.AffectedDocumentsClient;
 import com.livingdocs.github.change.CodeAnalyzerClient;
 import com.livingdocs.github.change.CodeEntity;
@@ -47,12 +58,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.contains;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.after;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -101,6 +114,89 @@ class SourceChangeDetectionTest {
     @MockitoBean GitHubClient gitHubClient;
     @MockitoBean CodeAnalyzerClient analyzerClient;
     @MockitoBean AffectedDocumentsClient documentsClient;  // trả danh sách rỗng nếu test không cấu hình
+
+    @Autowired DocumentWorkflowService workflows;
+    @Autowired DocumentWorkflowRepository workflowRows;
+
+    @MockitoBean(name = "aiServiceRestClient", answers = org.mockito.Answers.RETURNS_DEEP_STUBS)
+    RestClient revisionAi;
+    @MockitoBean(name = "codeAnalyzerRestClient", answers = org.mockito.Answers.RETURNS_DEEP_STUBS)
+    RestClient revisionAnalyzer;
+    @MockitoBean DocumentationGenerationService workflowDocuments;
+
+    @Test
+    void signedWebhookDraftNeedsStaffAndExactCurrentManagerApproval() throws Exception {
+        String owner = "revision-owner";
+        String manager = "revision-manager";
+        String staff = "revision-staff";
+        String document = "revision-e2e";
+        var repo = connectAndAddRepo(owner);
+        UUID repositoryId = UUID.fromString(repo.id());
+        String sha = newSha();
+        var commit = new GitHubCommit(sha, null, null, null);
+        when(gitHubClient.getCommit(TOKEN, "acme", "docs", "main")).thenReturn(commit);
+        when(gitHubClient.getCommitFiles(TOKEN, "acme", "docs", sha)).thenReturn(List.of(invoiceFile(PATCH)));
+        mockInvoiceContentAndAnalyzer();
+        when(revisionAi.get().uri("/internal/revision-draft-candidates/{id}", repositoryId)
+                .retrieve().body(JsonNode.class)).thenReturn(
+                        json.createArrayNode().add(json.createObjectNode().put("id", document)
+                                .put("owner_user_id", owner).put("current_version", 1)));
+        var analysis = json.createObjectNode();
+        analysis.putArray("files").addObject().put("path", PATH);
+        when(revisionAnalyzer.post().uri("/api/v1/analyze-repo")
+                .body(org.mockito.ArgumentMatchers.any(AnalysisInput.class)).retrieve()
+                .body(JsonNode.class)).thenReturn(analysis);
+        var draftRequest = mock(RestClient.RequestBodySpec.class, org.mockito.Answers.RETURNS_SELF);
+        var draftResponse = mock(RestClient.ResponseSpec.class);
+        when(revisionAi.post().uri("/internal/documents/{id}/revision-drafts", document)).thenReturn(draftRequest);
+        when(draftRequest.retrieve()).thenReturn(draftResponse);
+        when(draftResponse.body(JsonNode.class)).thenReturn(
+                json.createObjectNode().put("status", "proposed").put("number", 2));
+
+        sendWebhook("push", pushPayload(repo.githubId(), "refs/heads/main", sha)).andExpect(status().isAccepted());
+        var page = PageRequest.of(0, 10);
+        UUID workflowId = null;
+        for (int attempt = 0; attempt < 100 && workflowId == null; attempt++) {
+            workflowId = workflowRows.findByOwnerUserIdOrderByCreatedAtDesc(owner, page).stream()
+                    .findFirst().map(row -> row.getId()).orElse(null);
+            if (workflowId == null) {
+                Thread.sleep(50);
+            }
+        }
+        assertThat(workflowId).as("webhook revision job entered Staff queue").isNotNull();
+        UUID id = workflowId;
+        var draft = json.createObjectNode().put("owner_user_id", owner)
+                .put("pending_version", 2).put("current_version", 1);
+        draft.putObject("pending_revision").put("repository_id", repo.id()).put("commit_sha", sha);
+        when(workflowDocuments.getDocument(staff, document)).thenReturn(draft);
+        when(workflowDocuments.getDocument(manager, document)).thenReturn(draft);
+
+        var staffPermissions = Set.of("ROLE_STAFF", "DOCUMENT_CLAIM", "DOCUMENT_REVIEW");
+        var managerPermissions = Set.of("ROLE_MANAGER", "DOCUMENT_APPROVE");
+        var approved = ManagerDecision.APPROVED;
+        assertThatThrownBy(
+                () -> workflows.decide(manager, managerPermissions, id, approved, null, 2))
+                .hasMessageContaining("successful staff review");
+        workflows.claim(staff, staffPermissions, id);
+        workflows.staffReview(staff, staffPermissions, id, new StaffReviewRequest(
+                StaffReviewResult.PASSED, "Verified against source"));
+
+        assertThatThrownBy(
+                () -> workflows.decide(manager, managerPermissions, id, approved, null, 1))
+                .hasMessageContaining("Reload the submitted document version");
+        when(gitHubClient.getCommit(TOKEN, "acme", "docs", "main")).thenReturn(
+                new GitHubCommit(newSha(), null, null, null));
+        assertThatThrownBy(
+                () -> workflows.decide(manager, managerPermissions, id, approved, null, 2))
+                .hasMessageContaining("could not be verified as current");
+        verify(workflowDocuments, never()).resolveDocumentVersion(manager, owner, document, 2, "APPROVED", null);
+        when(gitHubClient.getCommit(TOKEN, "acme", "docs", "main")).thenReturn(commit);
+        assertThat(workflows.decide(manager, managerPermissions, id, approved, null, 2).submittedDocumentVersion())
+                .isEqualTo(2);
+        verify(workflowDocuments).resolveDocumentVersion(manager, owner, document, 2, "APPROVED", null);
+        sendWebhook("push", pushPayload(repo.githubId(), "refs/heads/main", sha)).andExpect(status().isAccepted());
+        assertThat(workflowRows.findByOwnerUserIdOrderByCreatedAtDesc(owner, page)).hasSize(1);
+    }
 
     // ------------------------------------------------------------------ LD-118: commit trên nhánh mặc định
 

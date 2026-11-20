@@ -21,19 +21,21 @@ public class RevisionJobWorker {
     private static final Logger log = LoggerFactory.getLogger(RevisionJobWorker.class);
     private static final Set<String> RETRYABLE = Set.of("ANALYZER_UNAVAILABLE", "AI_SERVICE_UNAVAILABLE",
             "GITHUB_UNAVAILABLE", "RATE_LIMITED", "GITHUB_INVALID_RESPONSE", "PULL_REQUEST_BASE_CHANGED",
-            "UNEXPECTED_FAILURE");
+            "UNEXPECTED_FAILURE", "DRAFT_VERSION_CONFLICT");
 
     private final RevisionJobQueue jobs;
     private final ConnectedRepositoryRepository repositories;
     private final SourceChangeRepository changes;
     private final SourceChangeService detector;
+    private final RevisionDraftGenerator drafts;
 
     public RevisionJobWorker(RevisionJobQueue jobs, ConnectedRepositoryRepository repositories,
-                             SourceChangeRepository changes, SourceChangeService detector) {
+                             SourceChangeRepository changes, SourceChangeService detector, RevisionDraftGenerator drafts) {
         this.jobs = jobs;
         this.repositories = repositories;
         this.changes = changes;
         this.detector = detector;
+        this.drafts = drafts;
     }
 
     @EventListener
@@ -55,10 +57,14 @@ public class RevisionJobWorker {
         try {
             SourceChangeRequest request = lease.request();
             detector.detect(request);
-            errorCode = changes.findByRepositoryIdAndTriggerTypeAndCommitSha(
-                            request.repositoryId(), request.trigger(), request.commitSha())
-                    .map(RevisionJobWorker::failureCode)
-                    .orElse(null);
+            var change = changes.findByRepositoryIdAndTriggerTypeAndCommitSha(
+                            request.repositoryId(), request.trigger(), request.commitSha());
+            errorCode = change.map(RevisionJobWorker::failureCode).orElse(null);
+            if (errorCode == null && change.isPresent()) {
+                drafts.generate(lease, change.get());
+            }
+        } catch (SourceChangeException exception) {
+            errorCode = exception.getCode();
         } catch (RuntimeException exception) {
             log.warn("Revision job {} failed with {}", lease.id(), exception.getClass().getSimpleName());
             errorCode = "UNEXPECTED_FAILURE";
