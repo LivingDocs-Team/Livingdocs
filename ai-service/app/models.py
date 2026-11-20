@@ -118,6 +118,8 @@ class SourceSnapshot(BaseModel):
     branch: str
     commit_sha: str
     fetched_at: Optional[datetime] = None
+    pull_request_number: Optional[int] = None
+    pull_request_base_sha: Optional[str] = None
 class GenerateRequest(BaseModel):
     scope: Scope
     target: str = Field(min_length=1)          # file path, module name or repository name

@@ -18,6 +18,7 @@ import com.livingdocs.github.entity.ConnectedRepository;
 import com.livingdocs.github.entity.GitHubConnection;
 import com.livingdocs.github.entity.ImpactEvidence;
 import com.livingdocs.github.entity.SourceChange;
+import com.livingdocs.github.entity.RepositoryStatus;
 import com.livingdocs.github.entity.SourceChangeEntity;
 import com.livingdocs.github.entity.SourceChangeFile;
 import com.livingdocs.github.exception.ApiException;
@@ -251,6 +252,53 @@ public class SourceChangeService {
     /** Không gọi Code Analyzer khi không có file nào để phân tích (vd. commit chỉ sửa README, hoặc chỉ thêm file mới). */
     private Map<String, List<CodeEntity>> analyze(String target, List<AnalysisInput.FileInput> files) {
         return files.isEmpty() ? Map.of() : analyzerClient.analyze(target, files);
+    }
+
+    public record DraftSource(String branch, String pullRequestBaseSha, List<AnalysisInput.FileInput> files) {}
+
+    public DraftSource draftSource(ConnectedRepository repo, SourceChangeRequest request) {
+        String[] name = repo.getFullName().split("/", 2);
+        String token = accessToken(repo);
+        String base = requireCurrentRevision(repo, request);
+        List<GitHubChangedFile> changes = request.trigger() == SourceChange.Trigger.COMMIT
+                ? gitHubClient.getCommitFiles(token, name[0], name[1], request.commitSha())
+                : pullRequestFiles(token, name[0], name[1], request);
+        List<AnalysisInput.FileInput> files = new ArrayList<>();
+        for (GitHubChangedFile file : changes) {
+            if (!isSourceFile(file) || !"modified".equals(file.status()) || file.sha() == null) {
+                continue;
+            }
+            if (files.size() == 20) {
+                throw new SourceChangeException("DRAFT_FILE_LIMIT_EXCEEDED", "Too many changed files for one draft.");
+            }
+            GitHubBlob blob = gitHubClient.getBlob(token, name[0], name[1], file.sha());
+            String text = decode(blob);
+            if (text != null && text.getBytes(StandardCharsets.UTF_8).length <= SyncOptions.DEFAULT_MAX_FILE_SIZE_BYTES) {
+                files.add(new AnalysisInput.FileInput(file.filename(), LanguageDetector.detect(file.filename()), text));
+            }
+        }
+        if (!java.util.Objects.equals(base, requireCurrentRevision(repo, request))) {
+            throw new SourceChangeException("PULL_REQUEST_BASE_CHANGED", "The pull request base changed.");
+        }
+        String branch = request.pullRequestNumber() == null
+                ? repo.getDefaultBranch() : "refs/pull/" + request.pullRequestNumber() + "/head";
+        return new DraftSource(branch, base, files);
+    }
+
+    public String requireCurrentRevision(ConnectedRepository repo, SourceChangeRequest request) {
+        if (repo.getStatus() == RepositoryStatus.DISCONNECTED) {
+            throw new SourceChangeException("REPOSITORY_DISCONNECTED", "The repository is disconnected.");
+        }
+        String[] name = repo.getFullName().split("/", 2);
+        String token = accessToken(repo);
+        if (request.trigger() == SourceChange.Trigger.PULL_REQUEST) {
+            return verifiedPullRequestBase(token, name[0], name[1], request.pullRequestNumber(), request.commitSha());
+        }
+        var head = gitHubClient.getCommit(token, name[0], name[1], repo.getDefaultBranch());
+        if (head == null || !request.commitSha().equalsIgnoreCase(head.sha())) {
+            throw new SourceChangeException("STALE_SOURCE_REVISION", "The default branch advanced.");
+        }
+        return null;
     }
 
     private String accessToken(ConnectedRepository repo) {
