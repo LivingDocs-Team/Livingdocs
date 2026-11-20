@@ -103,7 +103,9 @@ class RevisionWorkflowE2ETest {
     RestClient revisionAnalyzer;
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.EnumSource(Scenario.class)
+    @org.junit.jupiter.params.provider.EnumSource(value = Scenario.class,
+            mode = org.junit.jupiter.params.provider.EnumSource.Mode.EXCLUDE, names = "STAGE_RESTART")
+    @org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable(named = "LIVINGDOCS_E2E_RESTART_PHASE", matches = ".+")
     void signedWebhookRequiresStaffAndExactManagerDecision(Scenario scenario) throws Exception {
         String owner = Long.toString(java.util.concurrent.ThreadLocalRandom.current().nextLong(1, Long.MAX_VALUE));
         var repo = connectAndAddRepo(owner);
@@ -123,7 +125,7 @@ class RevisionWorkflowE2ETest {
                 .body(org.mockito.ArgumentMatchers.any(AnalysisInput.class)).retrieve()
                 .body(JsonNode.class)).thenAnswer(invocation -> {
                     if (analysisCalls.incrementAndGet() == 1) {
-                        if (scenario == Scenario.RETRY) {
+                        if (scenario == Scenario.RETRY || scenario == Scenario.STAGE_RESTART) {
                             return json.createObjectNode();
                         }
                         if (scenario == Scenario.REPLACE_WORKER) {
@@ -183,6 +185,21 @@ class RevisionWorkflowE2ETest {
         sendWebhook(event, delivery).andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.status").value("DUPLICATE"));
         UUID repositoryId = UUID.fromString(repo.id());
+        if (scenario == Scenario.STAGE_RESTART) {
+            await(() -> revisionJdbc.queryForObject("""
+                    SELECT count(*) FROM revision_jobs
+                    WHERE repository_id = ? AND status = 'QUEUED' AND attempts = 1
+                        AND error_code = 'ANALYZER_UNAVAILABLE'
+                    """, Integer.class, repositoryId) == 1);
+            assertThat(revisionJdbc.update("""
+                    UPDATE revision_jobs SET available_at = CURRENT_TIMESTAMP + INTERVAL '1 day'
+                    WHERE repository_id = ? AND status = 'QUEUED' AND attempts = 1
+                    """, repositoryId)).isEqualTo(1);
+            assertThat(analysisCalls.get()).isEqualTo(1);
+            assertThat(ai.get().uri("/internal/documents/{id}", documentId).retrieve().body(JsonNode.class)
+                    .path("pending_version").isNull()).isTrue();
+            return;
+        }
         if (scenario == Scenario.REPLACE_WORKER) {
             try {
                 assertThat(firstWorker.await(10, TimeUnit.SECONDS)).isTrue();
@@ -245,7 +262,67 @@ class RevisionWorkflowE2ETest {
     }
 
     enum Scenario {
-        APPROVE, REJECT, REPLACE_WORKER, RETRY, POLICY_DISABLED, DOCUMENT_OVERRIDE
+        APPROVE, REJECT, REPLACE_WORKER, RETRY, POLICY_DISABLED, DOCUMENT_OVERRIDE, STAGE_RESTART
+    }
+
+    @org.junit.jupiter.api.Test
+    @org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable(named = "LIVINGDOCS_E2E_RESTART_PHASE", matches = "stage")
+    void stageRetryForProcessRestart() throws Exception {
+        signedWebhookRequiresStaffAndExactManagerDecision(Scenario.STAGE_RESTART);
+    }
+
+    @org.junit.jupiter.api.Test
+    @org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable(named = "LIVINGDOCS_E2E_RESTART_PHASE", matches = "resume")
+    void recoversQueuedWebhookAfterBothServicesRestart() throws Exception {
+        var job = revisionJdbc.queryForMap("""
+                SELECT id, repository_id, commit_sha FROM revision_jobs
+                WHERE status = 'QUEUED' AND attempts = 1 AND error_code = 'ANALYZER_UNAVAILABLE'
+                """);
+        var baseline = revisionJdbc.queryForMap("""
+                SELECT id, document_id, owner_user_id FROM document_workflows
+                WHERE status = 'APPROVED' AND submitted_document_version = 1
+                """);
+        UUID repositoryId = (UUID) job.get("repository_id");
+        UUID workflowId = (UUID) baseline.get("id");
+        String sha = (String) job.get("commit_sha");
+        String documentId = (String) baseline.get("document_id");
+        String owner = (String) baseline.get("owner_user_id");
+        var ai = aiService.mutate().defaultHeader(USER_HEADER, owner).build();
+        String docUrl = "/internal/documents/" + documentId;
+        assertThat(ai.get().uri(docUrl).retrieve().body(JsonNode.class).path("current_version").asInt()).isEqualTo(1);
+
+        when(gitHubClient.getCommit(TOKEN, "acme", "docs", "main"))
+                .thenReturn(new GitHubCommit(sha, null, null, null));
+        when(gitHubClient.getCommitFiles(TOKEN, "acme", "docs", sha)).thenReturn(List.of(invoiceFile(PATCH)));
+        mockInvoiceContentAndAnalyzer();
+        var analysis = json.createObjectNode();
+        analysis.putArray("files").addObject().put("path", PATH).put("language", "java")
+                .putArray("classes").addObject().put("name", "Invoice").put("lineno", 1)
+                .put("docstring", "Includes tax in the total.");
+        when(revisionAnalyzer.post().uri("/api/v1/analyze-repo")
+                .body(org.mockito.ArgumentMatchers.any(AnalysisInput.class)).retrieve()
+                .body(JsonNode.class)).thenReturn(analysis);
+        // The first process parked the retry to keep it from running before the restart.
+        assertThat(revisionJdbc.update("""
+                UPDATE revision_jobs SET available_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND repository_id = ? AND status = 'QUEUED' AND attempts = 1
+                """, job.get("id"), repositoryId)).isEqualTo(1);
+        await(() -> "COMPLETED".equals(revisionJdbc.queryForObject(
+                "SELECT status FROM revision_jobs WHERE id = ?", String.class, job.get("id"))));
+        assertThat(revisionJdbc.queryForObject("SELECT attempts FROM revision_jobs WHERE id = ?",
+                Integer.class, job.get("id"))).isEqualTo(2);
+        var pending = ai.get().uri(docUrl).retrieve().body(JsonNode.class);
+        assertThat(pending.path("pending_version").asInt()).isEqualTo(2);
+        assertThat(pending.path("pending_revision").path("commit_sha").asText()).isEqualTo(sha);
+        var staffPermissions = Set.of("ROLE_STAFF", "DOCUMENT_CLAIM", "DOCUMENT_REVIEW");
+        workflows.claim("revision-staff", staffPermissions, workflowId);
+        workflows.staffReview("revision-staff", staffPermissions, workflowId,
+                new StaffReviewRequest(StaffReviewResult.PASSED, "Verified after restart"));
+        workflows.decide("revision-manager", Set.of("ROLE_MANAGER", "DOCUMENT_APPROVE"),
+                workflowId, ManagerDecision.APPROVED, null, 2);
+        var published = ai.get().uri(docUrl).retrieve().body(JsonNode.class);
+        assertThat(published.path("current_version").asInt()).isEqualTo(2);
+        assertThat(published.path("versions_total").asInt()).isEqualTo(2);
     }
 
     private static void await(java.util.function.BooleanSupplier condition) throws InterruptedException {
