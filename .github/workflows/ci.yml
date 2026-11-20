@@ -167,6 +167,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    # PostgreSQL thật cho các test Documentation Collections (cần khóa hàng FOR UPDATE, H2 không đủ).
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: collections_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d collections_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
@@ -181,6 +197,15 @@ jobs:
 
       - name: Build and test (H2 database, mocked GitHub)
         run: mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml verify
+
+      - name: Documentation Collections tests (PostgreSQL)
+        env:
+          COLLECTIONS_TEST_DB_URL: "jdbc:postgresql://localhost:5432/collections_test"
+          COLLECTIONS_TEST_DB_USER: "postgres"
+          COLLECTIONS_TEST_DB_PASSWORD: "postgres"
+        run: >-
+          mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml test
+          -Dtest='DocumentationCollections*PostgresTest'
 
       - name: Live test against real GitHub API
         env:
