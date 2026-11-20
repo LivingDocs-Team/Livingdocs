@@ -87,8 +87,8 @@ class DriftAnalysisServiceTest {
              {"name":"currency","type":"str"}],"return_type":"float"}]}]}
             """;
     private static final String DOCUMENTS = """
-            [{"id":"doc-shop","title":"Shop","target":"acme/shop"},
-             {"id":"doc-other","title":"Other","target":"other/repo"}]
+            [{"id":"doc-shop","title":"Shop","target":"acme/shop","owner_user_id":"drift-user"},
+             {"id":"doc-other","title":"Private document","target":"acme/shop","owner_user_id":"other-user"}]
             """;
     private static final String REPORT = """
             {"id":"report-1","status":"drift_detected","repository":"acme/shop",
@@ -431,7 +431,7 @@ class DriftAnalysisServiceTest {
     }
 
     private void expectDocuments() {
-        aiServiceServer.expect(requestTo("http://ai.test/documents"))
+        aiServiceServer.expect(requestTo("http://ai.test/internal/revision-draft-candidates/" + REPOSITORY_ID))
                 .andExpect(method(GET))
                 .andRespond(withSuccess(DOCUMENTS, MediaType.APPLICATION_JSON));
     }

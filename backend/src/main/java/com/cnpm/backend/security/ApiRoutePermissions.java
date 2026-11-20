@@ -113,12 +113,11 @@ public final class ApiRoutePermissions {
 
         // ---- Drift (#16 was removed for every role; thresholds #17 stay for Technical Lead) ----
         rule("GET", "/api/documentation/drift/severity-rules", need("driftPolicies", 'R'));
-        // No screen of the matrix covers drift analysis any more: these routes are refused for every role.
-        rule("POST", "/api/repositories/{}/drift/analyze");
-        rule("GET", "/api/repositories/{}/drift/reports");
-        rule("GET", "/api/repositories/{}/drift/reports/{}");
-        rule("GET", "/api/repositories/{}/drift/reports/{}/markdown");
-        rule("PUT", "/api/repositories/{}/drift/reports/{}/findings/{}/resolution");
+        rule("POST", "/api/repositories/{}/drift/analyze", need("driftAlerts", 'C'));
+        rule("GET", "/api/repositories/{}/drift/reports", need("driftAlerts", 'R'));
+        rule("GET", "/api/repositories/{}/drift/reports/{}", need("driftAlerts", 'R'));
+        rule("GET", "/api/repositories/{}/drift/reports/{}/markdown", need("driftAlerts", 'R'));
+        rule("PUT", "/api/repositories/{}/drift/reports/{}/findings/{}/resolution", need("driftAlerts", 'U'));
 
         // ---- One saved document and its code links (#8, #20) ----
         rule("GET", "/api/documentation/{}", need("documentation", 'R'), need("knowledgeBase", 'R'));

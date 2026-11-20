@@ -74,10 +74,12 @@ class ApiRoutePermissionsTest {
             Map.entry("GET /api/documentation/templates/abc/versions/2",
                     List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD")),
             Map.entry("POST /api/documentation/templates/abc/versions/1/restore", List.of("TECHNICAL_LEAD")),
-            // drift: analysis was removed for every role, thresholds stay for Technical Lead
+            // Developer reviews alerts. Technical Lead owns threshold settings.
             Map.entry("GET /api/documentation/drift/severity-rules", List.of("TECHNICAL_LEAD")),
-            Map.entry("POST /api/repositories/" + ID + "/drift/analyze", List.of()),
-            Map.entry("GET /api/repositories/" + ID + "/drift/reports", List.of()),
+            Map.entry("POST /api/repositories/" + ID + "/drift/analyze", List.of("DEVELOPER")),
+            Map.entry("GET /api/repositories/" + ID + "/drift/reports", List.of("DEVELOPER")),
+            Map.entry("PUT /api/repositories/" + ID + "/drift/reports/report/findings/F1/resolution",
+                    List.of("DEVELOPER")),
             // workflow (#9, #10, #11, #13, #19)
             Map.entry("POST /api/document-workflows", List.of("DEVELOPER")),
             Map.entry("GET /api/document-workflows/mine", List.of("DEVELOPER", "TECHNICAL_LEAD")),
@@ -144,16 +146,11 @@ class ApiRoutePermissionsTest {
     }
 
     @Test
-    void everyRuleNamesRealScreensAndIsUsableByAtLeastOneRoleExceptTheRemovedDriftRoutes() {
+    void everyRuleNamesRealScreensAndIsUsableByAtLeastOneRole() {
         for (String description : ApiRoutePermissions.ruleDescriptions()) {
             String[] parts = description.split(" ", 2);
             String path = parts[1].replace("{}", "x");
             var needs = ApiRoutePermissions.needsFor(parts[0], path);
-            boolean removedDrift = path.contains("/drift/") && !path.contains("severity-rules");
-            if (removedDrift) {
-                assertThat(needs).as(description).isEmpty();
-                continue;
-            }
             assertThat(needs).as(description).isNotEmpty();
             for (var need : needs) {
                 assertThat(ScreenPermissions.screens()).as(description).contains(need.screen());

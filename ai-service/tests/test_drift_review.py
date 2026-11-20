@@ -226,3 +226,16 @@ def test_api_resolution_endpoint_and_ai_flag():
     assert again["review"]["resolved"] == 1
     row = client.get("/drift/reports", params={"repository": "acme/shop"}).json()[0]
     assert row["review"]["status"] == "in_progress"
+
+    accepted = client.put(url, json={"status": "acknowledged", "decision": "accept", "actor": "7"})
+    assert accepted.status_code == 200
+    assert accepted.json()["resolution"]["proposed"] == f1["suggestion"]
+    assert client.put(url, json={"status": "acknowledged", "decision": "edit", "proposed": " "}).status_code == 422
+    edited = client.put(url, json={"status": "acknowledged", "decision": "edit", "proposed": "Use qty"})
+    assert edited.status_code == 200 and edited.json()["resolution"]["proposed"] == "Use qty"
+    assert client.put(url, json={"status": "dismissed", "decision": "dismiss"}).status_code == 422
+    dismissed = client.put(url, json={"status": "dismissed", "decision": "dismiss", "note": "Archived"})
+    assert dismissed.status_code == 200 and dismissed.json()["resolution"]["proposed"] is None
+    history = dismissed.json()["resolution"]["history"]
+    assert [action["decision"] for action in history] == [None, "accept", "edit", "dismiss"]
+    assert history[-2]["proposed"] == "Use qty"

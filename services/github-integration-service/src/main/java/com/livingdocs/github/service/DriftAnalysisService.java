@@ -88,7 +88,9 @@ public class DriftAnalysisService {
     private final RestClient aiServiceClient;
     private final JsonNodeFactory json = JsonNodeFactory.instance;
     /** Báo cáo -> người tạo (giữ trong bộ nhớ như báo cáo của ai-service). */
-    private final ConcurrentMap<String, String> reportOwners = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, ReportOwner> reportOwners = new ConcurrentHashMap<>();
+
+    private record ReportOwner(String user, UUID repository) { }
 
     public DriftAnalysisService(
             RepositorySyncService repositorySyncService,
@@ -136,7 +138,7 @@ public class DriftAnalysisService {
 
         List<ObjectNode> docs = request.includeRepositoryDocs() == null || request.includeRepositoryDocs()
                 ? repositoryDocs(ctx, pr.head().sha()) : List.of();
-        List<String> documentIds = documentIds(ctx, request.documentIds());
+        List<String> documentIds = documentIds(ctx, userId, repositoryId, request.documentIds());
 
         ObjectNode body = driftRequest(ctx, pr, number, baseSha, files, before, after, docs, documentIds);
         ObjectNode report = postDrift(body);
@@ -146,7 +148,7 @@ public class DriftAnalysisService {
             report.path("warnings").forEach(warnings::add);
         }
         report.set("warnings", warnings);
-        reportOwners.put(report.path("id").asText(), userId);
+        reportOwners.put(report.path("id").asText(), new ReportOwner(userId, repositoryId));
         return report;
     }
 
@@ -165,8 +167,9 @@ public class DriftAnalysisService {
             throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid response.");
         }
         ArrayNode own = json.arrayNode();
+        var expectedOwner = new ReportOwner(userId, repositoryId);
         for (JsonNode row : rows) {
-            if (Objects.equals(reportOwners.get(row.path("id").asText()), userId)) {
+            if (Objects.equals(reportOwners.get(row.path("id").asText()), expectedOwner)) {
                 own.add(row);
             }
         }
@@ -249,10 +252,15 @@ public class DriftAnalysisService {
         if (note != null && note.length() > 2000) {
             throw ApiException.badRequest("note must be 2000 characters or fewer.");
         }
+        if (request.proposed() != null && request.proposed().length() > 20000) {
+            throw ApiException.badRequest("Proposed text must be 20000 characters or fewer.");
+        }
         ObjectNode body = json.objectNode();
         body.put("status", status);
         body.put("actor", userId);
         putIfPresent(body, "note", note);
+        putIfPresent(body, "decision", request.decision());
+        putIfPresent(body, "proposed", request.proposed());
         try {
             JsonNode finding = aiServiceClient.put()
                     .uri("/drift/reports/{id}/findings/{finding}/resolution", reportId, findingId)
@@ -283,12 +291,15 @@ public class DriftAnalysisService {
     private String requireReport(String userId, UUID repositoryId, String reportId) {
         String repository = repositoryId == null ? null
                 : repositorySyncService.requireOwned(userId, repositoryId).getFullName();
-        String owner = reportOwners.get(reportId);
+        ReportOwner owner = reportOwners.get(reportId);
         if (owner == null) {
             throw ApiException.notFound("Drift report not found or the service was restarted.");
         }
-        if (!Objects.equals(owner, userId)) {
+        if (!Objects.equals(owner.user(), userId)) {
             throw ApiException.forbidden("This drift report belongs to another user.");
+        }
+        if (repositoryId != null && !Objects.equals(owner.repository(), repositoryId)) {
+            throw ApiException.notFound("Drift report not found for this repository.");
         }
         return repository;
     }
@@ -532,13 +543,13 @@ public class DriftAnalysisService {
     // ------------------------------------------------------------------ AI service
 
     /** Tài liệu đã lưu cần kiểm tra: chỉ tài liệu sinh cho repo này (target = owner/name). */
-    private List<String> documentIds(Context ctx, List<String> requested) {
-        JsonNode documents = getAiJson(aiServiceClient.get().uri("/documents"),
+    private List<String> documentIds(Context ctx, String userId, UUID repositoryId, List<String> requested) {
+        JsonNode documents = getAiJson(aiServiceClient.get().uri("/internal/revision-draft-candidates/{id}", repositoryId),
                 "The AI service could not list saved documents.");
         Set<String> ofRepository = new LinkedHashSet<>();
         if (documents.isArray()) {
             for (JsonNode d : documents) {
-                if (ctx.fullName.equalsIgnoreCase(d.path("target").asText())) {
+                if (userId.equals(d.path("owner_user_id").asText())) {
                     ofRepository.add(d.path("id").asText());
                 }
             }
