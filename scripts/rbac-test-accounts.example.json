@@ -1,0 +1,10 @@
+{
+  "_comment": "Local test accounts, one per role, for checking the role-based screen flows (Docs/rbac-screen-flow.md). Test-only passwords: never use them on a shared or production stack. Create them with scripts/seed_rbac_test_accounts.py.",
+  "accounts": [
+    {"role": "ADMINISTRATOR", "email": "admin.rbac@livingdocs.test", "username": "rbac_admin", "password": "Rbac-Test-Admin-1", "firstName": "Rbac", "lastName": "Administrator"},
+    {"role": "DEVELOPER", "email": "developer.rbac@livingdocs.test", "username": "rbac_developer", "password": "Rbac-Test-Dev-1", "firstName": "Rbac", "lastName": "Developer"},
+    {"role": "STAFF", "email": "staff.rbac@livingdocs.test", "username": "rbac_staff", "password": "Rbac-Test-Staff-1", "firstName": "Rbac", "lastName": "Staff"},
+    {"role": "MANAGER", "email": "manager.rbac@livingdocs.test", "username": "rbac_manager", "password": "Rbac-Test-Manager-1", "firstName": "Rbac", "lastName": "Manager"},
+    {"role": "TECHNICAL_LEAD", "email": "techlead.rbac@livingdocs.test", "username": "rbac_techlead", "password": "Rbac-Test-Lead-1", "firstName": "Rbac", "lastName": "TechLead"}
+  ]
+}
