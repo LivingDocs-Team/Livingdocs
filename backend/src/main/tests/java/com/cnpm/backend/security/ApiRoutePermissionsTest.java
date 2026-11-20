@@ -22,10 +22,10 @@ class ApiRoutePermissionsTest {
     /** route -> roles that may use it, written from the matrix (not computed from the rules). */
     private static final Map<String, List<String>> ALLOWED = Map.ofEntries(
             // GitHub connection (#5) and repositories (#6)
-            Map.entry("GET /api/github/authorize-url", List.of("DEVELOPER")),
-            Map.entry("GET /api/github/callback", List.of("DEVELOPER")),
-            Map.entry("GET /api/github/connection", List.of("DEVELOPER", "ADMINISTRATOR")),
-            Map.entry("DELETE /api/github/connection", List.of("DEVELOPER")),
+            Map.entry("GET /api/github/authorize-url", List.of("DEVELOPER", "MANAGER")),
+            Map.entry("GET /api/github/callback", List.of("DEVELOPER", "MANAGER")),
+            Map.entry("GET /api/github/connection", List.of("DEVELOPER", "MANAGER", "ADMINISTRATOR")),
+            Map.entry("DELETE /api/github/connection", List.of("DEVELOPER", "MANAGER")),
             Map.entry("GET /api/github/repos/available", List.of("DEVELOPER", "ADMINISTRATOR")),
             Map.entry("GET /api/workspaces/" + WS + "/repositories",
                     List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD", "ADMINISTRATOR")),
@@ -78,6 +78,7 @@ class ApiRoutePermissionsTest {
             Map.entry("GET /api/documentation/drift/severity-rules", List.of("TECHNICAL_LEAD")),
             Map.entry("POST /api/repositories/" + ID + "/drift/analyze", List.of("DEVELOPER")),
             Map.entry("GET /api/repositories/" + ID + "/drift/reports", List.of("DEVELOPER")),
+            Map.entry("POST /api/document-workflows/" + ID + "/versions/3/github-commit", List.of("MANAGER")),
             Map.entry("PUT /api/repositories/" + ID + "/drift/reports/report/findings/F1/resolution",
                     List.of("DEVELOPER")),
             // workflow (#9, #10, #11, #13, #19)

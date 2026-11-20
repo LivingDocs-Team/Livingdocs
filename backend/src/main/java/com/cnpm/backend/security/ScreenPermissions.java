@@ -32,7 +32,7 @@ public final class ScreenPermissions {
         row(1, "authentication",            "R",    "R",    "R",    "R",    "R");
         row(2, "profile",                   "RU",   "RU",   "RU",   "RU",   "RU");
         row(3, "notifications",             "R",    "",     "",     "",     "");
-        row(5, "githubConnection",          "CRD",  "",     "",     "",     "");
+        row(5, "githubConnection",          "CRD",  "",     "CRD",  "",     "");
         row(6, "repositories",              "CRUD", "",     "",     "",     "CRUD");
         row(7, "pullRequests",              "R",    "",     "",     "R",    "");
         row(8, "documentation",             "CRUE", "RU",   "",     "R",    "");
