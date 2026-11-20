@@ -40,9 +40,13 @@ Confidence (0-1, same levels as LD-340: high >= 0.75, medium >= 0.50):
 Scores are bounded to 0-1 and rounded half-up (confidence.bounded); the level comes from the
 rounded score with the thresholds of confidence.py, the same ones severity uses.
 """
+import json
+import os
+import tempfile
 import threading
 import uuid
 from collections import Counter, OrderedDict
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 from . import drift_referential, drift_semantic, drift_severity, drift_signature
@@ -222,19 +226,42 @@ def analyze(req: DriftAnalyzeRequest, store, reviewer: Optional[DriftReviewer] =
     return (reviewer or get_reviewer()).review(report)
 
 
-# ---------- report store (in memory; drift history with resolution is LD-167) ----------
+# ---------- report store ----------
 
 class DriftReportStore:
-    def __init__(self, limit: int = 500) -> None:
+    def __init__(self, limit: int = 500, path: Optional[str] = None) -> None:
         self._lock = threading.Lock()
         self._reports: "OrderedDict[str, DriftReport]" = OrderedDict()
         self.limit = limit
+        self.path = Path(path) if path else None
+        if self.path is not None and self.path.exists():
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            for item in raw[-self.limit:]:
+                report = DriftReport.model_validate(item)
+                self._reports[report.id] = report
+
+    def _persist(self, reports: "OrderedDict[str, DriftReport]") -> None:
+        if self.path is None:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        output = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.path.parent,
+                                             prefix=self.path.name, suffix=".tmp", delete=False)
+        temporary = Path(output.name)
+        try:
+            with output:
+                json.dump([report.model_dump(mode="json") for report in reports.values()], output, ensure_ascii=False)
+            os.replace(temporary, self.path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def add(self, report: DriftReport) -> DriftReport:
         with self._lock:
-            self._reports[report.id] = report
-            while len(self._reports) > self.limit:
-                self._reports.popitem(last=False)   # oldest first
+            reports = self._reports.copy()
+            reports[report.id] = report
+            while len(reports) > self.limit:
+                reports.popitem(last=False)
+            self._persist(reports)
+            self._reports = reports
         return report
 
     def get(self, report_id: str) -> Optional[DriftReport]:
@@ -246,7 +273,14 @@ class DriftReportStore:
             report = self._reports.get(report_id)
             if report is None:
                 return None
-            return resolve(report, finding_id, update)
+            candidate = report.model_copy(deep=True)
+            finding = resolve(candidate, finding_id, update)
+            if candidate != report:
+                reports = self._reports.copy()
+                reports[report_id] = candidate
+                self._persist(reports)
+                self._reports = reports
+            return finding
 
     def list(self, repository: Optional[str] = None,
              pull_request: Optional[int] = None) -> List[DriftReportSummary]:
@@ -264,4 +298,4 @@ class DriftReportStore:
         return rows
 
 
-drift_reports = DriftReportStore()
+drift_reports = DriftReportStore(path=os.getenv("DRIFT_REPORTS_FILE"))
