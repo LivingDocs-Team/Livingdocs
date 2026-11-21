@@ -330,6 +330,8 @@ class ResolutionEvent(BaseModel):
     accepted_update: Optional[str] = None      # LD-161
     decision: Optional[Literal["accept", "edit", "dismiss"]] = None
     proposed: Optional[str] = None
+    draft_version: Optional[int] = None
+    workflow_decision: Optional[Literal["APPROVED", "REJECTED"]] = None
     at: datetime = Field(default_factory=now)
 
 
@@ -344,6 +346,7 @@ class FindingResolution(BaseModel):
     decision: Optional[Literal["accept", "edit", "dismiss"]] = None
     proposed: Optional[str] = None
     draft_version: Optional[int] = None
+    rejected_draft_version: Optional[int] = None
     updated_at: Optional[datetime] = None
     history: List[ResolutionEvent] = Field(default_factory=list)
 
@@ -356,6 +359,7 @@ class ResolutionUpdate(BaseModel):
     """LD-161: only with status `resolved`."""
     decision: Optional[Literal["accept", "edit", "dismiss"]] = None
     proposed: Optional[str] = Field(default=None, max_length=20000)
+    retry_of: Optional[int] = Field(default=None, ge=1)
 
 
 class ReviewStatus(str, Enum):

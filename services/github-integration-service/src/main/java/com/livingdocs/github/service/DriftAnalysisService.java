@@ -17,6 +17,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -175,7 +176,9 @@ public class DriftAnalysisService {
                 SELECT report_id FROM drift_report_owners WHERE repository_id = ? AND owner_user_id = ?
                 """, String.class, repositoryId, userId));
         for (JsonNode row : rows) {
-            if (ownIds.contains(row.path("id").asText())) {
+            String reportId = row.path("id").asText();
+            if (ownIds.contains(reportId) || (repository.getFullName().equalsIgnoreCase(row.path("repository").asText())
+                    && isAttested(userId, repositoryId, reportId) && restoreOwner(userId, repositoryId, reportId))) {
                 own.add(row);
             }
         }
@@ -193,6 +196,12 @@ public class DriftAnalysisService {
     public JsonNode getReport(String userId, UUID repositoryId, String reportId, String minSeverity) {
         String repository = requireReport(userId, repositoryId, reportId);
         String level = severity(minSeverity);
+        JsonNode report = fetchReport(reportId, level, repository);
+        return reconcileWorkflowDecisions(userId, reportId, report)
+                ? fetchReport(reportId, level, repository) : report;
+    }
+
+    private JsonNode fetchReport(String reportId, String level, String repository) {
         JsonNode report = getAiJson(level == null
                         ? aiServiceClient.get().uri("/drift/reports/{id}", reportId)
                         : aiServiceClient.get().uri("/drift/reports/{id}?min_severity={s}", reportId, level),
@@ -204,6 +213,47 @@ public class DriftAnalysisService {
             throw ApiException.notFound("Drift report not found for this repository.");
         }
         return report;
+    }
+
+    private boolean reconcileWorkflowDecisions(String userId, String reportId, JsonNode report) {
+        boolean reconciled = false;
+        for (JsonNode finding : report.path("findings")) {
+            JsonNode resolution = finding.path("resolution");
+            int version = resolution.path("draft_version").asInt();
+            String document = finding.path("document").path("document_id").asText();
+            if (version < 1 || document.isBlank() || !"acknowledged".equals(resolution.path("status").asText())) {
+                continue;
+            }
+            var decisions = jdbc.query("""
+                    SELECT a.action, a.actor_user_id, a.comment
+                      FROM document_workflow_audit a JOIN document_workflows w ON w.id = a.workflow_id
+                     WHERE w.document_id = ? AND w.owner_user_id = ? AND a.document_version = ?
+                       AND a.actor_role = 'MANAGER' AND a.previous_status = 'PENDING_MANAGER_APPROVAL'
+                       AND a.action IN ('APPROVED', 'REJECTED') AND a.action = a.new_status
+                    """, (row, index) -> {
+                        ObjectNode body = json.objectNode();
+                        body.put("document_id", document).put("version", version);
+                        body.put("decision", row.getString("action")).put("actor", row.getString("actor_user_id"));
+                        body.put("note", row.getString("comment"));
+                        return body;
+                    }, document, userId, version);
+            if (decisions.isEmpty()) {
+                continue;
+            }
+            if (decisions.size() != 1) {
+                throw integrationFailure("DRIFT_WORKFLOW_AMBIGUOUS", "The draft has conflicting Manager audit entries.");
+            }
+            try {
+                aiServiceClient.put().uri("/internal/drift/reports/{id}/findings/{finding}/workflow-decision",
+                                reportId, finding.path("id").asText())
+                        .contentType(MediaType.APPLICATION_JSON).body(decisions.getFirst())
+                        .retrieve().toBodilessEntity();
+                reconciled = true;
+            } catch (RestClientException e) {
+                throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not reconcile the draft decision.");
+            }
+        }
+        return reconciled;
     }
 
     /** LD-159: the report as Markdown grouped by severity (Pull Request comment, download). */
@@ -277,6 +327,9 @@ public class DriftAnalysisService {
         putIfPresent(body, "accepted_update", accepted);
         putIfPresent(body, "decision", request.decision());
         putIfPresent(body, "proposed", request.proposed());
+        if (request.retryOf() != null) {
+            body.put("retry_of", request.retryOf());
+        }
         boolean createsDraft = "accept".equals(request.decision()) || "edit".equals(request.decision());
         if (createsDraft) {
             requireFreshDraftSource(userId, repositoryId, reportId, findingId);
@@ -355,11 +408,28 @@ public class DriftAnalysisService {
     private String requireReport(String userId, UUID repositoryId, String reportId) {
         String repository = repositoryId == null ? null
                 : repositorySyncService.requireOwned(userId, repositoryId).getFullName();
-        ReportOwner owner = jdbc.query("""
-                SELECT owner_user_id, repository_id FROM drift_report_owners WHERE report_id = ?
-                """, (row, index) -> new ReportOwner(row.getString("owner_user_id"),
-                row.getObject("repository_id", UUID.class)), reportId).stream().findFirst()
-                .orElseThrow(() -> ApiException.notFound("Drift report not found."));
+        ReportOwner owner = reportOwner(reportId);
+        if (owner == null && repositoryId == null) {
+            UUID attestedRepository = jdbc.queryForList("""
+                    SELECT repository_id FROM legacy_drift_owner_attestations
+                     WHERE report_id = ? AND owner_user_id = ?
+                    """, UUID.class, reportId, userId).stream().findFirst().orElse(null);
+            if (attestedRepository != null) {
+                return requireReport(userId, attestedRepository, reportId);
+            }
+        }
+        if (owner == null && repositoryId != null && isAttested(userId, repositoryId, reportId)) {
+            JsonNode report = getAiJson(aiServiceClient.get().uri("/drift/reports/{id}", reportId),
+                    "The AI service could not verify the attested report.");
+            if (reportId.equals(report.path("id").asText())
+                    && repository.equalsIgnoreCase(report.path("repository").asText())
+                    && restoreOwner(userId, repositoryId, reportId)) {
+                owner = reportOwner(reportId);
+            }
+        }
+        if (owner == null) {
+            throw ApiException.notFound("Drift report not found.");
+        }
         if (!Objects.equals(owner.user(), userId)) {
             throw ApiException.forbidden("This drift report belongs to another user.");
         }
@@ -367,6 +437,34 @@ public class DriftAnalysisService {
             throw ApiException.notFound("Drift report not found for this repository.");
         }
         return repository;
+    }
+
+    private ReportOwner reportOwner(String reportId) {
+        return jdbc.query("""
+                SELECT owner_user_id, repository_id FROM drift_report_owners WHERE report_id = ?
+                """, (row, index) -> new ReportOwner(row.getString("owner_user_id"),
+                row.getObject("repository_id", UUID.class)), reportId).stream().findFirst()
+                .orElse(null);
+    }
+
+    private boolean isAttested(String userId, UUID repositoryId, String reportId) {
+        return !jdbc.queryForList("""
+                SELECT report_id FROM legacy_drift_owner_attestations
+                 WHERE report_id = ? AND repository_id = ? AND owner_user_id = ?
+                """, String.class, reportId, repositoryId, userId).isEmpty();
+    }
+
+    private boolean restoreOwner(String userId, UUID repositoryId, String reportId) {
+        try {
+            jdbc.update("""
+                    INSERT INTO drift_report_owners (report_id, repository_id, owner_user_id)
+                    SELECT report_id, repository_id, owner_user_id FROM legacy_drift_owner_attestations
+                     WHERE report_id = ? AND repository_id = ? AND owner_user_id = ?
+                    """, reportId, repositoryId, userId);
+        } catch (DuplicateKeyException ignored) {
+            // A concurrent reader may have already promoted the attestation.
+        }
+        return new ReportOwner(userId, repositoryId).equals(reportOwner(reportId));
     }
 
     private static String severity(String value) {

@@ -35,7 +35,9 @@ function FindingReview({ finding, disabled, onReview }) {
       {resolution?.decision && (
         <div role="status">
           {({ accept: 'Accepted', edit: 'Edited', dismiss: 'Dismissed' })[resolution.decision]}
-          {draftVersion && <p>Draft v{draftVersion} · Submitted for Staff review</p>}
+          {draftVersion && <p>Draft v{draftVersion} · {resolution.status === 'resolved' ? 'Approved' : 'Submitted for Staff review'}</p>}
+          {!draftVersion && resolution.rejected_draft_version && resolution.status === 'open' &&
+            <p>Draft v{resolution.rejected_draft_version} · Rejected by Manager</p>}
           {(resolution.proposed || resolution.note) && <pre>{resolution.proposed || resolution.note}</pre>}
         </div>
       )}
@@ -151,6 +153,7 @@ export default function DeveloperDriftAlerts({ userId }) {
   }
 
   function review(findingId, decision, text) {
+    const rejectedVersion = report.findings.find((finding) => finding.id === findingId)?.resolution?.rejected_draft_version;
     return run(async () => {
       const updated = await githubApi(`${base}/reports/${encodeURIComponent(report.id)}/findings/${encodeURIComponent(findingId)}/resolution`, {
         method: 'PUT',
@@ -159,6 +162,7 @@ export default function DeveloperDriftAlerts({ userId }) {
           status: decision === 'dismiss' ? 'dismissed' : 'acknowledged',
           ...(decision === 'edit' && { proposed: text }),
           ...(decision === 'dismiss' && { note: text }),
+          ...(decision !== 'dismiss' && rejectedVersion && { retryOf: rejectedVersion }),
         },
       });
       setReport((previous) => ({

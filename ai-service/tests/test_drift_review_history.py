@@ -91,6 +91,89 @@ def test_only_the_newest_reports_are_loaded_and_a_corrupt_file_is_moved_aside(tm
     assert not path.exists() and list(tmp_path.glob("drift_reports.corrupt-*.json"))
 
 
+def test_imports_legacy_and_current_reports_once_across_restart(tmp_path):
+    legacy_path = tmp_path / "drift_reports.json"
+    current_path = tmp_path / "drift-reports.json"
+    legacy = DriftReportStore(path=str(legacy_path))
+    old = legacy.add(reviewed())
+    fid, suggested = suggestion_of(old)
+    legacy.resolve(old.id, fid, ResolutionUpdate(status="resolved", actor="42", accepted_update=suggested))
+    legacy_bytes = legacy_path.read_bytes()
+    current = DriftReportStore(path=str(tmp_path / "current.json"))
+    new = current.add(reviewed())
+    (tmp_path / "current.json").rename(current_path)
+
+    upgraded = DriftReportStore(limit=1, path=str(current_path))
+    assert [row.id for row in upgraded.list()] == [new.id, old.id]
+    upgraded.resolve(old.id, fid, ResolutionUpdate(status="open", actor="42"))
+    restarted = DriftReportStore(limit=1, path=str(current_path))
+    finding = next(f for f in restarted.get(old.id).findings if f.id == fid)
+    assert [event.status for event in finding.resolution.history] == ["resolved", "open"]
+    assert legacy_path.read_bytes() == legacy_bytes
+
+
+def test_failed_import_keeps_legacy_file_and_can_retry(tmp_path, monkeypatch):
+    legacy_path = tmp_path / "drift_reports.json"
+    current_path = tmp_path / "drift-reports.json"
+    old = DriftReportStore(path=str(legacy_path)).add(reviewed())
+    legacy_bytes = legacy_path.read_bytes()
+
+    def unavailable(*args):
+        raise OSError("simulated replacement failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr("app.drift.os.replace", unavailable)
+        with pytest.raises(OSError, match="replacement failure"):
+            DriftReportStore(path=str(current_path))
+    assert legacy_path.read_bytes() == legacy_bytes
+    assert not current_path.exists()
+    assert DriftReportStore(path=str(current_path)).get(old.id) == old
+
+
+def test_replays_manager_decision_after_failed_report_write_and_restart(tmp_path, monkeypatch):
+    path = tmp_path / "reports.json"
+    store = DriftReportStore(path=str(path))
+    report = store.add(reviewed())
+    fid, suggested = suggestion_of(report)
+    finding = next(item for item in report.findings if item.id == fid)
+    finding.document.document_id = "doc"
+    submit = ResolutionUpdate(status="acknowledged", decision="accept", actor="developer")
+    store.resolve(report.id, fid, submit, draft=lambda *_: 2)
+
+    def unavailable(*args):
+        raise OSError("simulated replacement failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr("app.drift.os.replace", unavailable)
+        with pytest.raises(OSError, match="replacement failure"):
+            store.apply_workflow_decision(report.id, fid, "doc", 2, "REJECTED", "manager", "Revise")
+    store = DriftReportStore(path=str(path))
+    for _ in range(2):
+        store.apply_workflow_decision(report.id, fid, "doc", 2, "REJECTED", "manager", "Revise")
+    with pytest.raises(ResolutionError) as error:
+        store.resolve(report.id, fid, submit, draft=lambda *_: 99)
+    assert error.value.status == 409
+
+    retry = ResolutionUpdate(status="acknowledged", decision="edit", proposed=suggested + " revised", retry_of=2)
+    first = store.resolve(report.id, fid, retry, draft=lambda *_: 3)
+    assert store.resolve(report.id, fid, retry, draft=lambda *_: 3) == first
+    store.apply_workflow_decision(report.id, fid, "doc", 2, "REJECTED", "manager", "Revise")
+    for _ in range(2):
+        store.apply_workflow_decision(report.id, fid, "doc", 3, "APPROVED", "manager", None)
+    store = DriftReportStore(path=str(path))
+    resolution = next(item.resolution for item in store.get(report.id).findings if item.id == fid)
+
+    def no_new_draft(*args):
+        pytest.fail("An approved submission retry must not create another draft")
+
+    assert store.resolve(report.id, fid, retry, draft=no_new_draft).resolution == resolution
+    assert resolution.status == "resolved"
+    assert resolution.accepted_update == retry.proposed
+    assert [(event.draft_version, event.workflow_decision) for event in resolution.history] == [
+        (2, None), (2, "REJECTED"), (3, None), (3, "APPROVED"),
+    ]
+
+
 def test_api_accepts_an_edited_suggestion_and_rejects_it_without_resolving():
     from main import app
 

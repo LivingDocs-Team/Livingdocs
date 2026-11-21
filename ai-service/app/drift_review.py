@@ -293,6 +293,16 @@ def resolve(report: DriftReport, finding_id: str, update: ResolutionUpdate) -> D
     elif update.decision == "dismiss" and update.status != ResolutionStatus.dismissed:
         raise ResolutionError(422, "Dismissing requires dismissed status")
     r: FindingResolution = f.resolution
+    if update.decision in ("accept", "edit") and update.retry_of != r.rejected_draft_version:
+        raise ResolutionError(409, "Reload the finding before starting another draft")
+    if (r.status == ResolutionStatus.resolved and r.draft_version is not None
+            and r.history and r.history[-1].workflow_decision == "APPROVED"):
+        submitted = next((event for event in reversed(r.history)
+                          if event.status == ResolutionStatus.acknowledged
+                          and event.draft_version == r.draft_version), None)
+        if (submitted and update.status == ResolutionStatus.acknowledged
+                and (update.decision, proposed, note) == (submitted.decision, submitted.proposed, submitted.note)):
+            return f
     if (r.status, r.note, r.accepted_update, r.decision, r.proposed) == (
         update.status, note, accepted, update.decision, proposed
     ):

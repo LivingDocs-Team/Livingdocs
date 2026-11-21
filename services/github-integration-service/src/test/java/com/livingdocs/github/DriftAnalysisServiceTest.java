@@ -132,7 +132,8 @@ class DriftAnalysisServiceTest {
         var jdbc = new JdbcTemplate(database);
         jdbc.execute("CREATE TABLE repositories (id UUID PRIMARY KEY)");
         jdbc.update("INSERT INTO repositories (id) VALUES (?)", REPOSITORY_ID);
-        new ResourceDatabasePopulator(new ClassPathResource("db/migration-common/V15__drift_report_owners.sql"))
+        new ResourceDatabasePopulator(new ClassPathResource("db/migration-common/V15__drift_report_owners.sql"),
+                new ClassPathResource("db/migration-common/V16__legacy_drift_owner_attestations.sql"))
                 .execute(database);
         driftService = newService();
 
@@ -311,6 +312,77 @@ class DriftAnalysisServiceTest {
         assertEquals("F1", report.path("findings").get(0).path("id").asText());
         assertEquals(HttpStatus.FORBIDDEN, other.getStatus());
         assertEquals(HttpStatus.NOT_FOUND, unknown.getStatus());
+        aiServiceServer.verify();
+    }
+
+    @Test
+    void attestedLegacyReportIsRestoredOnlyForItsOriginalWorkspaceAndUser() {
+        UUID otherId = UUID.randomUUID();
+        var jdbc = new JdbcTemplate(database);
+        jdbc.update("INSERT INTO repositories (id) VALUES (?)", otherId);
+        ConnectedRepository other = new ConnectedRepository();
+        other.setFullName("acme/shop");
+        when(repositorySyncService.requireOwned("another-user", otherId)).thenReturn(other);
+        when(repositorySyncService.requireOwned(USER_ID, otherId)).thenReturn(other);
+        jdbc.update("INSERT INTO legacy_drift_owner_attestations VALUES (?, ?, ?, ?)",
+                "report-1", REPOSITORY_ID, USER_ID, "historical audit entry 123");
+        String reportList = """
+                [{"id":"report-1","repository":"acme/shop"},{"id":"unknown","repository":"acme/shop"}]
+                """;
+        aiServiceServer.expect(requestTo(startsWith("http://ai.test/drift/reports?repository=")))
+                .andRespond(withSuccess(reportList, MediaType.APPLICATION_JSON));
+        aiServiceServer.expect(requestTo(startsWith("http://ai.test/drift/reports?repository=")))
+                .andRespond(withSuccess(reportList, MediaType.APPLICATION_JSON));
+        aiServiceServer.expect(requestTo("http://ai.test/drift/reports/report-1"))
+                .andRespond(withSuccess(REPORT, MediaType.APPLICATION_JSON));
+
+        assertEquals(0, driftService.listReports("another-user", otherId, null).size());
+        assertEquals(HttpStatus.NOT_FOUND, assertThrows(ApiException.class,
+                () -> driftService.getReport("another-user", otherId, "report-1", null)).getStatus());
+        assertEquals(1, driftService.listReports(USER_ID, REPOSITORY_ID, null).size());
+        assertEquals(HttpStatus.NOT_FOUND, assertThrows(ApiException.class,
+                () -> driftService.getReport(USER_ID, otherId, "report-1", null)).getStatus());
+        assertEquals("report-1", newService().getReport(USER_ID, REPOSITORY_ID, "report-1", null)
+                .path("id").asText());
+        aiServiceServer.verify();
+    }
+
+    @Test
+    void reportReplaysOnlyTheCommittedManagerAuditForItsDraftVersion() {
+        var jdbc = new JdbcTemplate(database);
+        jdbc.execute("""
+                CREATE TABLE document_workflows (id UUID PRIMARY KEY, document_id VARCHAR(64), owner_user_id VARCHAR(100))
+                """);
+        jdbc.execute("""
+                CREATE TABLE document_workflow_audit (workflow_id UUID, document_version INT, action VARCHAR(40),
+                    actor_role VARCHAR(40), actor_user_id VARCHAR(100), previous_status VARCHAR(40),
+                    new_status VARCHAR(40), comment VARCHAR(2000))
+                """);
+        UUID workflow = UUID.randomUUID();
+        jdbc.update("INSERT INTO drift_report_owners VALUES (?, ?, ?)", "report-1", REPOSITORY_ID, USER_ID);
+        jdbc.update("INSERT INTO document_workflows VALUES (?, ?, ?)", workflow, "doc-1", USER_ID);
+        jdbc.update("INSERT INTO document_workflow_audit VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                workflow, 2, "APPROVED", "MANAGER", "manager", "PENDING_MANAGER_APPROVAL", "APPROVED", null);
+        jdbc.update("INSERT INTO document_workflow_audit VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                workflow, 3, "REJECTED", "MANAGER", "manager", "PENDING_MANAGER_APPROVAL", "REJECTED", "Revise");
+        String pending = """
+                {"id":"report-1","repository":"acme/shop","findings":[{"id":"F1","document":{"document_id":"doc-1"},
+                  "resolution":{"status":"acknowledged","draft_version":3}}]}
+                """;
+        String rejected = pending.replace("\"status\":\"acknowledged\",\"draft_version\":3",
+                "\"status\":\"open\",\"rejected_draft_version\":3");
+        String reportUrl = "http://ai.test/drift/reports/report-1";
+        aiServiceServer.expect(requestTo(reportUrl)).andRespond(withSuccess(pending, MediaType.APPLICATION_JSON));
+        aiServiceServer.expect(requestTo("http://ai.test/internal/drift/reports/report-1/findings/F1/workflow-decision"))
+                .andExpect(method(PUT))
+                .andExpect(content().json("""
+                        {"document_id":"doc-1","version":3,"decision":"REJECTED","actor":"manager","note":"Revise"}
+                        """))
+                .andRespond(withStatus(HttpStatus.NO_CONTENT));
+        aiServiceServer.expect(requestTo(reportUrl)).andRespond(withSuccess(rejected, MediaType.APPLICATION_JSON));
+
+        assertEquals("open", driftService.getReport(USER_ID, REPOSITORY_ID, "report-1", null)
+                .at("/findings/0/resolution/status").asText());
         aiServiceServer.verify();
     }
 

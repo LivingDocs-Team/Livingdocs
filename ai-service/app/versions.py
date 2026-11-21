@@ -515,11 +515,13 @@ class DocumentStore:
         snapshot = SourceSnapshot(repository_id=repository_id, repository_full_name=report.repository,
                                   branch=pr.head_branch, commit_sha=pr.head_sha,
                                   pull_request_number=pr.number, pull_request_base_sha=pr.base_head_sha)
+        resolution = finding.resolution
         key = f"drift:{report.id}:{finding.id}"
+        if resolution.rejected_draft_version is not None:
+            key += f":after:{resolution.rejected_draft_version}"
         request = RevisionDraftRequest(source_change_id=key, trigger="PULL_REQUEST",
                                        pull_request_number=pr.number, source_snapshot=snapshot,
                                        base_version=target.version, files=[])
-        resolution = finding.resolution
         audit = {"report_id": report.id, "finding_id": finding.id, "decision": resolution.decision,
                  "proposed": resolution.proposed, "evidence": [
                      item.model_dump(mode="json") for item in finding.evidence]}
@@ -779,6 +781,8 @@ class DocumentStore:
             if doc.pending_version != version_number:
                 raise VersionError(409, "The pending document version has changed")
             version = self.version(doc_id, version_number)
+            previous_document = doc.model_copy(deep=True)
+            previous_version = version.model_copy(deep=True)
             if decision == "APPROVED":
                 version.status = VersionStatus.accepted
                 doc.current_version = version_number
@@ -795,7 +799,14 @@ class DocumentStore:
             doc.pending_version = None
             doc.updated_at = now()
             self._event(doc_id, action, version_number, actor_user_id, note)
-            self._save()
+            try:
+                self._save()
+            except OSError:
+                self._docs[doc_id] = previous_document
+                versions = self._versions[doc_id]
+                versions[versions.index(version)] = previous_version
+                self._events[doc_id].pop()
+                raise
 
 
 documents = DocumentStore(os.getenv("DOCUMENTS_FILE", DEFAULT_FILE) or None)

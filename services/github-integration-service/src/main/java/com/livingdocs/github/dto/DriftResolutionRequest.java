@@ -11,17 +11,17 @@ package com.livingdocs.github.dto;
  * @param proposed nội dung chỉnh sửa cho bản nháp
  */
 public record DriftResolutionRequest(
-        String status, String note, String acceptedUpdate, String decision, String proposed) {
+        String status, String note, String acceptedUpdate, String decision, String proposed, Integer retryOf) {
 
     public DriftResolutionRequest(String status, String note) {
-        this(status, note, null, null, null);
+        this(status, note, null, null, null, null);
     }
 
     public DriftResolutionRequest(String status, String note, String acceptedUpdate) {
-        this(status, note, acceptedUpdate, null, null);
+        this(status, note, acceptedUpdate, null, null, null);
     }
 
     public DriftResolutionRequest(String status, String note, String decision, String proposed) {
-        this(status, note, null, decision, proposed);
+        this(status, note, null, decision, proposed, null);
     }
 }
