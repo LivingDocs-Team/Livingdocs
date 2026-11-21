@@ -102,6 +102,22 @@ class DocumentCommitBackServiceTest {
     }
 
     @Test
+    void retryReconcilesCommitWhenGitHubDidNotConfirmTheFirstResponse() {
+        tree(SOURCE_SHA, List.of());
+        when(github.commitFileOnBranch("fixture-token", "fixture-ref", SOURCE_SHA, PATH,
+                CONTENT.getBytes(StandardCharsets.UTF_8), "Publish LivingDocs document " + DOCUMENT_ID + " v2"))
+                .thenThrow(new GitHubApiException("GitHub did not confirm the operation.", false));
+        assertThatThrownBy(() -> service.commit(MANAGER, PERMISSIONS, WORKFLOW_ID, 2))
+                .isInstanceOf(ApiException.class);
+
+        tree(NEXT_SHA, List.of(new GitHubTree.Entry(PATH, "100644", "blob", HELLO_BLOB, 6L)));
+        assertThat(service.commit(MANAGER, PERMISSIONS, WORKFLOW_ID, 2))
+                .isEqualTo(new DocumentCommitBackService.Result(PATH, NEXT_SHA, true));
+        org.mockito.Mockito.verify(github).commitFileOnBranch("fixture-token", "fixture-ref", SOURCE_SHA, PATH,
+                CONTENT.getBytes(StandardCharsets.UTF_8), "Publish LivingDocs document " + DOCUMENT_ID + " v2");
+    }
+
+    @Test
     void staleBranchOrOccupiedPathCannotWrite() {
         tree(NEXT_SHA, List.of());
         assertThatThrownBy(() -> service.commit(MANAGER, PERMISSIONS, WORKFLOW_ID, 2))
