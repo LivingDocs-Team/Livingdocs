@@ -765,19 +765,34 @@ class DocumentStore:
 
             self._save()
             return version
+
+    def require_workflow_decision(self, doc_id: str, version_number: int, decision: str,
+                                  actor_user_id: str, note: Optional[str]) -> DocumentVersion:
+        action, status = {
+            "APPROVED": (HistoryAction.accepted, VersionStatus.accepted),
+            "REJECTED": (HistoryAction.dismissed, VersionStatus.dismissed),
+        }[decision]
+        with self._lock:
+            version = self.version(doc_id, version_number)
+            events = [event for event in self._events.get(doc_id, [])
+                      if event.version == version_number and event.action == action]
+            if (version.status != status or version.decided_by != actor_user_id or len(events) != 1
+                    or events[0].actor != actor_user_id or events[0].note != note):
+                raise VersionError(409, "No matching Manager decision for this version, actor and note")
+            return version
+
     def resolve_workflow_version(self, doc_id: str, owner_user_id: str, version_number: int,
                                  decision: str, actor_user_id: str,
                                  note: Optional[str] = None) -> None:
         with self._lock:
             doc = self.get_owned(doc_id, owner_user_id)
+            if decision not in ("APPROVED", "REJECTED"):
+                raise VersionError(400, "Unknown review decision")
             if doc.pending_version is None:
-                version = self.version(doc_id, version_number)
-                if decision == "APPROVED" and doc.current_version == version_number \
-                        and version.status == VersionStatus.accepted:
-                    return  # Idempotent retry after the workflow transaction committed remotely first.
-                if decision == "REJECTED" and version.status == VersionStatus.dismissed:
-                    return
-                raise VersionError(409, "No matching proposed version is awaiting a decision")
+                if decision == "APPROVED" and doc.current_version != version_number:
+                    raise VersionError(409, "The current document version has changed")
+                self.require_workflow_decision(doc_id, version_number, decision, actor_user_id, note)
+                return
             if doc.pending_version != version_number:
                 raise VersionError(409, "The pending document version has changed")
             version = self.version(doc_id, version_number)
@@ -787,11 +802,9 @@ class DocumentStore:
                 version.status = VersionStatus.accepted
                 doc.current_version = version_number
                 action = HistoryAction.accepted
-            elif decision == "REJECTED":
+            else:
                 version.status = VersionStatus.dismissed
                 action = HistoryAction.dismissed
-            else:
-                raise VersionError(400, "Unknown review decision")
             version.decided_by = actor_user_id
             version.decided_at = now()
             version.note = note or version.note

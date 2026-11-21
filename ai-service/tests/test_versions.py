@@ -934,6 +934,13 @@ def test_drift_decisions_create_at_most_one_grounded_draft(monkeypatch, decision
     assert store.get(doc.id).pending_version == 2
     assert store.version(doc.id, 2).status == "proposed"
     store.resolve_workflow_version(doc.id, "73", 2, outcome, "manager")
+    for actor, note in [("another-manager", None), ("manager", "different note")]:
+        with pytest.raises(VersionError, match="No matching Manager decision"):
+            store.resolve_workflow_version(doc.id, "73", 2, outcome, actor, note)
+        assert client.put(outcome_url, headers=headers,
+                          json=outcome_body | {"actor": actor, "note": note}).status_code == 409
+    assert client.put(outcome_url.replace("/F1/", "/unrelated/"), headers=headers,
+                      json=outcome_body).status_code == 409
     store.resolve_workflow_version(doc.id, "73", 2, outcome, "manager")
     for _ in range(2):
         assert client.put(outcome_url, headers=headers, json=outcome_body).status_code == 204

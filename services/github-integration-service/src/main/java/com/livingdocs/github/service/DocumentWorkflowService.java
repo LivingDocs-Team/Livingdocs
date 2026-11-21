@@ -577,6 +577,13 @@ public class DocumentWorkflowService {
         require(authorities, decision == ManagerDecision.APPROVED ? "DOCUMENT_APPROVE" : "DOCUMENT_REJECT");
         String actorRole = requireRole(authorities, "MANAGER");
         DocumentWorkflow workflow = lock(workflowId);
+        String note = normalizeComment(comment);
+        if (workflow.getStatus().name().equals(decision.name())
+                && expectedVersion != null && expectedVersion.equals(workflow.getSubmittedDocumentVersion())
+                && decision == workflow.getManagerDecision() && actor.equals(workflow.getManagerUserId())
+                && Objects.equals(note, workflow.getManagerComment())) {
+            return toResponse(workflow);
+        }
         if (workflow.getStatus() != DocumentWorkflowStatus.PENDING_MANAGER_APPROVAL
                 || workflow.getStaffReviewResult() != StaffReviewResult.PASSED) {
             throw conflict("Manager decisions require a successful staff review.");
@@ -600,7 +607,7 @@ public class DocumentWorkflowService {
                 requireCurrentDraftRevision(document.path("pending_revision"), true);
             }
             documents.resolveDocumentVersion(actor, workflow.getOwnerUserId(), workflow.getDocumentId(),
-                    pendingVersion, decision.name(), normalizeComment(comment));
+                    pendingVersion, decision.name(), note);
         } else if (pendingVersion == 0) {
             int currentVersion = document.path("current_version").asInt(0);
             int totalVersions = document.path("versions_total").asInt(0);
@@ -608,16 +615,16 @@ public class DocumentWorkflowService {
                     && currentVersion == workflow.getSubmittedDocumentVersion();
             boolean rejectionMayNeedRetry = decision == ManagerDecision.REJECTED
                     && totalVersions >= workflow.getSubmittedDocumentVersion();
-            if (rejectionMayNeedRetry) {
+            if (rejectionMayNeedRetry || approvalAlreadyApplied) {
                 documents.resolveDocumentVersion(actor, workflow.getOwnerUserId(), workflow.getDocumentId(),
-                        workflow.getSubmittedDocumentVersion(), decision.name(), normalizeComment(comment));
-            } else if (!approvalAlreadyApplied) {
+                        workflow.getSubmittedDocumentVersion(), decision.name(), note);
+            } else {
                 throw conflict("The document version changed during review.");
             }
         } else {
             throw conflict("The document version changed during review.");
         }
-        workflow.decide(actor, decision, normalizeComment(comment));
+        workflow.decide(actor, decision, note);
         workflows.saveAndFlush(workflow);
         record(workflow, actor, decision.name(), previous, workflow.getStatus(), comment,
                 null, null, actorRole);

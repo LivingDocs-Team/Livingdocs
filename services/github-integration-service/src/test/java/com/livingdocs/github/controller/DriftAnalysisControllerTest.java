@@ -44,7 +44,7 @@ class DriftAnalysisControllerTest {
     @Test
     void analyzeReturnsCreatedReport() throws Exception {
         DriftAnalysisRequest request = new DriftAnalysisRequest(7, List.of("doc-1"), false);
-        when(driftService.analyzePullRequest("user-1", REPOSITORY_ID, request)).thenReturn(JSON.readTree("""
+        when(driftService.analyzePullRequest("user-1", REPOSITORY_ID, request, null, null)).thenReturn(JSON.readTree("""
                 {"id":"report-1","status":"drift_detected","summary":{"findings":2,"highest_severity":"high"}}
                 """));
 
@@ -58,7 +58,7 @@ class DriftAnalysisControllerTest {
                 .andExpect(jsonPath("$.id").value("report-1"))
                 .andExpect(jsonPath("$.summary.highest_severity").value("high"));
 
-        verify(driftService).analyzePullRequest("user-1", REPOSITORY_ID, request);
+        verify(driftService).analyzePullRequest("user-1", REPOSITORY_ID, request, null, null);
     }
 
     @Test
@@ -71,7 +71,7 @@ class DriftAnalysisControllerTest {
 
     @Test
     void listsReportsOfRepositoryAndReadsOneReport() throws Exception {
-        when(driftService.listReports("user-1", REPOSITORY_ID, 7)).thenReturn(JSON.readTree("""
+        when(driftService.listReports("user-1", REPOSITORY_ID, 7, null, null)).thenReturn(JSON.readTree("""
                 [{"id":"report-1","status":"no_drift"}]
                 """));
         when(driftService.getReport("user-1", "report-1")).thenReturn(JSON.readTree("""
@@ -89,17 +89,18 @@ class DriftAnalysisControllerTest {
 
     @Test
     void repositoryScopedReportMarkdownAndSeverityRules() throws Exception {
-        when(driftService.getReport("user-1", REPOSITORY_ID, "report-1", "high")).thenReturn(JSON.readTree("""
+        when(driftService.getReport("user-1", REPOSITORY_ID, "report-1", "high", "workspace-1", "OWNER")).thenReturn(JSON.readTree("""
                 {"id":"report-1","summary":{"highest_severity":"critical"},"findings":[]}
                 """));
-        when(driftService.getReportMarkdown("user-1", REPOSITORY_ID, "report-1", null))
+        when(driftService.getReportMarkdown("user-1", REPOSITORY_ID, "report-1", null, null, null))
                 .thenReturn("## Documentation drift");
         when(driftService.severityRules()).thenReturn(JSON.readTree("""
                 {"levels":[{"level":"critical","min_score":75}],"rules":[]}
                 """));
 
         mockMvc.perform(get("/api/repositories/" + REPOSITORY_ID + "/drift/reports/report-1")
-                        .header("X-User-Id", "user-1").param("minSeverity", "high"))
+                        .header("X-User-Id", "user-1").header("X-Verified-Workspace-Id", "workspace-1")
+                        .header("X-Verified-Workspace-Access", "OWNER").param("minSeverity", "high"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.summary.highest_severity").value("critical"));
         mockMvc.perform(get("/api/repositories/" + REPOSITORY_ID + "/drift/reports/report-1/markdown")
@@ -114,7 +115,7 @@ class DriftAnalysisControllerTest {
     @Test
     void resolvesOneFinding() throws Exception {
         DriftResolutionRequest request = new DriftResolutionRequest("resolved", "README updated in #43");
-        when(driftService.resolveFinding("user-1", REPOSITORY_ID, "report-1", "F2", request))
+        when(driftService.resolveFinding("user-1", REPOSITORY_ID, "report-1", "F2", request, null, null))
                 .thenReturn(JSON.readTree("""
                         {"id":"F2","resolution":{"status":"resolved","actor":"user-1","note":"README updated in #43"}}
                         """));
@@ -128,6 +129,6 @@ class DriftAnalysisControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resolution.status").value("resolved"));
 
-        verify(driftService).resolveFinding("user-1", REPOSITORY_ID, "report-1", "F2", request);
+        verify(driftService).resolveFinding("user-1", REPOSITORY_ID, "report-1", "F2", request, null, null);
     }
 }

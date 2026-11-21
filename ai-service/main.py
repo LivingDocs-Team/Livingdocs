@@ -646,13 +646,16 @@ class DriftWorkflowDecision(BaseModel):
 @app.put("/internal/drift/reports/{report_id}/findings/{finding_id}/workflow-decision",
          status_code=204, dependencies=[Depends(require_internal_service)])
 def apply_drift_workflow_decision(report_id: str, finding_id: str, update: DriftWorkflowDecision):
-    version = _call(documents.version, update.document_id, update.version)
+    version = _call(documents.require_workflow_decision, update.document_id, update.version,
+                    update.decision, update.actor, update.note)
     link = version.drift_finding or {}
-    expected = "accepted" if update.decision == "APPROVED" else "dismissed"
-    if link.get("report_id") != report_id or link.get("finding_id") != finding_id or version.status != expected:
+    if link.get("report_id") != report_id or link.get("finding_id") != finding_id:
         raise HTTPException(409, "Workflow decision does not match the linked drift draft")
-    drift_reports.apply_workflow_decision(report_id, finding_id, update.document_id, update.version,
-                                        update.decision, update.actor, update.note)
+    try:
+        drift_reports.apply_workflow_decision(report_id, finding_id, update.document_id, update.version,
+                                            update.decision, update.actor, update.note)
+    except ResolutionError as error:
+        raise HTTPException(error.status, error.message)
 
 
 @app.post("/internal/affected-documents", response_model=AffectedDocumentsResult,

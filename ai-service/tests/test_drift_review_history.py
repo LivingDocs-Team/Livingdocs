@@ -1,5 +1,6 @@
 """LD-166 / LD-172: accept, edit or dismiss the AI suggestion of a drift finding (LD-161), and
 keep drift analyses with their resolution history across restarts (LD-167)."""
+import json
 import os
 
 os.environ.pop("ANTHROPIC_API_KEY", None)  # offline reviewer
@@ -128,6 +129,71 @@ def test_failed_import_keeps_legacy_file_and_can_retry(tmp_path, monkeypatch):
     assert legacy_path.read_bytes() == legacy_bytes
     assert not current_path.exists()
     assert DriftReportStore(path=str(current_path)).get(old.id) == old
+
+
+def test_import_above_retention_limit_survives_next_write_and_restart(tmp_path):
+    legacy_path = tmp_path / "drift_reports.json"
+    current_path = tmp_path / "drift-reports.json"
+    report = reviewed()
+    rows = [report.model_copy(update={"id": f"legacy-{number}"}).model_dump(mode="json")
+            for number in range(501)]
+    legacy_path.write_text(json.dumps([*rows, rows[0]]), encoding="utf-8")
+    store = DriftReportStore(path=str(current_path))
+    finding_id, _ = suggestion_of(store.get("legacy-0"))
+    store.resolve("legacy-0", finding_id, ResolutionUpdate(status="acknowledged", actor="42"))
+    store.add(report)
+    restored = DriftReportStore(path=str(current_path))
+    assert len(restored.list()) == 502
+    assert restored.get("legacy-0").review.acknowledged == 1
+    assert restored.get(report.id) == report
+
+
+@pytest.mark.parametrize("name", ["drift_reports.json", "drift-reports.json"])
+def test_partial_import_file_is_preserved_for_recovery(tmp_path, name):
+    legacy = tmp_path / "drift_reports.json"
+    current = tmp_path / "drift-reports.json"
+    report = reviewed().model_dump(mode="json")
+    payload = json.dumps({"reports": [report]})
+    legacy.write_text(payload, encoding="utf-8")
+    current.write_text(payload, encoding="utf-8")
+    (tmp_path / name).write_text(payload[:-2], encoding="utf-8")
+    before = [path.read_bytes() for path in (legacy, current)]
+    with pytest.raises(json.JSONDecodeError):
+        DriftReportStore(path=str(current))
+    assert [path.read_bytes() for path in (legacy, current)] == before
+
+
+def test_conflicting_import_ids_leave_both_files_unchanged(tmp_path):
+    legacy = tmp_path / "drift_reports.json"
+    current = tmp_path / "drift-reports.json"
+    report = reviewed().model_dump(mode="json")
+    legacy.write_text(json.dumps([report]), encoding="utf-8")
+    current.write_text(json.dumps({"reports": [report | {"repository": "different/repo"}]}), encoding="utf-8")
+    before = [path.read_bytes() for path in (legacy, current)]
+    with pytest.raises(ValueError, match="Conflicting persisted drift report"):
+        DriftReportStore(path=str(current))
+    assert [path.read_bytes() for path in (legacy, current)] == before
+
+
+def test_failed_flush_rolls_back_existing_store_without_touching_legacy(tmp_path, monkeypatch):
+    legacy = tmp_path / "drift_reports.json"
+    current = tmp_path / "drift-reports.json"
+    old = DriftReportStore(path=str(legacy)).add(reviewed())
+    store = DriftReportStore(path=str(current))
+    before = [path.read_bytes() for path in (legacy, current)]
+    new = reviewed()
+
+    def unavailable(_fd):
+        raise OSError("simulated flush failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr("app.drift.os.fsync", unavailable)
+        with pytest.raises(OSError, match="flush failure"):
+            store.add(new)
+    assert store.get(new.id) is None
+    assert [path.read_bytes() for path in (legacy, current)] == before
+    assert DriftReportStore(path=str(current)).get(old.id) == old
+    assert not list(tmp_path.glob("*.tmp"))
 
 
 def test_replays_manager_decision_after_failed_report_write_and_restart(tmp_path, monkeypatch):

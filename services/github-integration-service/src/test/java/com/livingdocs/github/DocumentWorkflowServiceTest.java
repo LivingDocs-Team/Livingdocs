@@ -285,7 +285,7 @@ class DocumentWorkflowServiceTest {
         assertThat(approvalEvent.getNewStatus()).isEqualTo("APPROVED");
         assertThat(approvalEvent.getComment()).isEqualTo("Approved");
         assertThat(approvalEvent.getCreatedAt()).isNotNull();
-        verify(documents, never()).resolveDocumentVersion(any(), any(), any(), any(Integer.class), any(), any());
+        verify(documents).resolveDocumentVersion(MANAGER, "73", "doc-1", 1, "APPROVED", "Approved");
     }
 
     @Test
