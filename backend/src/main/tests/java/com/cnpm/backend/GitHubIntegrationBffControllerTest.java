@@ -580,7 +580,7 @@ class GitHubIntegrationBffControllerTest {
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();   // no call is expected
         UserRepository users = mock(UserRepository.class);
         for (String[] denied : new String[][] {
-                {"STAFF", "GET", "/api/github/connection"},                          // GitHub connection is Developer only
+                {"STAFF", "GET", "/api/github/connection"},
                 {"MANAGER", "POST", "/api/repositories/11111111-1111-4111-8111-111111111111/documentation/generate"},
                 {"DEVELOPER", "POST", "/api/document-workflows/11111111-1111-4111-8111-111111111111/approve"},
                 {"STAFF", "POST", "/api/document-workflows/11111111-1111-4111-8111-111111111111/approve"},
@@ -588,7 +588,7 @@ class GitHubIntegrationBffControllerTest {
                 {"MANAGER", "POST", "/api/document-workflows/11111111-1111-4111-8111-111111111111/comments"},
                 {"MANAGER", "POST", "/api/documentation/templates"},
                 {"DEVELOPER", "GET", "/api/document-workflows/manager/queue"},
-                {"DEVELOPER", "POST", "/api/repositories/11111111-1111-4111-8111-111111111111/drift/analyze"},
+                {"STAFF", "POST", "/api/repositories/11111111-1111-4111-8111-111111111111/drift/analyze"},
                 {"DEVELOPER", "GET", "/api/documentation/no/such/route/here"}}) {
             User actor = mock(User.class);
             when(actor.getId()).thenReturn(73L);

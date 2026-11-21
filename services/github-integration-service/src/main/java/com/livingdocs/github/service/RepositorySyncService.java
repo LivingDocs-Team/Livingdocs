@@ -9,6 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Service;
 
 import com.livingdocs.github.entity.ConnectedRepository;
+import com.livingdocs.github.entity.ConnectionStatus;
 import com.livingdocs.github.entity.GitHubConnection;
 import com.livingdocs.github.entity.RepositoryStatus;
 import com.livingdocs.github.exception.ApiException;
@@ -143,7 +144,20 @@ public class RepositorySyncService {
 
     /** Repo đã kết nối của người dùng (404 nếu không có, 403 nếu thuộc người khác). Dùng cho LD-145. */
     public ConnectedRepository requireOwned(String userId, UUID repositoryId) {
-        return findOwned(userId, repositoryId);
+        return requireOwned(userId, repositoryId, null, null);
+    }
+
+    public ConnectedRepository requireOwned(String userId, UUID repositoryId,
+            String verifiedWorkspaceId, String verifiedAccess) {
+        if ((verifiedWorkspaceId != null || verifiedAccess != null)
+                && (verifiedWorkspaceId == null || !"OWNER".equals(verifiedAccess))) {
+            throw ApiException.forbidden("Workspace ownership was not verified by the Backend.");
+        }
+        ConnectedRepository repository = findOwned(userId, repositoryId, verifiedWorkspaceId, verifiedAccess, true);
+        if (repository.getStatus() == RepositoryStatus.DISCONNECTED || repository.getStatus() == RepositoryStatus.ERROR) {
+            throw ApiException.forbidden("Repository access is unavailable.");
+        }
+        return repository;
     }
 
     /** Repo phải tồn tại và thuộc kết nối GitHub của người dùng (kết quả đồng bộ có cả nội dung code). */
@@ -157,17 +171,23 @@ public class RepositorySyncService {
 
     private ConnectedRepository findOwned(String userId, UUID repositoryId,
             String verifiedWorkspaceId, String verifiedAccess) {
+        return findOwned(userId, repositoryId, verifiedWorkspaceId, verifiedAccess, false);
+    }
+
+    private ConnectedRepository findOwned(String userId, UUID repositoryId,
+            String verifiedWorkspaceId, String verifiedAccess, boolean requireActiveConnection) {
         ConnectedRepository repo = repositoryRepository.findById(repositoryId)
                 .orElseThrow(() -> ApiException.notFound("Không tìm thấy repository " + repositoryId));
         GitHubConnection connection = connectionService.findConnection(userId).orElse(null);
-        if (connection == null || !connection.getId().equals(repo.getConnectionId())) {
+        if (connection == null || !connection.getId().equals(repo.getConnectionId())
+                || (requireActiveConnection && connection.getStatus() != ConnectionStatus.ACTIVE)) {
             throw ApiException.forbidden("Repository này không thuộc kết nối GitHub của bạn.");
         }
         if (repo.getWorkspaceId() != null && repo.getWorkspaceId().startsWith("workspace-")) {
             if (!repo.getWorkspaceId().equals(verifiedWorkspaceId) || !"OWNER".equals(verifiedAccess)) {
                 throw ApiException.forbidden("Workspace ownership was not verified by the Backend.");
             }
-        } else if (verifiedWorkspaceId != null && !repo.getWorkspaceId().equals(verifiedWorkspaceId)) {
+        } else if (verifiedWorkspaceId != null && !verifiedWorkspaceId.equals(repo.getWorkspaceId())) {
             throw ApiException.forbidden("Repository is not associated with the verified workspace.");
         }
         return repo;

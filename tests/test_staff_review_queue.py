@@ -132,6 +132,7 @@ class FakeApi:
             })
         if (request.method, path) == ("GET", f"/api/document-workflows/{WORKFLOW_ID}/review-evidence"):
             return route.fulfill(status=200, json={
+                "template_name": "Shop guide", "template_version": 1, "template_sections": ["Overview", "API Endpoints"],
                 "files": [{"path": "src/shop.py", "status": "generated", "entities": [{
                     "kind": "endpoint", "name": "GET /shop", "evidence": [{
                         "id": "E1", "kind": "source", "path": "src/shop.py", "line_start": 10,
@@ -318,6 +319,24 @@ def test_staff_review_passed_submits_comment_and_displays_backend_result(page: P
     expect(page.get_by_label("Submitted Staff review result")).to_contain_text("PENDING_MANAGER_APPROVAL")
     assert api.review_bodies == [{"result": "PASSED", "comment": "The document matches the source."}]
     assert ("POST", f"/api/document-workflows/{WORKFLOW_ID}/staff-review", api.review_bodies[0]) in api.requests
+
+
+def test_staff_reviews_template_and_submits_an_edit_for_the_displayed_version(page: Page):
+    api = FakeApi(workflow("STAFF_REVIEWING", USER_ID))
+    open_documentation(page, api)
+    expect(page.get_by_text("Template Shop guide · v1 · Sections: Overview, API Endpoints")).to_be_visible()
+    page.get_by_role("button", name="Edit draft").click()
+    content = "# Shop guide\n\nClarified API content.\n"
+    page.get_by_label("Draft content").fill(content)
+    page.get_by_label("Decision").select_option("PASSED")
+    page.get_by_label("Review comment", exact=True).fill("Clarified the API description.")
+    page.get_by_role("button", name="Submit review").click()
+    expect(page.get_by_role("heading", name="Review submitted")).to_be_visible()
+    assert api.review_bodies == [{
+        "result": "PASSED",
+        "comment": "Clarified the API description.",
+        "edit": {"content": content, "expectedVersion": 2, "note": "Clarified the API description."},
+    }]
 
 
 def test_reviewing_last_item_on_last_page_returns_to_remaining_queue_items(page: Page):
