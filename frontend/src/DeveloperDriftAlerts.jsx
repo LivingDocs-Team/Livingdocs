@@ -8,6 +8,8 @@ function FindingReview({ finding, disabled, onReview }) {
   const [text, setText] = useState('');
   const suggestion = finding.ai_review?.suggested_update || finding.suggestion;
   const resolution = finding.resolution;
+  const draftVersion = resolution?.draft_version;
+  const canDraft = Boolean(finding.document?.document_id && finding.document?.version);
 
   function begin(nextMode) {
     setMode(nextMode);
@@ -33,10 +35,11 @@ function FindingReview({ finding, disabled, onReview }) {
       {resolution?.decision && (
         <div role="status">
           {({ accept: 'Accepted', edit: 'Edited', dismiss: 'Dismissed' })[resolution.decision]}
+          {draftVersion && <p>Draft v{draftVersion} · Submitted for Staff review</p>}
           {(resolution.proposed || resolution.note) && <pre>{resolution.proposed || resolution.note}</pre>}
         </div>
       )}
-      {mode ? (
+      {draftVersion ? null : mode ? (
         <form onSubmit={(event) => { event.preventDefault(); void submit(mode); }}>
           <label>
             {mode === 'edit' ? 'Proposed text' : 'Dismissal reason'}
@@ -50,8 +53,8 @@ function FindingReview({ finding, disabled, onReview }) {
         </form>
       ) : (
         <div className="drift-alert-actions">
-          <button type="button" disabled={disabled || !suggestion} onClick={() => void submit('accept')}>Accept</button>
-          <button type="button" disabled={disabled} onClick={() => begin('edit')}>Edit</button>
+          <button type="button" disabled={disabled || !suggestion || !canDraft} onClick={() => void submit('accept')}>Accept</button>
+          <button type="button" disabled={disabled || !canDraft} onClick={() => begin('edit')}>Edit</button>
           <button type="button" disabled={disabled} onClick={() => begin('dismiss')}>Dismiss</button>
         </div>
       )}

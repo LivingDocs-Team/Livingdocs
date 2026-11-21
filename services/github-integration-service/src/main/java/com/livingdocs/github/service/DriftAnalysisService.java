@@ -88,6 +88,7 @@ public class DriftAnalysisService {
     private final RestClient aiServiceClient;
     private final JsonNodeFactory json = JsonNodeFactory.instance;
     private final JdbcTemplate jdbc;
+    private final DocumentWorkflowService workflows;
 
     private record ReportOwner(String user, UUID repository) { }
 
@@ -96,13 +97,15 @@ public class DriftAnalysisService {
             GitHubConnectionService connectionService,
             GitHubClient gitHubClient,
             @Qualifier("codeAnalyzerRestClient") RestClient analyzerClient,
-            @Qualifier("aiServiceRestClient") RestClient aiServiceClient, JdbcTemplate jdbc) {
+            @Qualifier("aiServiceRestClient") RestClient aiServiceClient, JdbcTemplate jdbc,
+            DocumentWorkflowService workflows) {
         this.repositorySyncService = repositorySyncService;
         this.connectionService = connectionService;
         this.gitHubClient = gitHubClient;
         this.analyzerClient = analyzerClient;
         this.aiServiceClient = aiServiceClient;
         this.jdbc = jdbc;
+        this.workflows = workflows;
     }
 
     // ------------------------------------------------------------------ analyze one Pull Request
@@ -264,9 +267,16 @@ public class DriftAnalysisService {
         putIfPresent(body, "note", note);
         putIfPresent(body, "decision", request.decision());
         putIfPresent(body, "proposed", request.proposed());
+        boolean createsDraft = "accept".equals(request.decision()) || "edit".equals(request.decision());
+        if (createsDraft) {
+            requireFreshDraftSource(userId, repositoryId, reportId, findingId);
+        }
         try {
-            JsonNode finding = aiServiceClient.put()
-                    .uri("/drift/reports/{id}/findings/{finding}/resolution", reportId, findingId)
+            var route = createsDraft
+                    ? aiServiceClient.put().uri("/internal/repositories/{repo}/drift/reports/{id}/findings/{finding}/resolution",
+                            repositoryId, reportId, findingId).header("X-User-Id", userId)
+                    : aiServiceClient.put().uri("/drift/reports/{id}/findings/{finding}/resolution", reportId, findingId);
+            JsonNode finding = route
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
                     .retrieve()
@@ -274,10 +284,22 @@ public class DriftAnalysisService {
             if (finding == null || !finding.isObject() || !finding.path("resolution").isObject()) {
                 throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid finding.");
             }
+            if (createsDraft) {
+                int version = finding.path("resolution").path("draft_version").asInt();
+                String documentId = finding.path("document").path("document_id").asText();
+                if (version < 1 || documentId.isBlank()) {
+                    throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The drift draft was not confirmed.");
+                }
+                workflows.submitDriftDraft(userId, documentId, version);
+            }
             return finding;
         } catch (RestClientResponseException e) {
             if (e.getStatusCode().value() == 404) {
                 throw ApiException.notFound("Drift report or finding not found in the AI service.");
+            }
+            if (e.getStatusCode().value() == 409) {
+                throw new ApiException(HttpStatus.CONFLICT, "DRIFT_RESOLUTION_CONFLICT",
+                        DocumentationTemplateService.detail(e));
             }
             if (e.getStatusCode().value() == 422) {
                 String detail = DocumentationTemplateService.detail(e);
@@ -288,6 +310,35 @@ public class DriftAnalysisService {
         } catch (RestClientException e) {
             throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not update the finding.");
         }
+    }
+
+    private void requireFreshDraftSource(String userId, UUID repositoryId, String reportId, String findingId) {
+        JsonNode report = getReport(userId, repositoryId, reportId, null);
+        for (JsonNode finding : report.path("findings")) {
+            if (!findingId.equals(finding.path("id").asText())) {
+                continue;
+            }
+            if (finding.path("resolution").path("draft_version").isIntegralNumber()) {
+                return;
+            }
+            if (!finding.path("document").path("document_id").isTextual()) {
+                throw new ApiException(HttpStatus.CONFLICT, "DRIFT_DOCUMENT_REQUIRED",
+                        "This finding does not point to a saved LivingDocs document.");
+            }
+            JsonNode pr = report.path("pull_request");
+            var context = new Context(report.path("repository").asText(), connectionService.getActiveConnection(userId));
+            GitHubPullRequest live = gitHubClient.getPullRequest(
+                    context.token(), context.owner, context.name, pr.path("number").asInt());
+            if (live == null || live.head() == null || live.head().sha() == null
+                    || live.base() == null || live.base().sha() == null
+                    || !live.head().sha().equals(pr.path("head_sha").asText())
+                    || !live.base().sha().equals(pr.path("base_head_sha").asText())) {
+                throw new ApiException(HttpStatus.CONFLICT, "DRIFT_SOURCE_CHANGED",
+                        "The pull request revision could not be verified. Run drift analysis again.");
+            }
+            return;
+        }
+        throw ApiException.notFound("Drift finding not found.");
     }
 
     /** Owner check; returns the repository name when a repository id is given. */
@@ -588,6 +639,7 @@ public class DriftAnalysisService {
         putIfPresent(p, "base_branch", cut(pr.base().ref(), 300));
         p.put("head_sha", pr.head().sha());
         p.put("base_sha", baseSha);
+        p.put("base_head_sha", pr.base().sha());
 
         ArrayNode out = body.putArray("files");
         Set<String> seen = new LinkedHashSet<>();

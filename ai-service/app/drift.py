@@ -267,7 +267,7 @@ class DriftReportStore:
     def get(self, report_id: str) -> Optional[DriftReport]:
         return self._reports.get(report_id)
 
-    def resolve(self, report_id: str, finding_id: str, update: ResolutionUpdate):
+    def resolve(self, report_id: str, finding_id: str, update: ResolutionUpdate, draft=None):
         """LD-346: set the resolution of one finding (None when the report is unknown)."""
         with self._lock:
             report = self._reports.get(report_id)
@@ -275,6 +275,8 @@ class DriftReportStore:
                 return None
             candidate = report.model_copy(deep=True)
             finding = resolve(candidate, finding_id, update)
+            if draft is not None:
+                finding.resolution.draft_version = draft(candidate, finding)
             if candidate != report:
                 reports = self._reports.copy()
                 reports[report_id] = candidate

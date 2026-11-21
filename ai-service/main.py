@@ -361,6 +361,13 @@ def get_owned_document(doc_id: str):
 def get_internal_document_content(doc_id: str, version: Optional[int] = Query(None, ge=1)):
     v = _call(documents.version, doc_id, version)
     return PlainTextResponse(v.content, media_type="text/markdown")
+
+
+@app.get("/internal/documents/{doc_id}/versions/{number}", response_model=DocumentVersion,
+         dependencies=[Depends(require_internal_service)])
+def get_internal_document_version(doc_id: str, number: int):
+    """Exact version for callers that enforce document workflow access."""
+    return _call(documents.version, doc_id, number)
 @app.get(
     "/internal/documents/{doc_id}/review-evidence",
     response_model=RevisionReviewEvidence,
@@ -569,6 +576,24 @@ def resolve_drift_finding(report_id: str, finding_id: str, update: ResolutionUpd
         finding = drift_reports.resolve(report_id, finding_id, update)
     except ResolutionError as e:
         raise HTTPException(e.status, e.message)
+    if finding is None:
+        raise HTTPException(404, "Drift report not found")
+    return finding
+
+
+@app.put("/internal/repositories/{repository_id}/drift/reports/{report_id}/findings/{finding_id}/resolution",
+         response_model=DriftFinding, dependencies=[Depends(require_internal_service)])
+def submit_drift_resolution(repository_id: str, report_id: str, finding_id: str,
+                            update: ResolutionUpdate, user_id: str = Header(alias="X-User-Id")):
+    update = update.model_copy(update={"actor": user_id})
+    try:
+        draft = None
+        if update.decision in ("accept", "edit"):
+            def draft(report, finding):
+                return documents.propose_drift(user_id, repository_id, report, finding)
+        finding = drift_reports.resolve(report_id, finding_id, update, draft=draft)
+    except (ResolutionError, VersionError) as error:
+        raise HTTPException(error.status, error.message)
     if finding is None:
         raise HTTPException(404, "Drift report not found")
     return finding
