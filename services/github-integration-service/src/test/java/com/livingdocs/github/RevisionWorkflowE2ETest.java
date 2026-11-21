@@ -49,6 +49,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -160,6 +161,17 @@ class RevisionWorkflowE2ETest {
         workflows.staffReview(staff, staffPermissions, id,
                 new StaffReviewRequest(StaffReviewResult.PASSED, "Baseline for source revision"));
         workflows.decide(manager, managerPermissions, id, ManagerDecision.APPROVED, null, 1);
+        if (scenario == Scenario.POLICY_DISABLED || scenario == Scenario.DOCUMENT_OVERRIDE) {
+            var rules = new java.util.ArrayList<Map<String, Object>>();
+            rules.add(Map.of("scope", "REPOSITORY", "target", "", "onCommit", true, "onPullRequest", false));
+            rules.add(Map.of("scope", "MODULE", "target", "src/main", "onCommit", false, "onPullRequest", true));
+            if (scenario == Scenario.DOCUMENT_OVERRIDE) {
+                rules.add(Map.of("scope", "DOCUMENT", "target", documentId, "onCommit", true, "onPullRequest", false));
+            }
+            mvc.perform(put("/api/repositories/{id}/auto-update-policies", repo.id()).header(USER_HEADER, owner)
+                    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsBytes(rules)))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(rules.size()));
+        }
         assertThatThrownBy(() -> RestClient.create(System.getenv("LIVINGDOCS_E2E_AI_URL"))
                 .get().uri("/internal/revision-draft-candidates/{id}", repo.id()).retrieve().toBodilessEntity())
                 .isInstanceOf(org.springframework.web.client.HttpClientErrorException.Unauthorized.class);
@@ -194,6 +206,12 @@ class RevisionWorkflowE2ETest {
         assertThat(rows.getContent().getFirst().getId()).isEqualTo(id);
         String docUrl = "/internal/documents/" + documentId;
         var pending = ai.get().uri(docUrl).retrieve().body(JsonNode.class);
+        if (scenario == Scenario.POLICY_DISABLED) {
+            assertThat(pending.path("pending_version").isNull()).isTrue();
+            assertThat(pending.path("current_version").asInt()).isEqualTo(1);
+            assertThat(pending.path("versions_total").asInt()).isEqualTo(1);
+            return;
+        }
         assertThat(pending.path("pending_version").asInt()).isEqualTo(2);
         assertThat(pending.path("current_version").asInt()).isEqualTo(1);
         assertThat(pending.path("pending_revision").path("commit_sha").asText()).isEqualTo(sha);
@@ -227,7 +245,7 @@ class RevisionWorkflowE2ETest {
     }
 
     enum Scenario {
-        APPROVE, REJECT, REPLACE_WORKER, RETRY
+        APPROVE, REJECT, REPLACE_WORKER, RETRY, POLICY_DISABLED, DOCUMENT_OVERRIDE
     }
 
     private static void await(java.util.function.BooleanSupplier condition) throws InterruptedException {
