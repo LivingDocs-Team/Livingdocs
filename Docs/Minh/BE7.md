@@ -1,358 +1,112 @@
-# LivingDocs — Đặc tả tái tạo chức năng LD-177: Documentation Change Log
+# FR-FE-04 Giao diện quản trị hệ thống và bảng điều khiển (Administration & Dashboard)
 
-## 1. Mục tiêu
-
-Triển khai **Documentation Change Log** cho LivingDocs nhằm lưu lại lịch sử thay đổi của từng tài liệu và cung cấp dữ liệu để hiển thị lịch sử theo dạng timeline.
-
-Chức năng cần đáp ứng các yêu cầu trong đề bài LD-177:
-
-1. Ghi nhận các thay đổi của tài liệu.
-2. Hiển thị lịch sử thay đổi theo thứ tự thời gian.
-3. Lưu người dùng và role thực hiện thay đổi.
-4. Lưu thời điểm thay đổi.
-5. Lưu nguồn kích hoạt thay đổi (trigger source).
-6. Theo dõi trạng thái tài liệu tại thời điểm ghi nhận thay đổi.
-
-Trong snapshot dự án, phần triển khai được xác định chủ yếu ở **GitHub Integration Service**: có entity, repository, service, controller, DTO và migration cho change log. API timeline đã có; không thấy một component frontend riêng hoặc lời gọi API `change-log` trong danh sách source frontend được cung cấp, vì vậy không mô tả giao diện timeline frontend như một phần đã hoàn thành.
-
-## 2. Thành phần và vị trí mã nguồn
-
-Các thành phần liên quan nằm trong `services/github-integration-service/`.
-
-### Backend — GitHub Integration Service
-
-- `src/main/java/com/livingdocs/github/entity/DocumentationChangeLog.java`: entity ánh xạ bảng `documentation_change_logs`.
-- `src/main/java/com/livingdocs/github/entity/ChangeTriggerSource.java`: enum định nghĩa các nguồn kích hoạt thay đổi.
-- `src/main/java/com/livingdocs/github/repository/DocumentationChangeLogRepository.java`: lớp truy vấn các bản ghi change log theo document, status và trigger source.
-- `src/main/java/com/livingdocs/github/service/DocumentationChangeLogService.java`: ghi nhận change log, chuẩn hóa actor role/status và truy xuất timeline.
-- `src/main/java/com/livingdocs/github/controller/DocumentationChangeLogController.java`: REST endpoint đọc lịch sử thay đổi.
-- `src/main/java/com/livingdocs/github/dto/DocumentationChangeLogResponse.java`: DTO trả dữ liệu change log cho client.
-- `src/main/resources/db/migration-common/V10__documentation_change_log.sql`: tạo bảng và index phục vụ truy vấn change log.
-
-### Các luồng nghiệp vụ tích hợp
-
-- `DocumentationGenerationService.java`: ghi nhận tài liệu được lưu sau khi AI generation hoàn tất; ghi nhận chỉnh sửa nội dung, quyết định review và rollback.
-- `DocumentWorkflowService.java`: ghi nhận thay đổi timeline phát sinh từ các thao tác workflow và rollback.
-- `GitHubWebhookController.java`: có phương thức ghi nhận tài liệu bị ảnh hưởng bởi sự kiện Push/Pull Request webhook.
-- `DocumentationGenerationService.ChangeLogOverride`: hỗ trợ truyền authorities và điều khiển việc bỏ qua log khi một thao tác đã được ghi nhận ở lớp workflow, tránh tạo bản ghi trùng.
-
-## 3. Kiến trúc xử lý tổng quan
-
-Luồng dữ liệu change log:
-
-1. Một thao tác làm thay đổi tài liệu xảy ra, ví dụ AI tạo tài liệu, người dùng sửa nội dung, reviewer đưa ra quyết định, rollback hoặc GitHub webhook ảnh hưởng đến tài liệu.
-2. Lớp nghiệp vụ xác định document ID, action, summary, actor, authorities, trigger source, status và reference ID.
-3. `DocumentationChangeLogService.recordChange(...)` tạo entity `DocumentationChangeLog`.
-4. Service chuẩn hóa summary, actor name, actor role, trigger source và status.
-5. Repository lưu entity vào bảng `documentation_change_logs`.
-6. Khi client yêu cầu lịch sử, `DocumentationChangeLogController` gọi `getTimeline(...)`.
-7. Service truy vấn theo document ID và các filter tùy chọn, sắp xếp `createdAt` giảm dần, rồi chuyển entity thành `DocumentationChangeLogResponse`.
-
-Change log là dữ liệu lịch sử riêng; không phải nội dung tài liệu hoặc bảng version của AI Service. Bản ghi giữ thông tin tham chiếu đến version/job/workflow/webhook nếu luồng nghiệp vụ cung cấp `referenceId`.
-
-## 4. Mô hình dữ liệu Documentation Change Log
-
-Entity `DocumentationChangeLog` ánh xạ bảng `documentation_change_logs`.
-
-| Trường | Kiểu / giới hạn | Ý nghĩa |
-|---|---|---|
-| `id` | String, tối đa 64 | ID bản ghi; nếu chưa có sẽ tự sinh UUID dạng String |
-| `documentId` | String, tối đa 64, bắt buộc | ID tài liệu được thay đổi |
-| `repositoryId` | UUID, nullable | Repository liên quan nếu luồng nghiệp vụ có cung cấp |
-| `versionNumber` | Integer, nullable | Số version liên quan đến thay đổi |
-| `action` | String, tối đa 64, bắt buộc | Loại hành động, ví dụ `CREATED`, `CONTENT_UPDATED`, `ROLLED_BACK` |
-| `summary` | String, tối đa 500, bắt buộc | Nội dung mô tả thay đổi |
-| `actorId` | String, tối đa 128, nullable | ID người hoặc tác nhân tạo thay đổi |
-| `actorName` | String, tối đa 255, nullable | Tên hiển thị của actor |
-| `actorRole` | String, tối đa 64, bắt buộc | Role chính của actor hoặc `SYSTEM` |
-| `triggerSource` | Enum String, tối đa 64, bắt buộc | Nguồn kích hoạt thay đổi |
-| `status` | String, tối đa 64, bắt buộc | Trạng thái tài liệu tại thời điểm ghi nhận |
-| `referenceId` | String, tối đa 128, nullable | ID tham chiếu như job ID hoặc version |
-| `createdAt` | Instant, bắt buộc | Thời điểm tạo bản ghi, không cập nhật lại |
-
-### Tự động khởi tạo
-
-Trong `@PrePersist`:
-
-- Nếu `id` chưa có, entity tạo UUID dạng String.
-- Nếu `createdAt` chưa có, entity gán `Instant.now()`.
-- Nếu `actorRole` chưa có hoặc rỗng, entity dùng `SYSTEM`.
-
-`createdAt` được đánh dấu `updatable = false`, do đó thời điểm của một event lịch sử không bị cập nhật lại khi entity được lưu sau đó.
-
-## 5. Trigger Source và Action
-
-### 5.1 Các nguồn kích hoạt
-
-Enum `ChangeTriggerSource` định nghĩa:
-
-| Giá trị | Ý nghĩa |
+| Mục | Nội dung |
 |---|---|
-| `AI_GENERATION` | Sinh tài liệu tự động từ kết quả phân tích code |
-| `MANUAL_EDIT` | Người dùng tạo hoặc chỉnh sửa trực tiếp trong editor |
-| `DRIFT_SUGGESTION` | Áp dụng gợi ý cập nhật từ phát hiện Documentation Drift |
-| `PR_WEBHOOK` | Kích hoạt từ sự kiện Push / Pull Request trên GitHub |
-| `REVIEW_WORKFLOW` | Thao tác tạo workflow, gửi duyệt, nhận duyệt, phê duyệt hoặc từ chối |
-| `ROLLBACK` | Khôi phục về phiên bản tài liệu trước đó |
+| Epic Jira | LD-286 Frontend Implementation |
+| Task Jira | LD-316 [Administration & Dashboard Interface] Implement Administration & Dashboard Interface |
+| Task đã làm | LD-317 (User & Role Management UI), LD-318 (Workspace & Repository Administration UI), LD-319 (System Configuration UI), LD-320 (System Monitoring & Health UI), LD-321 (Audit, Analytics & Notification UI) |
+| Người thực hiện | Khôi Nguyễn Hữu Đăng |
+| Thành phần | Frontend LivingDocs Web (`frontend/src/AdminDashboard.jsx`, `frontend/src/rbac/AppShell.jsx`, `frontend/src/rbac/flows/administrator.flow.js`, `frontend/src/rbac/permissions.js`); Backend BFF (`AdminUserController`, `AdminRoleController`, `AdminWorkspaceController`, `AdminSystemConfigController`, `AdminHealthController`, `AdminSystemAnalyticsController`, `AdminNotificationPolicyController`) |
+| Tác nhân | Quản trị viên hệ thống (`ADMINISTRATOR`), Backend BFF (cổng 8080), GitHub Integration Service & AI Service (truy vấn gián tiếp qua BFF) |
 
-Nếu `recordChange(...)` nhận `triggerSource == null`, service mặc định dùng `MANUAL_EDIT`.
+## 1. Mô tả
 
-### 5.2 Action được ghi nhận trong các luồng hiện có
+Hệ thống cung cấp giao diện quản trị tập trung (`AdminDashboard`) dành riêng cho vai trò Quản trị viên (`ADMINISTRATOR`) trên ứng dụng web LivingDocs. Thông qua thanh điều hướng phân quyền (`AppShell`), quản trị viên truy cập 6 phân khu chức năng trên một bảng điều khiển thống nhất: quản lý người dùng và phân quyền vai trò (`Users & roles`), quản trị danh mục workspace và repository toàn hệ thống (`Workspaces & repositories`), cấu hình tham số vận hành (`System configuration`), giám sát trạng thái sức khỏe các dịch vụ (`Health & monitoring`), theo dõi thống kê hoạt động và nhật ký kiểm toán (`Audit & analytics`), và thiết lập chính sách thông báo theo sự kiện (`Notifications`).
 
-Các action xuất hiện trong code:
+## 2. Yêu cầu chức năng
 
-- `CREATED`: tài liệu được lưu từ kết quả AI generation.
-- `CONTENT_UPDATED`: nội dung tài liệu được chỉnh sửa.
-- `WORKFLOW_{DECISION}`: quyết định workflow, ví dụ `WORKFLOW_APPROVED` hoặc action tương ứng với decision thực tế.
-- `ROLLED_BACK`: tài liệu được rollback về version trước.
-- `PR_WEBHOOK_IMPACT`: tài liệu bị ảnh hưởng bởi sự kiện GitHub webhook.
-
-Action là chuỗi mô tả nghiệp vụ, không phải enum cố định trong entity. Vì vậy khi bổ sung action mới cần giữ quy ước tên nhất quán với các luồng đang có.
-
-## 6. Ghi nhận người dùng, role và timestamp
-
-### 6.1 Actor
-
-`recordChange(...)` nhận các thông tin:
-
-- `actorId`: user ID hoặc định danh tác nhân.
-- `actorName`: tên hiển thị.
-- `authorities`: tập quyền/role của actor.
-
-Nếu `actorName` null hoặc rỗng, service dùng `actorId` làm tên hiển thị dự phòng.
-
-Với sự kiện webhook, code dùng actor cố định:
-- `actorId = "github-webhook"`
-- `actorName = "GitHub Webhook"`
-- authorities rỗng, do đó role được xác định là `SYSTEM`.
-
-### 6.2 Quy tắc xác định primary role
-
-`resolvePrimaryRole(...)` chuẩn hóa authorities:
-
-1. Loại bỏ giá trị null/rỗng.
-2. Xóa prefix `ROLE_` nếu có.
-3. Chuyển về chữ hoa.
-4. Chọn role theo thứ tự ưu tiên:
-
-`ADMINISTRATOR` → `ADMIN` → `MANAGER` → `TECHNICAL_LEAD` → `STAFF` → `DEVELOPER`.
-
-Quy tắc đặc biệt:
-- `ADMIN` được chuẩn hóa thành `ADMINISTRATOR`.
-- Authorities null/rỗng trả về `SYSTEM`.
-- Nếu có authorities nhưng không khớp danh sách ưu tiên, lấy authority đầu tiên sau chuẩn hóa.
-- Nếu sau lọc không còn authority hợp lệ, trả về `USER`.
-
-### 6.3 Timestamp
-
-Timestamp được ghi tự động tại thời điểm persist bằng `Instant.now()` trong entity `DocumentationChangeLog`. API trả thời gian này dưới dạng `Instant`.
-
-## 7. Ghi nhận thay đổi theo từng luồng nghiệp vụ
-
-### 7.1 Lưu tài liệu được sinh bởi AI
-
-Trong `DocumentationGenerationService.saveOwnedDocument(...)`:
-
-- Yêu cầu quyền `DOCUMENT_CREATE`.
-- Kiểm tra job thuộc user hiện tại.
-- Gọi AI Service để lưu tài liệu từ job.
-- Khi nhận được document hợp lệ và `changeLogService` khả dụng, ghi bản ghi:
-  - action: `CREATED`
-  - trigger: `AI_GENERATION`
-  - version: `1`
-  - status: `DRAFT`
-  - reference: job ID
-  - actor: user hiện tại và authorities tương ứng.
-
-### 7.2 Chỉnh sửa nội dung tài liệu
-
-Trong `editOwnedDocument(...)`:
-
-- Gửi nội dung mới và `expectedVersion` sang AI Service.
-- Truyền `X-User-Id`, `X-User-Roles`, `X-Trigger-Source`.
-- Trigger source là `MANUAL_EDIT`.
-- Khi thao tác thành công và không bị yêu cầu suppress log, ghi:
-  - action: `CONTENT_UPDATED`
-  - version: version mới từ response
-  - summary: note của người dùng; nếu không có note thì dùng mô tả cập nhật mặc định
-  - status: `DRAFT`.
-
-### 7.3 Review workflow
-
-Trong `resolveDocumentVersion(...)`:
-
-- Gửi actor, document owner, primary role và trigger `REVIEW_WORKFLOW` sang AI Service.
-- Sau khi AI Service xử lý thành công, ghi action `WORKFLOW_` ghép với decision.
-- Status trong change log là decision được truyền vào.
-- Reference ID là `v{version}`.
-
-### 7.4 Rollback
-
-Trong `rollbackDocumentVersion(...)` và luồng rollback workflow:
-
-- Gửi version nguồn và lý do rollback sang AI Service.
-- Trigger source là `ROLLBACK`.
-- Ghi action `ROLLED_BACK`.
-- Reference ID tham chiếu version nguồn theo dạng `v{sourceVersion}`.
-- Trong workflow rollback, `DocumentWorkflowService` ghi timeline sau khi rollback version hợp lệ và workflow được cập nhật.
-
-### 7.5 GitHub webhook
-
-`GitHubWebhookController.recordWebhookDocumentImpact(...)` ghi nhận ảnh hưởng của Push/Pull Request webhook đến tài liệu:
-
-- action: `PR_WEBHOOK_IMPACT`
-- trigger: `PR_WEBHOOK`
-- actor: `GitHub Webhook`
-- status: status hiện tại nếu có, nếu không dùng `DRAFT`
-- reference: reference ID do caller cung cấp
-- summary: nội dung caller cung cấp; nếu rỗng dùng thông báo mặc định.
-
-Phương thức bỏ qua việc ghi log nếu `changeLogService` không khả dụng hoặc document ID null/rỗng.
-
-### 7.6 Drift suggestion
-
-Enum có `DRIFT_SUGGESTION` để biểu diễn việc áp dụng gợi ý từ Documentation Drift. Tuy nhiên, trong các vị trí gọi `recordChange(...)` được xác định rõ trong snapshot, chưa có bằng chứng đủ để mô tả một luồng gọi cụ thể cho trigger này. Không nên khẳng định mọi thao tác áp dụng drift suggestion đã được nối vào change log nếu chưa kiểm tra thêm caller thực tế.
-
-## 8. API truy xuất Change Log Timeline
-
-Controller:
-
-`DocumentationChangeLogController`
-
-Base path:
-
-`/api/documentation`
-
-### Endpoint
-
-| Method | Endpoint | Mục đích |
-|---|---|---|
-| GET | `/api/documentation/{docId}/change-log` | Lấy lịch sử thay đổi của một tài liệu |
-
-Query parameters:
-
-| Parameter | Bắt buộc | Mô tả |
-|---|---|---|
-| `status` | Không | Lọc theo trạng thái; service trim và chuyển thành chữ hoa |
-| `triggerSource` | Không | Lọc theo enum `ChangeTriggerSource`; controller trim và chuyển thành chữ hoa |
-
-Ví dụ:
-
-```http
-GET /api/documentation/doc-123/change-log
-GET /api/documentation/doc-123/change-log?status=DRAFT
-GET /api/documentation/doc-123/change-log?triggerSource=AI_GENERATION
-GET /api/documentation/doc-123/change-log?status=APPROVED&triggerSource=REVIEW_WORKFLOW
-```
-
-Nếu `triggerSource` không thuộc enum, controller trả HTTP `400 Bad Request` với thông báo `Unsupported triggerSource: ...`.
-
-Endpoint trả danh sách `DocumentationChangeLogResponse`, được sắp xếp mới nhất trước. Snapshot hiện không thể hiện query parameter phân trang hoặc giới hạn số lượng bản ghi.
-
-## 9. Response DTO và dữ liệu Timeline
-
-`DocumentationChangeLogResponse` trả các trường:
-
-| Trường | Nội dung |
+| ID | Yêu cầu |
 |---|---|
-| `id` | ID bản ghi change log |
-| `documentId` | ID tài liệu |
-| `repositoryId` | Repository liên quan |
-| `versionNumber` | Version liên quan |
-| `action` | Hành động đã xảy ra |
-| `summary` | Mô tả thay đổi |
-| `actorId` | ID người/tác nhân |
-| `actorName` | Tên người/tác nhân |
-| `actorRole` | Role chính |
-| `triggerSource` | Nguồn kích hoạt |
-| `status` | Trạng thái tài liệu |
-| `referenceId` | ID tham chiếu |
-| `createdAt` | Timestamp tạo event |
+| FR-FE-04.1 | (LD-316) Chỉ hiển thị các mục điều hướng quản trị trên thanh menu bên trái (`AppShell`) cho người dùng có vai trò `ADMINISTRATOR` (`/admin/users`, `/admin/workspaces`, `/admin/configuration`, `/admin/monitoring`, `/admin/notification-policies`); người dùng thuộc vai trò khác truy cập trực tiếp qua URL bị chặn bởi route guard (`Access denied`). |
+| FR-FE-04.2 | (LD-316) Mở đúng tab chức năng tương ứng khi người dùng chọn từng mục trên menu quản trị (`user-management` → `Users & roles`, `workspace-administration` → `Workspaces & repositories`, `system-configuration` → `System configuration`, `monitoring` → `Health & monitoring`, `notification-policies` → `Notifications`) và cho phép chuyển đổi qua lại giữa tất cả 6 tab ngay trên trang `Administration`. |
+| FR-FE-04.3 | (LD-317) Hiển thị danh sách tài khoản người dùng có phân trang (10 người dùng/trang), hỗ trợ tìm kiếm theo tên, username hoặc email và lọc theo vai trò (`DEVELOPER`, `STAFF`, `MANAGER`, `TECHNICAL_LEAD`, `ADMINISTRATOR`) hoặc trạng thái hoạt động (`Active`, `Disabled`). |
+| FR-FE-04.4 | (LD-317) Cho phép thay đổi vai trò chính của người dùng và khóa (`Disable`, có hộp thoại xác nhận) hoặc mở khóa (`Enable`) tài khoản người dùng khác; vô hiệu hóa nút đổi vai trò và nút khóa tài khoản đối với chính tài khoản quản trị viên đang đăng nhập. |
+| FR-FE-04.5 | (LD-317) Hiển thị danh mục các vai trò hệ thống cùng số lượng và danh sách mã quyền (`permissions`) được gán; cho phép đánh dấu chọn/bỏ chọn từng quyền và lưu cấu hình phân quyền cho vai trò. |
+| FR-FE-04.6 | (LD-318) Hiển thị danh sách toàn bộ workspace được quản lý trên hệ thống (kèm email/username chủ sở hữu và số lượng thành viên) cùng workspace cá nhân (`ws-<userId>`), hỗ trợ lọc nhanh theo tên workspace hoặc thông tin chủ sở hữu. |
+| FR-FE-04.7 | (LD-318) Cho phép chỉnh sửa tên (`name`) và mô tả (`description`) của workspace được quản lý. |
+| FR-FE-04.8 | (LD-318) Hiển thị danh sách repository đã kết nối của workspace đang chọn (tên repository, nhánh mặc định, chế độ hiển thị `Public`/`Private`, trạng thái, thời điểm đồng bộ gần nhất) và cho phép kích hoạt đồng bộ thủ công (`Sync`) hoặc gỡ repository khỏi workspace (`Remove`, có hộp thoại xác nhận). |
+| FR-FE-04.9 | (LD-318) Hiển thị danh sách thành viên hiện tại của workspace được quản lý; cho phép chọn người dùng đang hoạt động (`active=true`) chưa thuộc workspace để thêm vào và gỡ thành viên khỏi workspace. |
+| FR-FE-04.10 | (LD-319) Hiển thị và cho phép cập nhật thời gian lưu trữ nhật ký kiểm toán (`auditRetentionDays`, số nguyên từ `0` đến `3650`, trong đó `0` là lưu vĩnh viễn) cùng lịch dọn dẹp tự động (`0 0 0 * * * UTC`). |
+| FR-FE-04.11 | (LD-319) Hiển thị thông tin cấu hình bảo mật và tích hợp runtime ở chế độ chỉ đọc: `Frontend URL`, `Session cookie SameSite`, `Session cookie Secure`, trạng thái cấu hình `GitHub OAuth2 client`, `GitHub Integration URL`, trạng thái `Internal BFF secret`, và thời gian chờ kết nối/đọc (`connectTimeoutSeconds`, `readTimeoutSeconds`). |
+| FR-FE-04.12 | (LD-319) Hiển thị bảng quy tắc mức độ nghiêm trọng của sai lệch tài liệu (`Documentation drift severity rules`: cấp độ, dải điểm, ý nghĩa, hành động khuyến nghị) và cho phép mở rộng xem cấu trúc JSON gốc. |
+| FR-FE-04.13 | (LD-320) Kiểm tra và hiển thị tình trạng sức khỏe (`Up`, `Down`, `Auth error`) của các thành phần dịch vụ qua Backend BFF (`Backend API`, `Backend Database`, `GitHub Integration Service`, cùng các thành phần con `AI Service`, `Code Analyzer` nếu có), kèm mã HTTP, thời gian phản hồi (ms), chi tiết trạng thái và thời điểm kiểm tra gần nhất. |
+| FR-FE-04.14 | (LD-320) Cho phép kiểm tra lại sức khỏe hệ thống thủ công (`Check again`) và phân biệt rõ lỗi xác thực/phân quyền (`401`/`403`) với lỗi dịch vụ ngừng hoạt động hoặc mất kết nối. |
+| FR-FE-04.15 | (LD-321) Hiển thị thống kê hoạt động hệ thống theo khoảng thời gian chọn sẵn (`Last 24 hours`, `Last 7 days`, `Last 30 days`) và nút làm mới (`Refresh metrics`): số repository đã kết nối, số tài liệu đã tạo, số job AI hoàn thành/thất bại (kèm mốc quan sát tiến trình hiện tại `observedSince`), và số lượng sự kiện audit theo nhóm (`Administration`, `Document workflow`, `Document version`). |
+| FR-FE-04.16 | (LD-321) Hiển thị nhật ký kiểm toán quản trị (`Administrative audit log`) có phân trang (20 bản ghi/trang) gồm thời gian xảy ra, hành động (`action`), người thực hiện (`actorId`), đối tượng tác động (`User #id`, `Role`, hoặc `Event`) và giá trị trước/sau thay đổi. |
+| FR-FE-04.17 | (LD-321) Hiển thị danh sách các sự kiện hỗ trợ thông báo (`REPOSITORY_CONNECTED`, `DOCUMENT_SUBMITTED`, `DOCUMENT_APPROVED`, `DOCUMENT_REJECTED`, `AI_JOB_COMPLETED`, `AI_JOB_FAILED`) kèm nhãn trạng thái (`Enabled`, `Disabled`, `Not configured`). |
+| FR-FE-04.18 | (LD-321) Cho phép nhập danh sách email người nhận (phân tách bằng dấu phẩy, chấm phẩy hoặc khoảng trắng), bật/tắt trạng thái kích hoạt và lưu (`Save policy`) hoặc xóa (`Delete policy`) chính sách thông báo cho từng sự kiện. |
 
-Dữ liệu có đủ các thuộc tính để client dựng timeline: mỗi phần tử là một event, có actor, hành động, mô tả, trạng thái, nguồn kích hoạt, version và thời điểm. Việc trình bày thành component timeline là trách nhiệm phía client; trong source frontend được cung cấp chưa xác định được component chuyên biệt gọi endpoint này.
+## 3. Giao diện và API tích hợp
 
-## 10. Database Migration và Index
+### Thành phần giao diện (`AdminDashboard.jsx`)
 
-Migration:
+| Tab / Thành phần | Nội dung hiển thị và thao tác | Yêu cầu |
+|---|---|---|
+| `Users & roles` (`UsersPanel`, `RolesPanel`) | Thanh tìm kiếm & lọc user, bảng tài khoản phân trang, dropdown đổi vai trò, nút khóa/mở khóa, danh sách thẻ vai trò kèm checkbox phân quyền và nút lưu | FR-FE-04.3 – 04.5 |
+| `Workspaces & repositories` (`WorkspacesPanel`, `WorkspaceDetail`, `WorkspaceMembersAdmin`) | Ô lọc & dropdown chọn workspace, form sửa tên/mô tả workspace, bảng repository kèm nút `Sync` và `Remove`, danh sách thành viên kèm form thêm/gỡ | FR-FE-04.6 – 04.9 |
+| `System configuration` (`ConfigPanel`) | Form chỉnh sửa `auditRetentionDays`, danh sách thông số bảo mật/tích hợp runtime, bảng `Documentation drift severity rules` và khối JSON chi tiết | FR-FE-04.10 – 04.12 |
+| `Health & monitoring` (`HealthPanel`) | Nút `Check again`, thời điểm kiểm tra, bảng trạng thái từng dịch vụ (`Status`, `HTTP`, `Response`, `Detail`) | FR-FE-04.13 – 04.14 |
+| `Audit & analytics` (`SystemAnalyticsSection`, `AuditPanel`) | Bộ chọn khoảng thời gian (`24h`, `7d`, `30d`), nút `Refresh metrics`, lưới thẻ số liệu thống kê, bảng nhật ký kiểm toán phân trang | FR-FE-04.15 – 04.16 |
+| `Notifications` (`NotificationPoliciesPanel`, `NotificationPolicyRow`) | Danh sách sự kiện hệ thống dạng accordion, ô nhập danh sách email người nhận, checkbox `Enabled`, nút `Save policy` và `Delete policy` | FR-FE-04.17 – 04.18 |
 
-`services/github-integration-service/src/main/resources/db/migration-common/V10__documentation_change_log.sql`
+### Endpoint Backend BFF sử dụng
 
-Migration tạo bảng `documentation_change_logs` với các cột tương ứng entity:
+| Method | Endpoint | Chức năng | Yêu cầu |
+|---|---|---|---|
+| `GET` | `/api/admin/users` | Liệt kê, tìm kiếm và lọc danh sách tài khoản có phân trang | FR-FE-04.3 |
+| `PATCH` | `/api/admin/users/{id}/role` | Cập nhật vai trò chính của tài khoản | FR-FE-04.4 |
+| `PATCH` | `/api/admin/users/{id}/status` | Khóa hoặc mở khóa tài khoản (`active: true/false`) | FR-FE-04.4 |
+| `GET` | `/api/admin/roles`, `/api/admin/permissions` | Lấy danh sách vai trò và danh mục mã quyền | FR-FE-04.5 |
+| `PUT` | `/api/admin/roles/{name}/permissions` | Cập nhật tập mã quyền gắn với vai trò | FR-FE-04.5 |
+| `GET` | `/api/admin/workspaces` | Lấy danh sách toàn bộ workspace được quản lý trên hệ thống | FR-FE-04.6 |
+| `PUT` | `/api/admin/workspaces/{workspaceId}` | Cập nhật tên và mô tả workspace | FR-FE-04.7 |
+| `GET` / `POST` / `DELETE` | `/api/admin/workspaces/{workspaceId}/members[/{userId}]` | Xem, thêm và gỡ thành viên khỏi workspace | FR-FE-04.9 |
+| `GET` | `/api/workspaces/{workspaceId}/repositories` | Lấy danh sách repository đã kết nối của workspace | FR-FE-04.8 |
+| `POST` / `DELETE` | `/api/repositories/{id}/sync`, `/api/repositories/{id}` | Đồng bộ thủ công hoặc gỡ repository khỏi workspace | FR-FE-04.8 |
+| `GET` / `PATCH` | `/api/admin/system-config` | Đọc cấu hình runtime và cập nhật `auditRetentionDays` | FR-FE-04.10 – 04.11 |
+| `GET` | `/api/documentation/drift/severity-rules` | Lấy danh mục quy tắc mức độ nghiêm trọng của drift | FR-FE-04.12 |
+| `GET` | `/api/admin/health` | Kiểm tra tình trạng hoạt động tổng hợp của các dịch vụ | FR-FE-04.13 – 04.14 |
+| `GET` | `/api/admin/system-analytics` | Lấy thống kê hoạt động hệ thống trong khoảng `[from, to)` | FR-FE-04.15 |
+| `GET` | `/api/admin/users/audit` | Lấy danh sách nhật ký kiểm toán quản trị có phân trang | FR-FE-04.16 |
+| `GET` / `PUT` / `DELETE` | `/api/admin/notification-policies[/{event}]` | Xem, tạo/cập nhật và xóa chính sách thông báo theo sự kiện | FR-FE-04.17 – 04.18 |
 
-- `id VARCHAR(64)` primary key.
-- `document_id VARCHAR(64)` not null.
-- `repository_id UUID`.
-- `version_number INTEGER`.
-- `action VARCHAR(64)` not null.
-- `summary VARCHAR(500)` not null.
-- `actor_id VARCHAR(128)`.
-- `actor_name VARCHAR(255)`.
-- `actor_role VARCHAR(64)` not null.
-- `trigger_source VARCHAR(64)` not null.
-- `status VARCHAR(64)` not null.
-- `reference_id VARCHAR(128)`.
-- `created_at TIMESTAMP WITH TIME ZONE` not null, default `CURRENT_TIMESTAMP`.
+## 4. Luồng chính
 
-Hai index được tạo:
+1. Người dùng đăng nhập bằng tài khoản có vai trò `ADMINISTRATOR`; `AppShell` hiển thị các mục quản trị trên sidebar.
+2. Quản trị viên chọn một mục quản trị trên menu (hoặc chuyển trực tiếp giữa các tab trên trang `Administration`).
+3. Component của tab tương ứng gọi API Backend BFF qua `adminApi` / `probeHealth` kèm cookie phiên (`credentials: 'include'`) và hiển thị trạng thái `Loading…` cho đến khi nhận dữ liệu.
+4. Khi thực hiện thao tác thay đổi dữ liệu (`POST`, `PUT`, `PATCH`, `DELETE`), frontend tự động lấy token CSRF (`/api/auth/csrf` → header `X-XSRF-TOKEN`), gửi yêu cầu, hiển thị thông báo thành công và tải lại dữ liệu mới nhất.
 
-- `idx_doc_changelog_doc_created` trên `(document_id, created_at DESC)` để truy vấn timeline của một tài liệu.
-- `idx_doc_changelog_repo_created` trên `(repository_id, created_at DESC)` để hỗ trợ truy vấn theo repository.
+## 5. Luồng lỗi
 
-Migration nằm trong `migration-common`, được dùng chung với các migration lineage của GitHub Integration Service. Khi thay đổi schema, cần kiểm tra cơ chế chọn lineage Flyway hiện có và không sửa tùy tiện migration đã được áp dụng trên database.
+| Trường hợp | HTTP / Trạng thái | Kết quả hiển thị |
+|---|---|---|
+| Phiên đăng nhập hết hạn hoặc chưa xác thực | `401` | Phát sự kiện `livingdocs:unauthenticated` để chuyển về màn hình đăng nhập; trên tab `Health & monitoring` hiển thị nhãn `Auth error` và thông báo yêu cầu đăng nhập |
+| Tài khoản không có quyền `ADMINISTRATOR` | `403` | Route guard hiển thị màn hình `Access denied`; nếu gọi API trả `403` thì hiển thị thông báo từ chối truy cập |
+| Dữ liệu đầu vào không hợp lệ (số ngày lưu trữ ngoài `0..3650`, danh sách email rỗng/sai định dạng, tên workspace rỗng) | `400` / Validate client | Hiển thị thông báo lỗi cụ thể ngay tại khu vực thao tác (`role="alert"`), không ghi đè dữ liệu hiện tại |
+| Tự đổi vai trò hoặc khóa chính tài khoản quản trị đang đăng nhập | `403` (và khóa trên UI) | Các điều khiển đổi vai trò và khóa của dòng tài khoản hiện tại bị `disabled`; backend từ chối nếu gửi trực tiếp |
+| Dịch vụ phụ thuộc (GitHub Integration, AI Service, Database) ngừng hoạt động hoặc mất kết nối | `503` / Timeout / Lỗi mạng | Tab `Health & monitoring` đánh dấu dịch vụ tương ứng là `Down` kèm mã HTTP và chi tiết lỗi; tab `Audit & analytics` hiển thị thông báo lỗi truy vấn thay vì hiển thị số `0` giả |
 
-## 11. Kiểm thử và tiêu chí chấp nhận
+## 6. Quy tắc nghiệp vụ
 
-Snapshot có test:
+- Mọi request từ trình duyệt chỉ đi qua Backend BFF (`/api/...`), không gọi trực tiếp sang GitHub Integration Service (`:8082`), AI Service (`:8001`) hay Code Analyzer (`:8000`).
+- Tất cả các phương thức thay đổi dữ liệu (`POST`, `PUT`, `PATCH`, `DELETE`) bắt buộc gửi kèm header `X-XSRF-TOKEN` và cookie phiên.
+- Phân quyền hiển thị trên giao diện (`administrator.flow.js`, `permissions.js`) chỉ phục vụ trải nghiệm người dùng; quyền thực thi thực tế được Backend kiểm soát qua `@PreAuthorize` và `SystemAdminAccess`.
+- Quản trị viên không thể tự thay đổi vai trò chính hoặc tự khóa tài khoản của chính mình, và không thể gỡ bỏ các quyền cốt lõi của vai trò `ADMINISTRATOR`.
+- Chính sách thông báo yêu cầu ít nhất 1 địa chỉ email hợp lệ khi lưu; danh sách email được tách tự động qua dấu phẩy, chấm phẩy hoặc khoảng trắng.
 
-`services/github-integration-service/src/test/java/com/livingdocs/github/service/DocumentationChangeLogServiceTest.java`
+## 7. Tiêu chí chấp nhận
 
-Test sử dụng `@SpringBootTest`, profile `test` và `@Transactional`.
+- **AC-FE-04.1:** Tài khoản `ADMINISTRATOR` nhìn thấy đầy đủ 5 mục quản trị trên sidebar và mở đúng tab tương ứng trên trang `Administration`; tài khoản `DEVELOPER` không thấy các mục này và bị từ chối (`Access denied`) khi truy cập trực tiếp `#/admin/users`.
+- **AC-FE-04.2:** Quản trị viên tìm kiếm/lọc được danh sách người dùng, đổi vai trò của người dùng khác sang `STAFF`, khóa/mở khóa tài khoản khác, trong khi các điều khiển tương ứng trên chính dòng tài khoản của quản trị viên bị vô hiệu hóa.
+- **AC-FE-04.3:** Quản trị viên mở rộng một vai trò (ví dụ `DEVELOPER`), chọn thêm quyền và bấm `Save permissions` thì hệ thống gọi `PUT /api/admin/roles/{name}/permissions` và hiển thị thông báo `Permissions saved.`.
+- **AC-FE-04.4:** Quản trị viên xem được danh sách workspace toàn hệ thống, cập nhật thông tin workspace, quản lý thành viên, xem danh sách repository kết nối và kích hoạt đồng bộ thủ công (`Sync`).
+- **AC-FE-04.5:** Quản trị viên cập nhật `auditRetentionDays` trong khoảng `0..3650`, xem thông số runtime và bảng quy tắc mức độ nghiêm trọng của documentation drift.
+- **AC-FE-04.6:** Tab `Health & monitoring` hiển thị đúng trạng thái `Up`, `Down` hoặc `Auth error` cho từng dịch vụ phản hồi từ `/api/admin/health` và cho phép kiểm tra lại qua nút `Check again`.
+- **AC-FE-04.7:** Quản trị viên xem được số liệu thống kê theo khoảng thời gian, tra cứu nhật ký kiểm toán quản trị phân trang và cấu hình (lưu/xóa) chính sách thông báo email cho từng sự kiện hệ thống.
 
-Test `shouldRecordFilterAndResolvePrimaryRole()` kiểm tra:
+## 8. Kiểm thử
 
-1. Ghi hai event cho cùng document với actor, role, trigger, status và reference khác nhau.
-2. Truy vấn timeline không filter trả về đủ hai bản ghi.
-3. Thứ tự timeline là mới nhất trước.
-4. Authorities chứa `ROLE_ADMIN` được chuẩn hóa thành `ADMINISTRATOR`.
-5. Authorities chứa cả `ROLE_DEVELOPER` và `ROLE_MANAGER` chọn `MANAGER` theo thứ tự ưu tiên.
-6. Filter kết hợp `status=PENDING_STAFF_REVIEW` và `triggerSource=ROLLBACK` chỉ trả event phù hợp.
-
-### Tiêu chí chấp nhận theo yêu cầu LD-177
-
-1. Mỗi luồng thay đổi được tích hợp phải tạo bản ghi change log với document ID và action phù hợp.
-2. Bản ghi lưu actor ID/name và primary role; sự kiện hệ thống/webhook được thể hiện là `SYSTEM` khi không có authorities.
-3. Timestamp được tự động ghi và không bị cập nhật lại.
-4. Trigger source được lưu đúng theo nguồn phát sinh.
-5. Status tại thời điểm thay đổi được lưu trong bản ghi.
-6. API lấy timeline theo document ID, sắp xếp giảm dần theo `createdAt`.
-7. API hỗ trợ lọc theo status, trigger source hoặc đồng thời cả hai.
-8. Trigger source không hợp lệ trả HTTP 400.
-9. Summary rỗng có giá trị mặc định; summary dài hơn 500 ký tự được cắt còn 497 ký tự và thêm `...`.
-10. Migration tạo bảng và index phù hợp với entity/repository.
-
-Không kết luận test đã pass chỉ dựa trên việc có file test trong source snapshot; cần chạy Maven test/verify để xác nhận kết quả thực tế.
-
-## 12. Các giới hạn cần giữ nguyên khi tái tạo
-
-- Controller change log trong snapshot chỉ thể hiện endpoint GET timeline; không thấy API tạo/sửa/xóa change log công khai. Ghi log được thực hiện qua service nội bộ từ các luồng nghiệp vụ.
-- Timeline query hiện không có pagination hoặc limit được thể hiện trong controller/service.
-- `DRIFT_SUGGESTION` đã có trong enum nhưng chưa xác định được caller cụ thể trong các call site được rà soát; không khẳng định luồng này đã ghi log đầy đủ.
-- Một số luồng gọi service chỉ ghi log khi `changeLogService` khác null; không mô tả change log là luôn hoạt động nếu dependency không được cấu hình.
-- Summary được giới hạn tối đa 500 ký tự.
-- `repositoryId`, `versionNumber`, `actorId`, `actorName` và `referenceId` có thể null theo schema/entity; không giả định mọi event đều có đủ các trường này.
-- Snapshot thể hiện backend endpoint và DTO cung cấp dữ liệu cho timeline, nhưng không xác nhận có giao diện frontend timeline hoàn chỉnh.
-- Không tự thêm action, trigger source, trạng thái hoặc hành vi audit ngoài những gì được tích hợp và kiểm thử.
-
-## 13. Hướng dẫn cho AI tái tạo code
-
-- Giữ change log trong GitHub Integration Service; không chuyển trách nhiệm lưu lịch sử sang frontend.
-- Dùng `DocumentationChangeLogService.recordChange(...)` làm điểm ghi nhận thống nhất cho các luồng nghiệp vụ.
-- Giữ đầy đủ metadata: document ID, repository ID nếu có, version, action, summary, actor, role, trigger source, status và reference ID.
-- Giữ nguyên thứ tự ưu tiên role và quy tắc chuẩn hóa `ADMIN` thành `ADMINISTRATOR`.
-- Giữ timestamp do entity tự tạo bằng `Instant.now()` và không cập nhật lại event lịch sử.
-- Khi bổ sung luồng nghiệp vụ mới, xác định rõ actor, trigger source, action, status và reference ID trước khi gọi service.
-- Tránh ghi trùng khi workflow và generation service cùng tham gia một thao tác; tuân theo cơ chế `ChangeLogOverride`/`suppressChangeLog` hiện có.
-- Giữ API `GET /api/documentation/{docId}/change-log` và hai filter `status`, `triggerSource`; nếu thêm pagination hoặc filter mới cần cập nhật DTO/contract/test tương ứng.
-- Giữ migration `V10__documentation_change_log.sql` trong `migration-common` và kiểm tra tất cả Flyway lineage liên quan khi thay đổi schema.
-- Bổ sung test cho từng caller mới, trường hợp trigger/status không hợp lệ và quyền truy cập nếu mở rộng endpoint.
-- Không tuyên bố có frontend timeline hoặc test pass nếu chưa có bằng chứng tương ứng trong source và kết quả chạy thực tế.
+- **Kiểm thử E2E giao diện (Playwright):** `tests/test_frontend_admin.py` (kiểm tra phân quyền hiển thị menu, điều hướng 5 mục quản trị sang từng tab, lọc/đổi vai trò/khóa tài khoản, chỉnh sửa quyền vai trò, quản trị workspace & đồng bộ repository, kiểm tra sức khỏe dịch vụ với các trạng thái `403`/`DEGRADED`/`UP`, cấu hình `auditRetentionDays`, thống kê hệ thống, audit log và chính sách thông báo) và `tests/test_rbac_screen_flow.py`.
+- **Kiểm thử tĩnh & đóng gói Frontend:** `cd frontend && npm run lint && npm run build`.
+- **Kiểm thử Backend liên quan:** `backend/src/main/tests/java/com/cnpm/backend/AdminUserControllerTest.java`, `AdminRoleControllerTest.java`, `AdminMonitoringPostgresTest.java`, `WorkspaceControllerTest.java`, `security/BackendSecurityFilterChainTest.java`.

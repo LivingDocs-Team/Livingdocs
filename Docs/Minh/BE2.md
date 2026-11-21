@@ -1,190 +1,104 @@
-# LivingDocs — Đặc tả tái tạo chức năng CI và Documentation Drift Guard (snapshot LD-376)
+# BE2 — LD-376 CI và Documentation Drift Guard
 
-> Tài liệu được tạo từ `LivingDocs-LD-376.zip`. Lưu ý: metadata Git trong ZIP cho thấy `HEAD` đang ở `main`, không phải branch `LD-376`; vì vậy tài liệu mô tả đúng những gì hiện diện trong snapshot, không khẳng định đây là toàn bộ thay đổi lịch sử của branch LD-376.
+| Mục | Nội dung |
+|---|---|
+| Story Jira | LD-376 CI and Documentation Drift Guard |
+| Task đã làm | — |
+| Người thực hiện | — |
+| Thành phần | `.github/workflows/ci.yml`, `scripts/check_documentation_drift.py`, `tests/test_documentation_drift.py`, các module backend/frontend/analyzer/AI/service, `compose.yaml` |
+| Tác nhân | GitHub Actions (push/PR/dispatch), developers |
 
-## 1. Mục tiêu
+## 1. Mô tả
 
-Snapshot này có pipeline GitHub Actions để tự động kiểm tra repository khi push/PR, đồng thời có chức năng **Documentation Drift Verification** kiểm tra các liên kết Markdown nội bộ bị hỏng. Pipeline kiểm tra nhiều thành phần độc lập: drift guard, backend, frontend, GitHub integration service, AI service, integration test và Docker Compose validation.
+Pipeline GitHub Actions tự động kiểm tra repository khi push/PR, đồng thời có chức năng **Documentation Drift Verification** kiểm tra các liên kết Markdown nội bộ bị hỏng. Pipeline kiểm tra nhiều thành phần độc lập: drift guard, backend, frontend, GitHub integration service, AI service, integration test AI + analyzer, Docker Compose validation. Mỗi job có trạng thái pass/fail độc lập.
 
-Hai phần cần được tái tạo:
-1. Script Python kiểm tra link Markdown nội bộ.
-2. Workflow GitHub Actions điều phối các job kiểm tra, tạo summary và lưu test artifacts.
+## 2. Yêu cầu chức năng
 
-## 2. Thành phần và vị trí file
+| ID | Yêu cầu |
+|---|---|
+| LD-376.1 | Drift guard phát hiện link local trong `.md` trỏ đến file/thư mục không tồn tại hoặc trỏ ra ngoài repo. External link, protocol-relative URL và anchor-only link không bị coi là file local. |
+| LD-376.2 | Root = `Path(__file__).resolve().parents[1]`; quét `ROOT.rglob("*.md")`; bỏ qua `.git`, `node_modules`, `target`, `dist`, `.venv`, `venv`. |
+| LD-376.3 | Nhận diện inline link `[...] (destination)` (không bắt image `![](...)`) và reference definition `[label]: destination`; hỗ trợ destination `<...>` hoặc token không khoảng trắng, có thể có title. |
+| LD-376.4 | Đọc UTF-8 (lỗi decode thay bằng ký tự thay thế), thu thập destination, URL-decode bằng `unquote`, parse `urlsplit`; bỏ qua URL có scheme, protocol-relative (`//...`) và destination không có path (anchor-only). |
+| LD-376.5 | Resolve path tương đối từ thư mục chứa Markdown; kiểm tra nằm trong root bằng `resolve()` + `relative_to(ROOT)`; báo `link escapes repository: <raw>` khi vượt root; báo `missing local link: <raw>` khi đích không tồn tại; hiển thị path tương đối với root khi có thể. |
+| LD-376.6 | CLI chạy `python scripts/check_documentation_drift.py`: pass in `Documentation drift check passed: checked N Markdown files.` + exit 0; fail in `Documentation drift detected: broken local Markdown links found.` + liệt kê lỗi + exit 1. |
+| LD-376.7 | Workflow `LivingDocs CI` trigger: `push` lên `main`/`LD-*`, `pull_request` vào `main` (types `opened`, `synchronize`, `reopened`, `ready_for_review`), `workflow_dispatch`. Permission tối thiểu `contents: read`. Concurrency group `livingdocs-ci-${{ github.ref }}`, `cancel-in-progress: true`. |
+| LD-376.8 | Job Documentation Drift Verification: `ubuntu-latest`, timeout 5 phút, `actions/checkout@v4`, `actions/setup-python@v5` Python 3.12, chạy script, cài `pytest`/`pytest-html`, chạy `pytest -q tests/test_documentation_drift.py`, ghi `GITHUB_STEP_SUMMARY` PASS/FAIL. |
+| LD-376.9 | Job Backend: `ubuntu-latest`, 15 phút, PostgreSQL service (`cnpm`/`postgres`/`postgres` port 5432, healthcheck `pg_isready`), Java Temurin 27, cache Maven theo `backend/pom.xml`, kiểm tra file README/pom/workflow tồn tại, cấp quyền thực thi `backend/mvnw`, chạy `./backend/mvnw --batch-mode --no-transfer-progress -f backend/pom.xml clean verify`, env DB `jdbc:postgresql://localhost:5432/cnpm`. |
+| LD-376.10 | Job Frontend: `ubuntu-latest`, 10 phút, Node 24, cache npm theo `frontend/package-lock.json`, chạy `npm ci`, `npm run lint`, `npm run build` trong `frontend/`. |
+| LD-376.11 | Job GitHub Integration Service: Java 21, Maven test với H2/mock; live test nếu `GITHUB_LIVE_TEST=true`, `GITHUB_LIVE_REPO`, `GITHUB_TOKEN`; upload `services/github-integration-service/target/surefire-reports/` bằng `actions/upload-artifact@v4`, `if: always()`. |
+| LD-376.12 | Job AI Service: Python 3.12, cài `ai-service/requirements.txt`, chạy `python -m pytest -q` trong `ai-service`. |
+| LD-376.13 | Job AI Service Integration: Python 3.12, cài AI deps + `javalang`, khởi động analyzer Uvicorn port 8000, AI service port 8001, poll health/openapi chờ sẵn sàng, chạy integration với `ANALYZER_URL=http://localhost:8000`, `AI_SERVICE_URL=http://localhost:8001`; in log hai service khi fail. |
+| LD-376.14 | Job Docker Compose Validation kiểm tra cấu hình Compose và cấu hình service theo đúng workflow snapshot, không đổi sang deploy thật. |
+| LD-376.15 | Unit test tối thiểu: `test_existing_local_markdown_link_passes`, `test_missing_local_markdown_link_is_reported` (chứa `missing local link`). |
 
-- `.github/workflows/ci.yml`: workflow chính `LivingDocs CI`.
-- `scripts/check_documentation_drift.py`: scanner tìm Markdown links và xác minh đích đến.
-- `tests/test_documentation_drift.py`: unit tests cho scanner.
-- `tests/`: các test backend/frontend/analyzer/AI/service khác được workflow gọi.
-- `backend/pom.xml`, `frontend/package.json`, `ai-service/requirements.txt`, `services/github-integration-service/pom.xml`: cấu hình build/test của từng module.
-- `compose.yaml`: file được job Docker Compose validation kiểm tra.
+## 3. API / Giao diện
 
-## 3. Documentation Drift Guard
+| Loại | Command / Event | Kết quả | Yêu cầu |
+|---|---|---|---|
+| CLI | `python scripts/check_documentation_drift.py` | exit 0 khi pass, exit 1 khi có lỗi | LD-376.6 |
+| Unit test | `python -m pytest -q tests/test_documentation_drift.py` | Test pass/fail độc lập | LD-376.15 |
+| Trigger | `push` lên `main`/`LD-*` | Workflow chạy | LD-376.7 |
+| Trigger | `pull_request` vào `main` (opened/synchronize/reopened/ready_for_review) | Workflow chạy | LD-376.7 |
+| Trigger | `workflow_dispatch` | Workflow chạy thủ công | LD-376.7 |
+| Job | Documentation Drift Verification | PASS/FAIL + summary | LD-376.8 |
+| Job | Backend Build and Test | Maven `clean verify` | LD-376.9 |
+| Job | Frontend Build | `npm ci` + `lint` + `build` | LD-376.10 |
+| Job | GitHub Integration Service Test | Maven test + upload artifact | LD-376.11 |
+| Job | AI Service Test | `pytest -q` | LD-376.12 |
+| Job | AI Service Integration | Chạy integration test 2 service thật | LD-376.13 |
+| Job | Docker Compose Validation | Parse compose + kiểm tra service | LD-376.14 |
 
-### 3.1 Mục tiêu
+## 4. Luồng chính
 
-Phát hiện liên kết local trong các file `.md` đang trỏ đến file/thư mục không tồn tại hoặc trỏ ra ngoài repository. External links như `https://...`, URI có scheme, protocol-relative URL và anchor-only links không bị kiểm tra như file local.
+1. Push/PR/dispatch khớp trigger kích hoạt workflow `LivingDocs CI`.
+2. Concurrency group hủy run cũ cùng ref khi có run mới.
+3. Job Documentation Drift Verification: cài Python 3.12, chạy scanner; nếu pass → exit 0 + summary PASS; nếu fail → exit 1 + summary FAIL.
+4. Job Backend Build and Test: khởi động PostgreSQL service, chờ healthy, chạy Maven `clean verify` với DB env.
+5. Job Frontend Build: `npm ci` → `npm run lint` → `npm run build`.
+6. Job GitHub Integration Service Test: Maven test H2/mock; live test nếu có `GITHUB_LIVE_TEST=true`; upload `surefire-reports/` kể cả khi fail.
+7. Job AI Service Test: cài requirements, chạy pytest.
+8. Job AI Service Integration: khởi động analyzer + AI service, poll health, chạy integration test.
+9. Job Docker Compose Validation: kiểm tra compose.
+10. Kết quả từng job được tổng hợp trạng thái workflow.
 
-### 3.2 Cách tìm file Markdown
+## 5. Luồng lỗi
 
-- Root dự án được xác định từ vị trí script: `Path(__file__).resolve().parents[1]`.
-- Quét đệ quy `ROOT.rglob("*.md")`.
-- Bỏ qua thư mục: `.git`, `node_modules`, `target`, `dist`, `.venv`, `venv`.
+| Trường hợp | Kết quả |
+|---|---|
+| Markdown link local trỏ đến file không tồn tại | In `missing local link: <raw>`, exit 1 |
+| Link trỏ ra ngoài repository | In `link escapes repository: <raw>`, exit 1 |
+| External URL, protocol-relative URL, anchor-only | Không bị coi là lỗi |
+| File Markdown decode lỗi | Đọc bằng ký tự thay thế, không fail toàn bộ |
+| Bất kỳ step bắt buộc nào fail | Job tương ứng fail |
+| Test GitHub Integration Service fail | Artifact `surefire-reports/` vẫn được upload (`if: always()`) |
+| AI Service Integration fail | In log analyzer + AI service để debug |
+| Markdown link bị hỏng | Chỉ báo lỗi, không tự sửa link |
 
-### 3.3 Cách nhận diện link
+## 6. Quy tắc nghiệp vụ
 
-Script dùng hai regex:
-- Inline Markdown link: `[...] (destination)`; không bắt image link (`![](...)`).
-- Reference-style link definition: `[label]: destination`.
-
-Destination có thể nằm trong dấu `<...>` hoặc dạng token không có khoảng trắng. Có thể có title sau destination.
-
-### 3.4 Quy trình xác minh
-
-Với từng file Markdown:
-1. Đọc UTF-8, lỗi decode thay bằng ký tự thay thế.
-2. Thu thập destination từ inline links và reference definitions.
-3. URL-decode destination bằng `unquote`.
-4. Parse bằng `urlsplit`.
-5. Bỏ qua URL có scheme, protocol-relative URL (`//...`) và destination không có path (ví dụ anchor-only).
-6. Resolve path tương đối từ thư mục chứa Markdown.
-7. Kiểm tra path vẫn nằm trong repository root để chặn path traversal.
-8. Báo lỗi nếu path resolve nằm ngoài root hoặc file/dir đích không tồn tại.
-
-Thông báo lỗi:
-- `link escapes repository: <raw destination>`
-- `missing local link: <raw destination>`
-
-Đường dẫn trong thông báo được hiển thị tương đối với repository root khi có thể.
-
-### 3.5 CLI contract
-
-Chạy tại root repository:
-
-```bash
-python scripts/check_documentation_drift.py
-```
-
-Kết quả:
-- Không có lỗi: in `Documentation drift check passed: checked N Markdown files.` và exit code `0`.
-- Có lỗi: in tiêu đề `Documentation drift detected: broken local Markdown links found.`, liệt kê từng lỗi và exit code `1`.
-
-### 3.6 Test tối thiểu
-
-`tests/test_documentation_drift.py` có hai test:
-- `test_existing_local_markdown_link_passes`: link tới file tồn tại phải không có lỗi.
-- `test_missing_local_markdown_link_is_reported`: link tới file không tồn tại phải có một lỗi chứa `missing local link`.
-
-Khi tái tạo nên bổ sung kiểm thử path traversal, URL external, anchor-only, reference-style links, URL-encoded path và ignored directories mà không làm thay đổi contract hiện tại.
-
-## 4. GitHub Actions workflow
-
-### 4.1 Trigger
-
-Workflow `LivingDocs CI` chạy khi:
-- `push` lên `main` hoặc bất kỳ branch khớp `LD-*`.
-- `pull_request` vào `main`.
-- `workflow_dispatch` (chạy thủ công).
-
-PR types trong snapshot: `opened`, `synchronize`, `reopened`, `ready_for_review`.
-
-Permissions tối thiểu: `contents: read`.
-
-Concurrency:
-- Group theo `livingdocs-ci-${{ github.ref }}`.
-- `cancel-in-progress: true`, hủy run cũ cùng ref khi có run mới.
-
-### 4.2 Job Documentation Drift Verification
-
-- Runner: `ubuntu-latest`.
-- Timeout: 5 phút.
-- Checkout bằng `actions/checkout@v4`.
-- Setup Python 3.12 bằng `actions/setup-python@v5`.
-- Chạy `python scripts/check_documentation_drift.py`.
-- Cài `pytest`, `pytest-html`, chạy `python -m pytest -q tests/test_documentation_drift.py`.
-- Dùng `GITHUB_STEP_SUMMARY` để ghi `Documentation drift: PASS` hoặc `FAIL`; khi fail hướng dẫn xem workflow logs.
-
-### 4.3 Job Backend Build and Test
-
-- Runner Ubuntu, timeout 15 phút.
-- PostgreSQL service container:
-  - DB `cnpm`
-  - user/password `postgres`
-  - port `5432`
-  - healthcheck `pg_isready`.
-- Setup Java Temurin 27, cache Maven theo `backend/pom.xml`.
-- Kiểm tra các file README, pom và workflow tồn tại.
-- Cấp quyền thực thi `backend/mvnw`.
-- Chạy `./backend/mvnw --batch-mode --no-transfer-progress -f backend/pom.xml clean verify`.
-- DB env: `jdbc:postgresql://localhost:5432/cnpm`, `postgres` / `postgres`.
-
-### 4.4 Job Frontend Build
-
-- Runner Ubuntu, timeout 10 phút.
-- Setup Node.js 24 và npm cache theo `frontend/package-lock.json`.
-- Trong `frontend/`: `npm ci`, `npm run lint`, `npm run build`.
-
-### 4.5 Job GitHub Integration Service Test
-
-Trong snapshot workflow:
-- Setup Java 21.
-- Build/test bằng Maven với H2 và GitHub mock.
-- Chạy live test với GitHub API nếu có `GITHUB_LIVE_TEST=true`, `GITHUB_LIVE_REPO`, `GITHUB_TOKEN`.
-- Upload `services/github-integration-service/target/surefire-reports/` bằng `actions/upload-artifact@v4`, `if: always()`.
-
-### 4.6 Job AI Service Test
-
-- Setup Python 3.12.
-- Cài `ai-service/requirements.txt`.
-- Chạy `python -m pytest -q` trong `ai-service`.
-
-### 4.7 Job AI Service Integration
-
-- Setup Python 3.12.
-- Cài AI dependencies và analyzer dependency `javalang`.
-- Khởi động analyzer trên port 8000 bằng Uvicorn.
-- Khởi động AI service trên port 8001.
-- Poll health/openapi để chờ cả hai service sẵn sàng.
-- Chạy integration tests với `ANALYZER_URL=http://localhost:8000`, `AI_SERVICE_URL=http://localhost:8001`.
-- Nếu fail, in log của hai service.
-
-### 4.8 Docker Compose Validation
-
-Workflow có job riêng để xác minh cấu hình Compose; giữ nguyên việc kiểm tra file Compose và cấu hình service ở workflow snapshot. Khi triển khai lại, dùng đúng các lệnh/steps trong `.github/workflows/ci.yml` của snapshot thay vì tự đổi sang deploy thật.
-
-## 5. Những gì CI không làm
-
+- Drift guard chỉ kiểm tra local file reference, không crawl/kiểm tra URL internet.
 - Không tự deploy production.
 - Không tự sửa link Markdown bị hỏng.
 - Không commit thay đổi ngược về repository.
 - Không thay thế unit/integration tests của từng module.
-- Không nên đặt secret thật trực tiếp trong YAML; dùng GitHub Actions secrets.
+- Không đặt secret thật trực tiếp trong YAML; dùng GitHub Actions secrets.
+- Artifact upload phải `if: always()` để giữ báo cáo khi test fail.
+- Mỗi job có trạng thái pass/fail độc lập.
 
-## 6. Cấu trúc kết quả
+## 7. Tiêu chí chấp nhận
 
-Mỗi job có trạng thái pass/fail độc lập. Khi bất kỳ step bắt buộc nào thất bại, job tương ứng fail và workflow thể hiện trạng thái CI. Artifact test reports được upload theo `if: always()` ở job có cấu hình upload, để có thể xem báo cáo kể cả khi test fail.
+- **AC-LD-376.1:** Push lên branch `LD-*` kích hoạt workflow.
+- **AC-LD-376.2:** PR vào `main` kích hoạt workflow.
+- **AC-LD-376.3:** Manual dispatch hoạt động.
+- **AC-LD-376.4:** Markdown link local tồn tại được chấp nhận.
+- **AC-LD-376.5:** Link local thiếu file bị báo lỗi và exit code khác 0.
+- **AC-LD-376.6:** Link đi ra ngoài repository bị báo lỗi.
+- **AC-LD-376.7:** External link và anchor-only link không bị coi là file thiếu.
+- **AC-LD-376.8:** Thư mục cache/build được bỏ qua.
+- **AC-LD-376.9:** Backend/Frontend/Service jobs chạy đúng runtime và lệnh đã mô tả.
+- **AC-LD-376.10:** Test report được upload khi job có cấu hình upload, kể cả khi test fail.
 
-## 7. Hướng dẫn tái tạo cho AI
+## 8. Kiểm thử
 
-1. Tạo `.github/workflows/ci.yml` với trigger, permission, concurrency như mục 4.
-2. Viết scanner Python độc lập, không phụ thuộc framework web.
-3. Dùng `pathlib`, `re`, `urllib.parse.unquote`, `urlsplit`, và `sys.exit` theo mô tả.
-4. Đảm bảo scan inline links và reference links, không scan image links.
-5. Ngăn path traversal bằng `resolve()` + `relative_to(ROOT)`.
-6. Trả exit code `1` nếu có bất kỳ lỗi nào để GitHub Actions fail đúng.
-7. Tạo unit tests và gọi chúng từ workflow.
-8. Không biến drift guard thành công cụ crawl/kiểm tra URL internet; chỉ kiểm tra local file references.
-9. Không tự thêm deployment, auto-fix hay quyền ghi repository.
-
-## 8. Tiêu chí chấp nhận
-
-- Push lên branch `LD-*` kích hoạt workflow.
-- PR vào `main` kích hoạt workflow.
-- Manual dispatch hoạt động.
-- Markdown link local tồn tại được chấp nhận.
-- Link local thiếu file bị báo lỗi và exit code khác 0.
-- Link đi ra ngoài repository bị báo lỗi.
-- External links và anchor-only links không bị coi là file thiếu.
-- Thư mục cache/build được bỏ qua.
-- Backend/frontend/service jobs chạy đúng runtime và lệnh đã mô tả.
-- Báo cáo test được upload khi workflow job có cấu hình upload, kể cả khi test fail.
+`tests/test_documentation_drift.py` (unit) + các test module backend/frontend/AI/service được workflow gọi. Nên bổ sung test path traversal, URL external, anchor-only, reference-style links, URL-encoded path và ignored directories mà không đổi contract hiện tại.

@@ -1,243 +1,100 @@
-# LivingDocs — Đặc tả tái tạo chức năng LD-382: Docker & Deployment
+# BE3 — LD-382 Docker & Deployment
 
-> Tài liệu được trích xuất từ `LivingDocs-LD-382.zip`, branch `LD-382-Implement-Docker-&-Deployment`. Mục tiêu là tái tạo cấu hình container hóa và chạy đồng bộ các service hiện có; đây không phải mô tả một hệ thống Kubernetes hay triển khai cloud.
+| Mục | Nội dung |
+|---|---|
+| Story Jira | LD-382 Docker & Deployment |
+| Task đã làm | — |
+| Người thực hiện | — |
+| Thành phần | `compose.yaml`, `backend/Dockerfile`, `frontend/Dockerfile`, `frontend/nginx.conf`, `ai-service/Dockerfile`, `services/github-integration-service/Dockerfile`, `services/github-integration-service/docker-compose.yml`, `backend/src/main/resources/application.properties`, `services/github-integration-service/src/main/resources/application.yml` |
+| Tác nhân | Developers / DevOps khởi động stack local bằng Compose |
 
-## 1. Mục tiêu
+## 1. Mô tả
 
-Đóng gói các thành phần LivingDocs thành Docker images và điều phối bằng Docker Compose:
-- PostgreSQL cho backend.
-- PostgreSQL riêng cho GitHub Integration Service.
-- Backend Spring Boot.
-- AI Service FastAPI.
-- GitHub Integration Service Spring Boot.
-- Frontend React/Vite được build và phục vụ bằng Nginx.
+Đóng gói các thành phần LivingDocs thành Docker images và điều phối bằng Docker Compose: PostgreSQL cho backend, PostgreSQL riêng cho GitHub Integration Service, backend Spring Boot, AI Service FastAPI, GitHub Integration Service Spring Boot, frontend React/Vite build tĩnh phục vụ bởi Nginx. Mục đích: khởi động môi trường local bằng một lệnh Compose, quản lý thứ tự phụ thuộc, healthcheck và volume dữ liệu.
 
-Mục đích: khởi động môi trường local bằng một lệnh Compose, quản lý thứ tự phụ thuộc, healthcheck và volume dữ liệu.
+## 2. Yêu cầu chức năng
 
-## 2. File và vị trí mã nguồn
+| ID | Yêu cầu |
+|---|---|
+| LD-382.1 | `backend/Dockerfile`: build stage Maven + Eclipse Temurin, `WORKDIR /app`, copy `pom.xml`/`src`, chạy `mvn -B -DskipTests package`; runtime stage Eclipse Temurin JDK, cài `curl`, copy JAR thành `/app/app.jar`, expose `8080`, entrypoint `java -jar app.jar`. |
+| LD-382.2 | `frontend/Dockerfile`: build stage `node:24-alpine`, `npm ci`, copy source, `npm run build`; runtime `nginx:alpine`, copy `dist` vào `/usr/share/nginx/html`, copy `nginx.conf`, expose `80`, chạy Nginx foreground. |
+| LD-382.3 | `ai-service/Dockerfile`: base `python:3.12-slim`, `WORKDIR /app`, `PYTHONDONTWRITEBYTECODE=1`/`PYTHONUNBUFFERED=1`, cài `requirements.txt`, copy source, expose `8001`, CMD `uvicorn main:app --host 0.0.0.0 --port 8001`. |
+| LD-382.4 | `services/github-integration-service/Dockerfile`: build stage Maven + Eclipse Temurin 21, tải dependencies offline, copy `src`, package bỏ qua tests; runtime Eclipse Temurin 21 JRE, cài `curl`, copy JAR `github-integration-service-*.jar` thành `app.jar`, expose `8082`, CMD `java -jar app.jar`. |
+| LD-382.5 | Compose service `backend-db`: PostgreSQL 16, DB `cnpm`, user/password `livingdocs`, host `5434` → container `5432`, volume `backend-db-data`, healthcheck `pg_isready -U livingdocs -d cnpm`. |
+| LD-382.6 | Compose service `github-db`: PostgreSQL 16, DB `github_integration`, user/password `livingdocs`, host `5433` → container `5432`, volume `github-db-data`, healthcheck `pg_isready -U livingdocs -d github_integration`. |
+| LD-382.7 | Compose service `backend`: build `./backend`, image `livingdocs-backend:local`, host `8080` → container `8080`, DB URL `jdbc:postgresql://backend-db:5432/cnpm`, depends on `backend-db` healthy, OAuth client id/secret qua env với placeholder local, healthcheck `http://localhost:8080/actuator/health`, start_period đủ dài cho Spring Boot. |
+| LD-382.8 | Compose service `ai-service`: build `./ai-service`, image `livingdocs-ai:local`, host `8001` → container `8001`, healthcheck `/health` bằng Python urllib, start period ~15s. |
+| LD-382.9 | Compose service `github-integration`: build `./services/github-integration-service`, image `livingdocs-github-integration:local`, host `8082` → container `8082`, DB URL `jdbc:postgresql://github-db:5432/github_integration`, nhận `TOKEN_ENCRYPTION_KEY`, GitHub client id/secret, app slug, redirect URI qua env, depends on `github-db` healthy, healthcheck actuator, start period ~30s. |
+| LD-382.10 | Compose service `frontend`: build `./frontend`, image `livingdocs-frontend:local`, host `3000` → container `80`, depends on backend, ai-service, github-integration theo compose snapshot; frontend build static, không chạy Vite dev server. |
+| LD-382.11 | Named volumes: `backend-db-data`, `github-db-data`; container nối trong network Compose mặc định ở phiên bản LD-382. Không tự suy diễn network segmentation LD-397. |
+| LD-382.12 | Secret lấy qua `.env`/môi trường; không commit secret. `TOKEN_ENCRYPTION_KEY` đúng format AES-256-GCM mà `TokenEncryptor` yêu cầu. Không thay placeholder local thành credential production. |
+| LD-382.13 | `services/github-integration-service/docker-compose.yml` chạy riêng PostgreSQL 16 dev cho GitHub integration, named volume `github-db-data`. |
+| LD-382.14 | Healthcheck + `depends_on: condition: service_healthy` đảm bảo DB healthy trước backend/GitHub Integration. Healthcheck không thay thế kiểm thử end-to-end; `depends_on` không đảm bảo credential bên ngoài (GitHub OAuth/LLM) hợp lệ. |
 
-- `compose.yaml`: orchestration ở root.
-- `backend/Dockerfile`: build backend Java và chạy JAR.
-- `frontend/Dockerfile`: build React app và serve qua Nginx.
-- `frontend/nginx.conf`: cấu hình Nginx SPA/reverse proxy theo source snapshot.
-- `ai-service/Dockerfile`: image Python FastAPI.
-- `services/github-integration-service/Dockerfile`: multi-stage Maven + JRE.
-- `services/github-integration-service/docker-compose.yml`: Compose riêng để chạy PostgreSQL dev cho service GitHub integration.
-- `backend/src/main/resources/application.properties`: cấu hình DB và server backend.
-- `services/github-integration-service/src/main/resources/application.yml`: cấu hình DB, GitHub OAuth, token encryption, CORS và actuator.
+## 3. API / Cổng và giao diện
 
-## 3. Kiến trúc container
+| Loại | Địa chỉ / Endpoint | Kết quả | Yêu cầu |
+|---|---|---|---|
+| HTTP | Frontend host `3000` → container `80` | SPA static qua Nginx | LD-382.2, LD-382.10 |
+| HTTP | Backend host `8080` → container `8080` | Spring Boot API | LD-382.7 |
+| HTTP | GitHub Integration host `8082` → container `8082` | Spring Boot OAuth/API | LD-382.9 |
+| HTTP | AI Service host `8001` → container `8001` | FastAPI | LD-382.8 |
+| Health | Backend `GET /actuator/health` | `UP` | LD-382.7 |
+| Health | GitHub Integration `GET /actuator/health` | `UP` | LD-382.9 |
+| Health | AI Service `GET /health` | `OK` | LD-382.8 |
+| TCP | Backend DB `backend-db:5432` (host `5434`) | PostgreSQL healthy | LD-382.5 |
+| TCP | GitHub DB `github-db:5432` (host `5433`) | PostgreSQL healthy | LD-382.6 |
 
-```text
-Browser
-  -> frontend (Nginx, host port 3000)
-       -> backend (Spring Boot, host port 8080)
-       -> GitHub Integration (host port 8082 cho OAuth callback/API theo cấu hình)
+## 4. Luồng chính
 
-backend-db (PostgreSQL) <-> backend
-github-db (PostgreSQL) <-> github-integration
-ai-service (FastAPI, port 8001)
-```
+1. Từ root repo chạy `docker compose config` (đã có biến bắt buộc) để parse.
+2. `docker compose build` build các images: backend, frontend, ai-service, github-integration.
+3. `docker compose up -d` khởi động services.
+4. PostgreSQL `backend-db` và `github-db` chạy, healthcheck `pg_isready` → healthy.
+5. Backend khởi động sau khi `backend-db` healthy; GitHub Integration khởi động sau khi `github-db` healthy.
+6. AI Service và Frontend khởi động; frontend phục vụ ở host port 3000; browser gọi backend/GitHub Integration qua reverse proxy Nginx.
+7. Kiểm tra trạng thái bằng `docker compose ps`, xem log bằng `docker compose logs -f <service>`.
+8. Dừng stack bằng `docker compose down` (giữ volumes) hoặc `docker compose down -v` (xóa volumes — reset dữ liệu).
 
-Compose snapshot định nghĩa named volumes:
-- `backend-db-data`
-- `github-db-data`
+## 5. Luồng lỗi
 
-Các container được nối trong network Compose mặc định ở phiên bản LD-382. Không tự suy diễn thêm network segmentation của snapshot LD-397.
+| Trường hợp | Kết quả |
+|---|---|
+| Thiếu biến bắt buộc (`TOKEN_ENCRYPTION_KEY`, GitHub client/secret…) | `docker compose config` fail |
+| DB chưa healthy | Backend/GitHub Integration không khởi động (depends_on healthy) |
+| Build backend/frontend/AI/GitHub Integration lỗi | `docker compose build` fail, image tương ứng không có |
+| Backend healthcheck fail | Container bị đánh dấu unhealthy; service phụ thuộc không vượt qua |
+| GitHub OAuth/LLM sai credential | Healthcheck vẫn có thể `UP`, nhưng tích hợp bên ngoài fail — cần kiểm tra cấu hình |
+| Secret bị hard-code hoặc commit | Vi phạm nguyên tắc bảo mật |
+| Chạy `down` (không `-v`) | Named volumes giữ nguyên, dữ liệu DB còn |
+| Chạy `down -v` | Xóa volumes, dữ liệu DB mất |
 
-## 4. Dockerfile theo service
+## 6. Quy tắc nghiệp vụ
 
-### 4.1 Backend
-
-- Build stage dùng Maven + Eclipse Temurin.
-- `WORKDIR /app`.
-- Copy `pom.xml`, `src`.
-- Chạy `mvn -B -DskipTests package`.
-- Runtime stage dùng Eclipse Temurin JDK image trong snapshot.
-- Cài `curl` để healthcheck có thể gọi actuator.
-- Copy JAR thành `/app/app.jar`.
-- Expose `8080`.
-- Entrypoint: `java -jar app.jar`.
-
-### 4.2 Frontend
-
-- Build stage: `node:24-alpine`.
-- Copy `package*.json`, chạy `npm ci`.
-- Copy source và chạy `npm run build`.
-- Runtime: `nginx:alpine`.
-- Copy `dist` vào `/usr/share/nginx/html`.
-- Copy `nginx.conf` vào Nginx config.
-- Expose `80`, chạy Nginx foreground.
-
-### 4.3 AI Service
-
-- Base image `python:3.12-slim`.
-- `WORKDIR /app`.
-- Set `PYTHONDONTWRITEBYTECODE=1`, `PYTHONUNBUFFERED=1`.
-- Copy requirements và `pip install --no-cache-dir -r requirements.txt`.
-- Copy source.
-- Expose `8001`.
-- Run `uvicorn main:app --host 0.0.0.0 --port 8001`.
-
-### 4.4 GitHub Integration Service
-
-- Build stage Maven + Eclipse Temurin 21.
-- Copy `pom.xml`, tải dependencies offline, copy `src`, package bỏ qua tests trong image build.
-- Runtime stage Eclipse Temurin 21 JRE.
-- Cài `curl`, copy JAR `github-integration-service-*.jar` thành `app.jar`.
-- Expose `8082`, chạy `java -jar app.jar`.
-
-## 5. Docker Compose services
-
-### 5.1 backend-db
-
-- Image PostgreSQL 16.
-- Database `cnpm`, user/password `livingdocs`.
-- Host port `5434` map vào container `5432`.
-- Named volume `backend-db-data`.
-- Healthcheck `pg_isready -U livingdocs -d cnpm`.
-
-### 5.2 github-db
-
-- Image PostgreSQL 16.
-- Database `github_integration`, user/password `livingdocs`.
-- Host port `5433` map vào container `5432`.
-- Named volume `github-db-data`.
-- Healthcheck `pg_isready -U livingdocs -d github_integration`.
-
-### 5.3 backend
-
-- Build context `./backend`, Dockerfile `Dockerfile`.
-- Image `livingdocs-backend:local`.
-- Host `8080` -> container `8080`.
-- DB URL nội bộ `jdbc:postgresql://backend-db:5432/cnpm`.
-- Depends on `backend-db` healthy.
-- OAuth client id/secret lấy từ environment, có placeholder mặc định local.
-- Healthcheck gọi `http://localhost:8080/actuator/health`.
-- `start_period` đủ dài cho Spring Boot startup.
-
-### 5.4 ai-service
-
-- Build context `./ai-service`.
-- Image `livingdocs-ai:local`.
-- Host `8001` -> container `8001`.
-- Healthcheck gọi `http://localhost:8001/health` bằng Python urllib.
-- Start period khoảng 15 giây.
-
-### 5.5 github-integration
-
-- Build context `./services/github-integration-service`.
-- Image `livingdocs-github-integration:local`.
-- Host `8082` -> container `8082`.
-- DB URL nội bộ `jdbc:postgresql://github-db:5432/github_integration`.
-- Nhận `TOKEN_ENCRYPTION_KEY`, GitHub client id/secret, app slug và redirect URI qua environment.
-- Depends on `github-db` healthy.
-- Healthcheck gọi actuator health endpoint.
-- Start period khoảng 30 giây.
-
-### 5.6 frontend
-
-- Build context `./frontend`.
-- Image `livingdocs-frontend:local`.
-- Host port `3000` -> container Nginx port `80`.
-- Depends on backend, AI service và GitHub integration theo compose snapshot.
-- Frontend được build thành static assets, không chạy Vite dev server trong container production-like.
-
-## 6. Biến môi trường và bảo mật
-
-GitHub Integration Service yêu cầu:
-- `TOKEN_ENCRYPTION_KEY`: khóa mã hóa token, bắt buộc trong Compose.
-- `GITHUB_CLIENT_ID`
-- `GITHUB_CLIENT_SECRET`
-- `GITHUB_APP_SLUG`
-- `GITHUB_REDIRECT_URI`
-
-Backend có:
-- `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`.
-- OAuth GitHub client id/secret nếu backend dùng OAuth login.
-
-Quy tắc:
-- Secret phải cung cấp qua `.env` hoặc môi trường triển khai; không commit secret thật.
-- `TOKEN_ENCRYPTION_KEY` phải là khóa phù hợp độ dài/format mà `TokenEncryptor` yêu cầu (trong service là khóa AES-256-GCM).
-- Không thay placeholder local thành credential production.
-- PostgreSQL data phải nằm trong named volume để container recreate không làm mất dữ liệu.
-- Khi tái tạo từ snapshot LD-382, không tự áp dụng network hardening/loopback binding của LD-397 nếu mục tiêu là tái tạo chính xác LD-382.
-
-## 7. Cách chạy
-
-Từ thư mục root:
-
-```bash
-docker compose config
-docker compose build
-docker compose up -d
-docker compose ps
-```
-
-Theo dõi log:
-
-```bash
-docker compose logs -f backend
-docker compose logs -f github-integration
-docker compose logs -f ai-service
-docker compose logs -f frontend
-```
-
-Dừng stack:
-
-```bash
-docker compose down
-```
-
-Giữ dữ liệu database bằng cách không thêm `-v`. Chỉ xóa volumes khi chủ động muốn reset dữ liệu.
-
-Để chạy riêng database GitHub Integration Service trong development:
-
-```bash
-cd services/github-integration-service
-docker compose up -d
-```
-
-Compose riêng sử dụng PostgreSQL 16 và named volume `github-db-data`.
-
-## 8. Healthcheck và phụ thuộc
-
-- Database phải healthy trước khi backend/GitHub Integration Service khởi động.
-- Backend healthcheck dùng Spring Actuator.
-- GitHub Integration healthcheck dùng Spring Actuator.
-- AI Service healthcheck dùng `/health`.
-- Healthcheck là cơ chế báo trạng thái container; không thay thế kiểm thử chức năng end-to-end.
-- `depends_on` chỉ đảm bảo điều kiện phụ thuộc đã cấu hình, không đảm bảo mọi tích hợp bên ngoài (GitHub OAuth/LLM) có credential hợp lệ.
-
-## 9. Giới hạn và lưu ý tái tạo
-
-- Đây là Docker Compose cho môi trường local/development hoặc demo; không có Kubernetes manifests.
-- Không có autoscaling, rolling deployment, ingress controller hay secret manager.
-- Việc build image backend dùng `-DskipTests`; test cần chạy riêng bằng Maven/CI.
-- AI Service có thể cần `ANTHROPIC_API_KEY` để dùng LLM thật; thiếu key thì code snapshot hỗ trợ offline generator.
-- GitHub OAuth cần GitHub App/client credentials và redirect URI khớp cấu hình.
-- Không đưa `.env` thật vào Git.
-- Giữ chính xác port mapping, volume names, service names và internal DNS names vì các service dùng tên Compose để kết nối nhau.
-
-## 10. Tiêu chí chấp nhận
-
-1. `docker compose config` parse thành công khi đã cung cấp biến bắt buộc.
-2. Tất cả images build thành công.
-3. PostgreSQL containers healthy và giữ dữ liệu sau recreate.
-4. Backend kết nối `backend-db`.
-5. GitHub Integration Service kết nối `github-db`.
-6. `/actuator/health` của các Spring services trả trạng thái healthy.
-7. AI Service `/health` trả trạng thái OK.
-8. Frontend được phục vụ ở host port 3000.
-9. `docker compose down` không xóa named volumes; `down -v` mới xóa.
-10. Secret không bị hard-code vào source hoặc commit vào repository.
-
-## 11. Hướng dẫn cho AI tái tạo code
-
-- Tạo một Dockerfile riêng cho mỗi service theo đúng build/runtime stage.
 - Root `compose.yaml` là nguồn orchestration chính.
-- Dùng tên service làm hostname trong các JDBC URLs, không dùng `localhost` giữa các container.
-- Dùng healthchecks và `depends_on: condition: service_healthy` cho database dependencies.
-- Dùng named volumes cho dữ liệu PostgreSQL.
-- Không gộp hai PostgreSQL database thành một database nếu đang tái tạo snapshot LD-382.
-- Không đưa các network riêng, loopback host bindings hay analyzer service từ LD-397 vào tài liệu/implementation LD-382.
+- Dùng tên service Compose làm hostname trong JDBC URL, không dùng `localhost` giữa các container.
+- Dùng healthcheck + `depends_on: condition: service_healthy` cho DB dependency.
+- Dùng named volume cho dữ liệu PostgreSQL; `docker compose down` không xóa, `down -v` mới xóa.
+- Không gộp hai PostgreSQL database thành một khi tái tạo LD-382.
+- Khi tái tạo LD-382, không tự áp dụng network hardening/loopback binding của LD-397, không thêm analyzer service LD-397.
+- Build backend dùng `-DskipTests`; test chạy riêng qua Maven/CI.
+- Đây là Compose local/development/demo; không có Kubernetes manifests, autoscaling, rolling deploy, ingress, secret manager.
+- AI Service có thể cần `ANTHROPIC_API_KEY` để dùng LLM thật; thiếu key thì hỗ trợ offline generator.
+- Không đưa `.env` thật vào Git; giữ chính xác port, volume name, service name, internal DNS.
+
+## 7. Tiêu chí chấp nhận
+
+- **AC-LD-382.1:** `docker compose config` parse thành công khi đã cung cấp biến bắt buộc.
+- **AC-LD-382.2:** Tất cả images build thành công.
+- **AC-LD-382.3:** PostgreSQL containers healthy và giữ dữ liệu sau recreate.
+- **AC-LD-382.4:** Backend kết nối `backend-db`.
+- **AC-LD-382.5:** GitHub Integration Service kết nối `github-db`.
+- **AC-LD-382.6:** `/actuator/health` của các Spring services trả `healthy`.
+- **AC-LD-382.7:** AI Service `/health` trả `OK`.
+- **AC-LD-382.8:** Frontend phục vụ ở host port 3000.
+- **AC-LD-382.9:** `docker compose down` không xóa named volumes; `down -v` mới xóa.
+- **AC-LD-382.10:** Secret không bị hard-code vào source hoặc commit vào repository.
+
+## 8. Kiểm thử
+
+Kiểm thử thủ công theo mục 4 + mục 7 trong môi trường local. Tự động hóa một phần qua job `Docker Compose Validation` trong workflow CI LD-376.
