@@ -482,20 +482,43 @@ class DocumentStore:
             if (not base.sections_match_content or section is None or not section.markdown
                     or base.content.count(section.markdown) != 1):
                 raise VersionError(409, "The affected section cannot be updated safely")
-            sections = [item.model_copy(update={"markdown": resolution.proposed, "status": "manual"})
+            template_snapshot = base.review_report or base.evidence_report
+            proposed = resolution.proposed
+            if template_snapshot and template_snapshot.template_sections:
+                title = section.markdown.splitlines()[0]
+                if not proposed.startswith("# "):
+                    passage = next((item.excerpt for item in finding.evidence
+                                    if item.kind == "documentation" and item.path == section.path
+                                    and item.excerpt), None)
+                    if passage is None or section.markdown.count(passage) != 1:
+                        raise VersionError(409, "The drift suggestion cannot be located in the affected section")
+                    replacement = f"{title}\n\n{proposed}" if passage == title else proposed
+                    proposed = section.markdown.replace(passage, replacement, 1)
+                # The renderer omits sections without applicable entities. Preserve the
+                # headings present in this file rather than requiring inapplicable ones.
+                def headings(markdown):
+                    return [line.rstrip() for line in markdown.splitlines() if line.startswith("## ")]
+
+                if proposed.splitlines()[0] != title or headings(proposed) != headings(section.markdown):
+                    raise VersionError(409, "The drift draft changes the documentation template headings")
+            sections = [item.model_copy(update={"markdown": proposed, "status": "manual"})
                         if item.path == target.path else item for item in base.sections]
             evidence = [Evidence(id=item.id, kind=EvidenceKind.doc if item.kind == "documentation"
                                  else EvidenceKind.source, path=item.path or finding.file,
                                  line_start=item.line_start, line_end=item.line_end, excerpt=item.excerpt)
                         for item in finding.evidence]
             review = JobReport(job_id=key, template_id=doc.template_id, method="drift",
+                               template_name=template_snapshot.template_name if template_snapshot else None,
+                               template_version=template_snapshot.template_version if template_snapshot else doc.template_version,
+                               template_instructions=template_snapshot.template_instructions if template_snapshot else None,
+                               template_sections=template_snapshot.template_sections if template_snapshot else [],
                                files=[FileReport(path=finding.file, status=FileResultStatus.generated,
                                                  context_used=evidence)])
             number = doc.versions_total + 1
             version = DocumentVersion(
                 number=number, status=VersionStatus.proposed, origin=VersionOrigin.source_change,
                 base_version=base.number, created_by=owner, manual=True,
-                content=base.content.replace(section.markdown, resolution.proposed, 1),
+                content=base.content.replace(section.markdown, proposed, 1),
                 sections=sections, skipped=base.skipped, source_snapshot=snapshot,
                 source_changes=[SourceChangeRef(id=key, trigger="PULL_REQUEST", commit_sha=pr.head_sha,
                                                pull_request_number=pr.number)],
