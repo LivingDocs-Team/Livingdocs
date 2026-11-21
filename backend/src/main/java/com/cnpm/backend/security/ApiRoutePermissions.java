@@ -130,8 +130,10 @@ public final class ApiRoutePermissions {
         rule("GET", "/api/document-workflows/manager/queue", need("managerApproval", 'R'));
         rule("GET", "/api/document-workflows/history-accessible", need("workflowSubmission", 'R'),
                 need("staffReview", 'R'), need("managerApproval", 'R'), need("approvalAudit", 'R'));
+        // "/versions" and "/comparison" (LD-183): compare two versions of the workflow's document. They are read
+        // views like "/history"; GitHub Integration still checks that the user may read this workflow.
         for (String view : new String[] {"", "/document", "/evidence", "/review-evidence", "/review-comparison",
-                "/history", "/comments", "/change-requests"}) {
+                "/history", "/comments", "/change-requests", "/versions", "/comparison"}) {
             rule("GET", "/api/document-workflows/{}" + view, need("workflowSubmission", 'R'),
                     need("staffReview", 'R'), need("managerApproval", 'R'), need("approvalAudit", 'R'));
         }
