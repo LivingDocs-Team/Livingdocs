@@ -214,6 +214,10 @@ export default function ManagerApprovalQueue({ userId }) {
     && workflow.staffReviewResult === 'PASSED'
     && visibleDetail.document?.version === workflow.submittedDocumentVersion;
   const canRollback = workflow?.status === 'APPROVED';
+  const canCommitToGitHub = workflow?.status === 'APPROVED'
+    && String(workflow.managerUserId) === String(userId)
+    && history.some((event) => event.action === 'REVISION_DRAFT_SUBMITTED'
+      && event.comment?.startsWith(`Version ${workflow.submittedDocumentVersion} from `));
   const repository = visibleDetail?.evidence?.source_snapshot?.repository_full_name
     || 'Not included in workflow/evidence response';
 
@@ -286,6 +290,29 @@ export default function ManagerApprovalQueue({ userId }) {
       setRefreshIndex((value) => value + 1);
     } catch (error) {
       setActionMessage({ type: 'error', text: managerError(error, 'request rollback') });
+    } finally {
+      setAction('');
+    }
+  }
+
+  async function commitToGitHub() {
+    if (!canCommitToGitHub || action) return;
+    const version = workflow.submittedDocumentVersion;
+    if (!window.confirm(`Commit approved version ${version} to GitHub?`)) return;
+    setAction('GITHUB_COMMIT');
+    setActionMessage(null);
+    try {
+      const result = await githubApi(
+        `/api/document-workflows/${encodeURIComponent(workflow.id)}/versions/${version}/github-commit`,
+        { method: 'POST', userId },
+      );
+      if (!result?.path || !result?.observedHeadSha) throw new Error('GitHub did not confirm the commit.');
+      setActionMessage({
+        type: 'success',
+        text: `${result.alreadyPresent ? 'Already present' : 'Committed'} on GitHub: ${result.path}`,
+      });
+    } catch (error) {
+      setActionMessage({ type: 'error', text: error?.message || 'GitHub did not confirm the commit.' });
     } finally {
       setAction('');
     }
@@ -421,6 +448,15 @@ export default function ManagerApprovalQueue({ userId }) {
                       <div><dt>Updated</dt><dd>{formatTimestamp(workflow.updatedAt)}</dd></div>
                       <div><dt>Decision time</dt><dd>{formatTimestamp(workflow.decidedAt)}</dd></div>
                     </dl>
+                    {canCommitToGitHub && (
+                      <div className="documentation-actions">
+                        <button type="button" className="documentation-secondary-button" disabled={Boolean(action)}
+                          onClick={commitToGitHub}>
+                          {action === 'GITHUB_COMMIT' ? 'Committing…' : 'Commit to GitHub'}
+                        </button>
+                        <a href="#/github/connection">GitHub connection</a>
+                      </div>
+                    )}
                     {workflow.status === 'REJECTED' && (
                       <section className="staff-review-comments" aria-label="Manager rejection reason">
                         <h5>Rejection reason</h5>

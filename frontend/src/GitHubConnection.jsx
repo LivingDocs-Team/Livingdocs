@@ -81,7 +81,7 @@ function GitHubConnection({ userId }) {
     <main className="page">
       <section className="login-card github-connection-card">
         <h1>GitHub Integration</h1>
-        <p className="subtitle">Connect your GitHub account to manage repositories in LivingDocs.</p>
+        <p className="subtitle">Connect your GitHub account to use GitHub from LivingDocs.</p>
 
         {!userId && <p role="alert">Sign in to LivingDocs before connecting GitHub.</p>}
         {isLoading && <p role="status">Loading GitHub connection…</p>}
