@@ -16,10 +16,12 @@ import com.livingdocs.github.client.GitHubBlob;
 import com.livingdocs.github.client.GitHubChangedFile;
 import com.livingdocs.github.client.GitHubClient;
 import com.livingdocs.github.client.GitHubRepo;
+import com.livingdocs.github.client.GitHubTree;
 import com.livingdocs.github.client.GitHubPullRequest;
 import com.livingdocs.github.entity.ConnectionStatus;
 import com.livingdocs.github.entity.GitHubConnection;
 import com.livingdocs.github.repository.GitHubConnectionRepository;
+import com.livingdocs.github.service.DocumentCommitBackService;
 import com.livingdocs.github.sync.AnalysisInput;
 import org.mockito.invocation.InvocationOnMock;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -92,6 +94,7 @@ class RevisionWorkflowE2ETest {
     @Autowired ObjectMapper json;
     @Autowired GitHubConnectionRepository connectionRepository;
     @Autowired DocumentWorkflowService workflows;
+    @Autowired DocumentCommitBackService commitBack;
     @Autowired DocumentWorkflowRepository workflowRows;
     @Autowired org.springframework.jdbc.core.JdbcTemplate revisionJdbc;
     @Autowired com.livingdocs.github.change.RevisionJobWorker revisionWorker;
@@ -419,9 +422,51 @@ class RevisionWorkflowE2ETest {
         String visible = ai.get().uri(docUrl + "/content").retrieve().body(String.class);
         if (reject) {
             assertThat(visible).doesNotContain("Calculates invoice totals with tax.");
+            assertThatThrownBy(() -> commitBack.commit(manager, managerPermissions, id, 2))
+                    .hasMessageContaining("not approved");
         } else {
             assertThat(visible).contains("Calculates invoice totals with tax.");
         }
+        if (scenario == Scenario.APPROVE) {
+            assertCommitBackAudit(manager, managerPermissions, id, repo, documentId, sha, visible, owner);
+        }
+    }
+
+    private void assertCommitBackAudit(String manager, Set<String> permissions, UUID workflowId,
+            Repo repo, String documentId, String sourceSha, String content, String owner) throws Exception {
+        saveConnection(manager);
+        String publishedSha = newSha();
+        String treeSha = newSha();
+        String path = ".livingdocs/" + documentId + "-v2.md";
+        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+        when(gitHubClient.getPublicationBranch(TOKEN, "acme", "docs")).thenReturn(
+                new GitHubClient.PublicationBranch(repo.githubId(), "acme/docs", "ref", "main", sourceSha, treeSha));
+        when(gitHubClient.getTree(TOKEN, "acme", "docs", treeSha))
+                .thenReturn(new GitHubTree(treeSha, false, List.of()));
+        String message = "Publish LivingDocs document " + documentId + " v2";
+        when(gitHubClient.commitFileOnBranch(TOKEN, "ref", sourceSha, path, bytes, message))
+                .thenReturn(publishedSha);
+        assertThat(commitBack.commit(manager, permissions, workflowId, 2).observedHeadSha()).isEqualTo(publishedSha);
+
+        var hash = java.security.MessageDigest.getInstance("SHA-1");
+        hash.update(("blob " + bytes.length + "\0").getBytes(StandardCharsets.US_ASCII));
+        String blob = java.util.HexFormat.of().formatHex(hash.digest(bytes));
+        when(gitHubClient.getPublicationBranch(TOKEN, "acme", "docs")).thenReturn(
+                new GitHubClient.PublicationBranch(repo.githubId(), "acme/docs", "ref", "main", publishedSha, treeSha));
+        when(gitHubClient.getTree(TOKEN, "acme", "docs", treeSha)).thenReturn(new GitHubTree(treeSha, false,
+                List.of(new GitHubTree.Entry(path, "100644", "blob", blob, (long) bytes.length))));
+        assertThat(commitBack.commit(manager, permissions, workflowId, 2).alreadyPresent()).isTrue();
+        org.mockito.Mockito.verify(gitHubClient).commitFileOnBranch(TOKEN, "ref", sourceSha, path, bytes, message);
+        assertThat(workflows.history(owner, Set.of("DOCUMENT_VIEW"), workflowId))
+                .filteredOn(entry -> entry.action().equals("COMMIT_BACK_CONFIRMED"))
+                .singleElement().satisfies(entry -> {
+                    assertThat(entry.documentId()).isEqualTo(documentId);
+                    assertThat(entry.documentVersion()).isEqualTo(2);
+                    assertThat(entry.actorUserId()).isEqualTo(manager);
+                    assertThat(entry.actorRole()).isEqualTo("MANAGER");
+                    assertThat(entry.createdAt()).isNotNull();
+                    assertThat(entry.comment()).contains(sourceSha, publishedSha, "Published approved version");
+                });
     }
 
     enum Scenario {
@@ -552,7 +597,7 @@ class RevisionWorkflowE2ETest {
     private record Repo(String id, long githubId) {
     }
 
-    private Repo connectAndAddRepo(String user) throws Exception {
+    private void saveConnection(String user) {
         GitHubConnection connection = new GitHubConnection();
         connection.setUserId(user);
         connection.setGithubUserId(9200L);
@@ -561,7 +606,10 @@ class RevisionWorkflowE2ETest {
         connection.setAccessTokenExpiresAt(Instant.now().plus(Duration.ofHours(8)));
         connection.setStatus(ConnectionStatus.ACTIVE);
         connectionRepository.save(connection);
+    }
 
+    private Repo connectAndAddRepo(String user) throws Exception {
+        saveConnection(user);
         long githubId = NEXT_GITHUB_REPO_ID.incrementAndGet();
         GitHubRepo docs = new GitHubRepo(githubId, "acme/docs", false, "main", "https://github.com/acme/docs");
         when(gitHubClient.listUserRepositories(TOKEN)).thenReturn(List.of(docs));
