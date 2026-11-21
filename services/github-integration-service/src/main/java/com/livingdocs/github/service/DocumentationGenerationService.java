@@ -459,6 +459,33 @@ public class DocumentationGenerationService {
         }
     }
 
+    public int editStaffDraft(String actor, String owner, String documentId, int expected,
+            String content, String reason) {
+        try {
+            ObjectNode body = JsonNodeFactory.instance.objectNode().put("expected_version", expected)
+                    .put("content", content).put("note", reason);
+            JsonNode response = aiServiceClient.put().uri("/internal/documents/{id}/staff-draft", documentId)
+                    .header("X-User-Id", actor).header("X-Document-Owner-Id", owner)
+                    .contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(JsonNode.class);
+            if (response == null || response.path("number").asInt() != expected + 1
+                    || response.path("evidence_from_version").asInt() != expected) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid Staff draft.");
+            }
+            return response.path("number").asInt();
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 409) {
+                throw new ApiException(HttpStatus.CONFLICT, "STAFF_DRAFT_CONFLICT",
+                        DocumentationTemplateService.detail(e));
+            }
+            if (e.getStatusCode().value() == 422) {
+                throw ApiException.badRequest(DocumentationTemplateService.detail(e));
+            }
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not save the Staff draft.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not save the Staff draft.");
+        }
+    }
+
     public void resolveDocumentVersion(String actorUserId, String ownerUserId, String documentId,
             int version, String decision, String note) {
         try {

@@ -8,6 +8,7 @@ import com.livingdocs.github.repository.DocumentWorkflowRepository;
 import com.livingdocs.github.entity.StaffReviewResult;
 import com.livingdocs.github.entity.ManagerDecision;
 import com.livingdocs.github.dto.WorkflowDtos.StaffReviewRequest;
+import com.livingdocs.github.dto.WorkflowDtos.EditDocumentRequest;
 import com.livingdocs.github.client.GitHubCommit;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.livingdocs.github.change.CodeAnalyzerClient;
@@ -373,21 +374,37 @@ class RevisionWorkflowE2ETest {
                 .containsExactly("Overview", "Classes");
         assertThat(revision.path("content").asText()).contains("## Overview", "## Classes")
                 .doesNotContain("## API Endpoints");
+        boolean staffEdits = scenario == Scenario.APPROVE;
+        String staffEditReason = "Clarified the invoice description";
+        int reviewedVersion = staffEdits ? 3 : 2;
+        EditDocumentRequest staffEdit = null;
+        if (staffEdits) {
+            String original = revision.path("content").asText();
+            var invalid = new EditDocumentRequest(original.replace("## Classes", "## API Endpoints"),
+                    staffEditReason, 2);
+            assertThatThrownBy(() -> workflows.staffReview(staff, staffPermissions, id,
+                    new StaffReviewRequest(StaffReviewResult.PASSED, "Verified against source", invalid)))
+                    .hasMessageContaining("template headings");
+            assertThat(workflowRows.findById(id).orElseThrow().getSubmittedDocumentVersion()).isEqualTo(2);
+            staffEdit = new EditDocumentRequest(original + "\nStaff clarification.\n", staffEditReason, 2);
+        }
         workflows.staffReview(staff, staffPermissions, id,
-                new StaffReviewRequest(StaffReviewResult.PASSED, "Verified against source"));
+                new StaffReviewRequest(StaffReviewResult.PASSED, "Verified against source", staffEdit));
         assertThatThrownBy(() -> workflows.decide(manager, managerPermissions, id, ManagerDecision.APPROVED, null, 1))
                 .hasMessageContaining("Reload the submitted document version");
         when(gitHubClient.getCommit(TOKEN, "acme", "docs", "main"))
                 .thenReturn(new GitHubCommit(newSha(), null, null, null));
-        assertThatThrownBy(() -> workflows.decide(manager, managerPermissions, id, ManagerDecision.APPROVED, null, 2))
+        assertThatThrownBy(() -> workflows.decide(manager, managerPermissions, id, ManagerDecision.APPROVED, null,
+                reviewedVersion))
                 .hasMessageContaining("could not be verified as current");
         when(gitHubClient.getCommit(TOKEN, "acme", "docs", "main")).thenReturn(commit);
 
         boolean reject = scenario == Scenario.REJECT;
         var decision = reject ? ManagerDecision.REJECTED : ManagerDecision.APPROVED;
-        workflows.decide(manager, managerPermissions, id, decision, reject ? "Needs clarification" : null, 2);
+        String managerReason = reject ? "Needs clarification" : "Verified the reviewed revision";
+        workflows.decide(manager, managerPermissions, id, decision, managerReason, reviewedVersion);
         var history = workflows.history(owner, Set.of("DOCUMENT_VIEW"), id).stream()
-                .filter(event -> Integer.valueOf(2).equals(event.documentVersion()))
+                .filter(event -> event.documentVersion() != null && event.documentVersion() >= 2)
                 .toList();
         assertThat(history).extracting(event -> event.action())
                 .containsSubsequence("REVISION_DRAFT_SUBMITTED", "PASSED", decision.name());
@@ -406,19 +423,21 @@ class RevisionWorkflowE2ETest {
             assertThat(event.actorUserId()).isEqualTo(staff);
             assertThat(event.actorRole()).isEqualTo("STAFF");
             assertThat(event.comment()).isEqualTo("Verified against source");
+            assertThat(event.documentVersion()).isEqualTo(reviewedVersion);
         });
         assertThat(history).anySatisfy(event -> {
             assertThat(event.action()).isEqualTo(decision.name());
             assertThat(event.actorUserId()).isEqualTo(manager);
             assertThat(event.actorRole()).isEqualTo("MANAGER");
-            assertThat(event.comment()).isEqualTo(reject ? "Needs clarification" : null);
+            assertThat(event.comment()).isEqualTo(managerReason);
+            assertThat(event.documentVersion()).isEqualTo(reviewedVersion);
         });
         assertThat(revision.path("source_changes").get(0).path("commit_sha").asText()).isEqualTo(sha);
         assertThat(revision.path("source_changes").get(0).path("trigger").asText()).isEqualTo("COMMIT");
         var resolved = ai.get().uri(docUrl).retrieve().body(JsonNode.class);
         assertThat(resolved.path("pending_version").isNull()).isTrue();
-        assertThat(resolved.path("current_version").asInt()).isEqualTo(reject ? 1 : 2);
-        assertThat(resolved.path("versions_total").asInt()).isEqualTo(2);
+        assertThat(resolved.path("current_version").asInt()).isEqualTo(reject ? 1 : reviewedVersion);
+        assertThat(resolved.path("versions_total").asInt()).isEqualTo(reviewedVersion);
         String visible = ai.get().uri(docUrl + "/content").retrieve().body(String.class);
         if (reject) {
             assertThat(visible).doesNotContain("Calculates invoice totals with tax.");
@@ -427,26 +446,40 @@ class RevisionWorkflowE2ETest {
         } else {
             assertThat(visible).contains("Calculates invoice totals with tax.");
         }
-        if (scenario == Scenario.APPROVE) {
-            assertCommitBackAudit(manager, managerPermissions, id, repo, documentId, sha, visible, owner);
+        if (staffEdits) {
+            assertThat(visible).contains("Staff clarification.");
+            assertThat(history).extracting(event -> event.action())
+                    .containsSubsequence("REVISION_DRAFT_SUBMITTED", "STAFF_DRAFT_EDITED", "PASSED", "APPROVED");
+            assertThat(history).anySatisfy(event -> {
+                assertThat(event.action()).isEqualTo("STAFF_DRAFT_EDITED");
+                assertThat(event.actorUserId()).isEqualTo(staff);
+                assertThat(event.actorRole()).isEqualTo("STAFF");
+                assertThat(event.documentVersion()).isEqualTo(reviewedVersion);
+                assertThat(event.comment()).isEqualTo(staffEditReason);
+            });
+            var edited = ai.get().uri(docUrl + "/versions/{version}", reviewedVersion)
+                    .retrieve().body(JsonNode.class);
+            assertThat(edited.path("evidence_from_version").asInt()).isEqualTo(2);
+            assertThat(edited.path("source_snapshot").path("commit_sha").asText()).isEqualTo(sha);
+            assertCommitBackAudit(manager, managerPermissions, id, repo, documentId, reviewedVersion, sha, visible, owner);
         }
     }
 
     private void assertCommitBackAudit(String manager, Set<String> permissions, UUID workflowId,
-            Repo repo, String documentId, String sourceSha, String content, String owner) throws Exception {
+            Repo repo, String documentId, int version, String sourceSha, String content, String owner) throws Exception {
         saveConnection(manager);
         String publishedSha = newSha();
         String treeSha = newSha();
-        String path = ".livingdocs/" + documentId + "-v2.md";
+        String path = ".livingdocs/" + documentId + "-v" + version + ".md";
         byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
         when(gitHubClient.getPublicationBranch(TOKEN, "acme", "docs")).thenReturn(
                 new GitHubClient.PublicationBranch(repo.githubId(), "acme/docs", "ref", "main", sourceSha, treeSha));
         when(gitHubClient.getTree(TOKEN, "acme", "docs", treeSha))
                 .thenReturn(new GitHubTree(treeSha, false, List.of()));
-        String message = "Publish LivingDocs document " + documentId + " v2";
+        String message = "Publish LivingDocs document " + documentId + " v" + version;
         when(gitHubClient.commitFileOnBranch(TOKEN, "ref", sourceSha, path, bytes, message))
                 .thenReturn(publishedSha);
-        assertThat(commitBack.commit(manager, permissions, workflowId, 2).observedHeadSha()).isEqualTo(publishedSha);
+        assertThat(commitBack.commit(manager, permissions, workflowId, version).observedHeadSha()).isEqualTo(publishedSha);
 
         var hash = java.security.MessageDigest.getInstance("SHA-1");
         hash.update(("blob " + bytes.length + "\0").getBytes(StandardCharsets.US_ASCII));
@@ -455,13 +488,13 @@ class RevisionWorkflowE2ETest {
                 new GitHubClient.PublicationBranch(repo.githubId(), "acme/docs", "ref", "main", publishedSha, treeSha));
         when(gitHubClient.getTree(TOKEN, "acme", "docs", treeSha)).thenReturn(new GitHubTree(treeSha, false,
                 List.of(new GitHubTree.Entry(path, "100644", "blob", blob, (long) bytes.length))));
-        assertThat(commitBack.commit(manager, permissions, workflowId, 2).alreadyPresent()).isTrue();
+        assertThat(commitBack.commit(manager, permissions, workflowId, version).alreadyPresent()).isTrue();
         org.mockito.Mockito.verify(gitHubClient).commitFileOnBranch(TOKEN, "ref", sourceSha, path, bytes, message);
         assertThat(workflows.history(owner, Set.of("DOCUMENT_VIEW"), workflowId))
                 .filteredOn(entry -> entry.action().equals("COMMIT_BACK_CONFIRMED"))
                 .singleElement().satisfies(entry -> {
                     assertThat(entry.documentId()).isEqualTo(documentId);
-                    assertThat(entry.documentVersion()).isEqualTo(2);
+                    assertThat(entry.documentVersion()).isEqualTo(version);
                     assertThat(entry.actorUserId()).isEqualTo(manager);
                     assertThat(entry.actorRole()).isEqualTo("MANAGER");
                     assertThat(entry.createdAt()).isNotNull();

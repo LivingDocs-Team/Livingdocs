@@ -444,6 +444,17 @@ def resolve_owned_document_version(doc_id: str, data: InternalVersionDecision,
     except VersionError as e:
         raise HTTPException(e.status, e.message)
 
+
+@app.put("/internal/documents/{doc_id}/staff-draft", response_model=DocumentVersion,
+         dependencies=[Depends(require_internal_service)])
+def edit_staff_draft(doc_id: str, data: DocumentContentEdit,
+                     actor: str = Header(alias="X-User-Id"),
+                     owner: str = Header(alias="X-Document-Owner-Id")):
+    if not data.note or not data.note.strip():
+        raise HTTPException(422, "A reason is required for a Staff edit")
+    return _call(documents.edit_staff_draft, doc_id, owner, data.expected_version,
+                 actor, data.content, data.note.strip())
+
 @app.post(
     "/internal/documents/{doc_id}/rollback",
     response_model=DocumentVersion,

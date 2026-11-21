@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import pathlib
+import re
 import threading
 import uuid
 from datetime import datetime
@@ -31,6 +32,8 @@ from .version_models import (Document, DocumentVersion, FileSection, PreparedRev
 log = logging.getLogger(__name__)
 DEFAULT_FILE = "data/documents.json"
 SEPARATOR = "\n\n---\n\n"
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+_HEADING = re.compile(r"^ {0,3}(#{1,2})[ \t]+(.+?)\s*$")
 
 
 class VersionError(Exception):
@@ -47,6 +50,22 @@ def _not_found(what: str) -> VersionError:
 
 
 # ---------- Text helpers ----------
+
+def _template_headings(markdown: str) -> list[tuple[str, str]]:
+    headings = []
+    fence = None
+    for line in markdown.splitlines():
+        marker = _FENCE.match(line)
+        if fence is not None:
+            if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence) and not marker[2].strip():
+                fence = None
+        elif marker:
+            fence = marker[1]
+        else:
+            heading = _HEADING.match(line)
+            if heading:
+                headings.append((heading[1], heading[2]))
+    return headings
 
 def _mean(values: List[Optional[float]]) -> Optional[float]:
     xs = [v for v in values if v is not None]
@@ -496,10 +515,7 @@ class DocumentStore:
                     proposed = section.markdown.replace(passage, replacement, 1)
                 # The renderer omits sections without applicable entities. Preserve the
                 # headings present in this file rather than requiring inapplicable ones.
-                def headings(markdown):
-                    return [line.rstrip() for line in markdown.splitlines() if line.startswith("## ")]
-
-                if proposed.splitlines()[0] != title or headings(proposed) != headings(section.markdown):
+                if proposed.splitlines()[0] != title or _template_headings(proposed) != _template_headings(section.markdown):
                     raise VersionError(409, "The drift draft changes the documentation template headings")
             sections = [item.model_copy(update={"markdown": proposed, "status": "manual"})
                         if item.path == target.path else item for item in base.sections]
@@ -586,6 +602,51 @@ class DocumentStore:
             self._event(doc_id, HistoryAction.proposed, number, owner_user_id, note or "Owner edited after changes requested")
             self._save()
             return version
+
+    def edit_staff_draft(self, doc_id: str, owner: str, expected: int, actor: str,
+                         content: str, reason: str) -> DocumentVersion:
+        with self._lock:
+            doc = self.get_owned(doc_id, owner)
+            if doc.pending_version is None:
+                raise VersionError(409, "No document version is awaiting review")
+            pending = self.version(doc_id, doc.pending_version)
+            if pending.number != expected:
+                if (pending.evidence_from_version == expected and pending.created_by == actor
+                        and pending.content == content and pending.note == reason):
+                    return pending
+                raise VersionError(409, "The submitted document version has changed")
+            report = pending.review_report or pending.evidence_report
+            if report and report.template_sections:
+                if _template_headings(content) != _template_headings(pending.content):
+                    raise VersionError(409, "The Staff edit changes the documentation template headings")
+            sections = pending.sections
+            matches = doc.scope == Scope.file and len(sections) == 1 and not pending.skipped
+            if matches:
+                sections = [sections[0].model_copy(update={"markdown": content, "status": "manual"})]
+            previous = doc.model_copy(deep=True)
+            edited = pending.model_copy(deep=True, update={
+                "number": doc.versions_total + 1, "content": content, "sections": sections,
+                "sections_match_content": matches,
+                "evidence_from_version": pending.number, "created_by": actor, "created_at": now(),
+                "manual": True, "note": reason,
+            })
+            pending.status = VersionStatus.superseded
+            pending.superseded_by = edited.number
+            self._versions[doc.id].append(edited)
+            doc.pending_version = doc.versions_total = edited.number
+            doc.updated_at = now()
+            self._event(doc.id, HistoryAction.edited, edited.number, actor, reason, related=pending.number)
+            try:
+                self._save()
+            except OSError:
+                self._versions[doc.id].pop()
+                self._events[doc.id].pop()
+                self._docs[doc.id] = previous
+                pending.status = VersionStatus.proposed
+                pending.superseded_by = None
+                raise
+            return edited
+
     def rollback_owned(
         self,
         doc_id: str,

@@ -75,6 +75,7 @@ export default function ManagerApprovalQueue({ userId }) {
   const [actionMessage, setActionMessage] = useState(null);
   const [lastOutcome, setLastOutcome] = useState(null);
   const [rejectComment, setRejectComment] = useState('');
+  const [approveComment, setApproveComment] = useState('');
   const [rollbackVersion, setRollbackVersion] = useState('');
   const [rollbackReason, setRollbackReason] = useState('');
 
@@ -229,7 +230,7 @@ export default function ManagerApprovalQueue({ userId }) {
       const response = await githubApi(`/api/document-workflows/${encodeURIComponent(workflow.id)}/${decision === 'APPROVED' ? 'approve' : 'reject'}`, {
         method: 'POST', userId, body: {
           documentVersion: workflow.submittedDocumentVersion,
-          ...(decision === 'REJECTED' ? { comment: comment.trim() } : {}),
+          ...(comment.trim() ? { comment: comment.trim() } : {}),
         },
       });
       const expected = decision;
@@ -239,6 +240,7 @@ export default function ManagerApprovalQueue({ userId }) {
       }
       setLastOutcome(response);
       setRejectComment('');
+      setApproveComment('');
       setActionMessage({ type: 'success', text: `Backend confirmed ${decision}.` });
       try {
         const events = await githubApi(`/api/document-workflows/${encodeURIComponent(workflow.id)}/history`, { userId });
@@ -252,6 +254,13 @@ export default function ManagerApprovalQueue({ userId }) {
     } finally {
       setAction('');
     }
+  }
+
+  function selectWorkflow(id) {
+    setActionMessage(null);
+    setApproveComment('');
+    setRejectComment('');
+    setSelectedId(String(id));
   }
 
   async function submitRollback(event) {
@@ -370,7 +379,7 @@ export default function ManagerApprovalQueue({ userId }) {
                   <button type="button" key={item.id}
                     className={`suggestion-review-card ${String(item.id) === selectedWorkflowId ? 'active' : ''}`}
                     aria-pressed={String(item.id) === selectedWorkflowId}
-                    onClick={() => { setActionMessage(null); setSelectedId(String(item.id)); }}>
+                    onClick={() => selectWorkflow(item.id)}>
                     <strong>{item.documentTitle || 'Untitled document'}</strong>
                     <span>Repository: Not included in workflow response</span>
                     <span>Staff: {item.reviewerUserId || 'Unavailable'}</span>
@@ -397,7 +406,7 @@ export default function ManagerApprovalQueue({ userId }) {
                     <button type="button" key={`approved-${item.id}`}
                       className={`suggestion-review-card ${String(item.id) === selectedWorkflowId ? 'active' : ''}`}
                       aria-pressed={String(item.id) === selectedWorkflowId}
-                      onClick={() => { setActionMessage(null); setSelectedId(String(item.id)); }}>
+                      onClick={() => selectWorkflow(item.id)}>
                       <strong>{item.documentTitle || 'Untitled document'}</strong>
                       <span>Status: {item.status}</span>
                       <span>Version: {item.submittedDocumentVersion || 'Unavailable'}</span>
@@ -411,7 +420,7 @@ export default function ManagerApprovalQueue({ userId }) {
                     <button type="button" key={`rejected-${item.id}`}
                       className={`suggestion-review-card ${String(item.id) === selectedWorkflowId ? 'active' : ''}`}
                       aria-pressed={String(item.id) === selectedWorkflowId}
-                      onClick={() => { setActionMessage(null); setSelectedId(String(item.id)); }}>
+                      onClick={() => selectWorkflow(item.id)}>
                       <strong>{item.documentTitle || 'Untitled document'}</strong>
                       <span>Status: {item.status}</span>
                       <span>Decision: {item.managerDecision || 'Not included in workflow response'}</span>
@@ -493,6 +502,7 @@ export default function ManagerApprovalQueue({ userId }) {
                               <strong>{event.action || 'Action unavailable'}</strong>
                               <p>Actor: {event.actorUserId || 'Unavailable'}{event.actorRole ? ` (${event.actorRole})` : ''}</p>
                               <p>Time: {formatTimestamp(event.createdAt)}</p>
+                              {event.documentVersion && <p>Document version: {event.documentVersion}</p>}
                               <p>Workflow: {event.previousStatus || '—'} → {event.newStatus || '—'}</p>
                               {event.comment && <p>Comment: {event.comment}</p>}
                             </article>
@@ -503,9 +513,11 @@ export default function ManagerApprovalQueue({ userId }) {
 
                     {canDecide && isApprover && <section className="manager-approval-actions">
                       <h5>Final decision</h5>
-                      <p className="documentation-hint">The Backend requires a rejection reason. Approval has no request body.</p>
+                      <label htmlFor="manager-approval-comment">Approval reason (optional)</label>
+                      <textarea id="manager-approval-comment" value={approveComment} maxLength={2000}
+                        onChange={(event) => setApproveComment(event.target.value)} />
                       <button type="button" className="documentation-primary-button" disabled={Boolean(action)}
-                        onClick={() => submitDecision('APPROVED', '')}>
+                        onClick={() => submitDecision('APPROVED', approveComment)}>
                         {action === 'APPROVED' ? 'Approving...' : 'Approve document'}
                       </button>
                       <form className="staff-review-form" onSubmit={(event) => {
