@@ -2,11 +2,13 @@ package com.livingdocs.github.service;
 
 import com.livingdocs.github.client.GitHubClient;
 import com.livingdocs.github.client.GitHubTree;
+import com.livingdocs.github.entity.DocumentWorkflowAudit;
 import com.livingdocs.github.entity.DocumentWorkflowStatus;
 import com.livingdocs.github.entity.RepositoryStatus;
 import com.livingdocs.github.exception.ApiException;
 import com.livingdocs.github.exception.GitHubApiException;
 import com.livingdocs.github.repository.ConnectedRepositoryRepository;
+import com.livingdocs.github.repository.DocumentWorkflowAuditRepository;
 import com.livingdocs.github.repository.DocumentWorkflowRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -23,19 +25,23 @@ import java.util.UUID;
 @Service
 public class DocumentCommitBackService {
     private static final String DIRECTORY = ".livingdocs";
+    private static final String AUDIT_ACTION = "COMMIT_BACK_CONFIRMED";
     private final DocumentWorkflowRepository workflows;
     private final ConnectedRepositoryRepository repositories;
     private final DocumentationGenerationService documents;
     private final GitHubConnectionService connections;
     private final GitHubClient github;
+    private final DocumentWorkflowAuditRepository audit;
 
     public DocumentCommitBackService(DocumentWorkflowRepository workflows, ConnectedRepositoryRepository repositories,
-            DocumentationGenerationService documents, GitHubConnectionService connections, GitHubClient github) {
+            DocumentationGenerationService documents, GitHubConnectionService connections, GitHubClient github,
+            DocumentWorkflowAuditRepository audit) {
         this.workflows = workflows;
         this.repositories = repositories;
         this.documents = documents;
         this.connections = connections;
         this.github = github;
+        this.audit = audit;
     }
 
     @Transactional
@@ -111,7 +117,8 @@ public class DocumentCommitBackService {
                 if (path.equalsIgnoreCase(entry.path())) {
                     if (!sha.equals(remote.headSha()) && path.equals(entry.path())
                             && "100644".equals(entry.mode()) && blobSha(content).equals(entry.sha())) {
-                        return new Result(path, remote.headSha(), true);
+                        return confirmPublication(workflowId, version, actor, sha,
+                                new Result(path, remote.headSha(), true));
                     }
                     throw conflict("A file already occupies the publication path.");
                 }
@@ -121,7 +128,7 @@ public class DocumentCommitBackService {
             }
             String committed = github.commitFileOnBranch(token, remote.refId(), sha, path, content,
                     "Publish LivingDocs document " + documentId + " v" + version);
-            return new Result(path, committed, false);
+            return confirmPublication(workflowId, version, actor, sha, new Result(path, committed, false));
         } catch (GitHubApiException e) {
             if (e.isUnauthorized() || e.isNotFound() || e.getStatusCode() == 403 && !e.isRateLimited()) {
                 throw ApiException.forbidden("GitHub denied access to the repository.");
@@ -129,6 +136,19 @@ public class DocumentCommitBackService {
             throw new ApiException(HttpStatus.BAD_GATEWAY, "GITHUB_COMMIT_UNCONFIRMED",
                     "GitHub did not confirm the commit. Retry to check the published path.");
         }
+    }
+
+    private Result confirmPublication(UUID workflowId, int version, String actor, String sourceSha, Result result) {
+        // commit() holds the workflow row lock across confirmation and persistence.
+        if (!audit.existsByWorkflowIdAndDocumentVersionAndAction(workflowId, version, AUDIT_ACTION)) {
+            String reason = result.alreadyPresent() ? "Verified existing publication" : "Published approved version";
+            var entry = new DocumentWorkflowAudit(workflowId, actor, AUDIT_ACTION, "APPROVED", "APPROVED",
+                    reason + " at " + result.path() + "; source " + sourceSha
+                            + "; observed head " + result.observedHeadSha(), null, null, "MANAGER");
+            entry.setDocumentVersion(version);
+            audit.save(entry);
+        }
+        return result;
     }
 
     private static String blobSha(byte[] content) {
