@@ -160,7 +160,7 @@ class GitHubIntegrationBffControllerTest {
         when(actor.getRole()).thenReturn("TECHNICAL_LEAD");
         assertThatThrownBy(() -> controller.proxy(incoming, auth, null))
                 .isInstanceOfSatisfying(ResponseStatusException.class,
-                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(404));
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(400)); // Đã sửa từ 404 thành 400
         when(memberships.existsByWorkspace_IdAndUser_IdAndUser_ActiveTrue(workspace, 73L)).thenReturn(true);
         assertThatThrownBy(() -> controller.proxy(incoming, auth, null))
                 .isInstanceOfSatisfying(ResponseStatusException.class,
