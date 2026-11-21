@@ -408,7 +408,7 @@ public class DocumentWorkflowService {
     public WorkflowResponse staffReview(String actor, Set<String> authorities, UUID workflowId,
             StaffReviewRequest request) {
         require(authorities, "DOCUMENT_REVIEW");
-        requireRole(authorities, "STAFF");
+        String actorRole = requireRole(authorities, "STAFF");
         DocumentWorkflow workflow = lock(workflowId);
         if (workflow.getStatus() != DocumentWorkflowStatus.STAFF_REVIEWING
                 || !actor.equals(workflow.getReviewerUserId())) {
@@ -423,7 +423,8 @@ public class DocumentWorkflowService {
         String comment = normalizeComment(request.comment());
         workflow.review(result, comment);
         workflows.saveAndFlush(workflow);
-        record(workflow, actor, result.name(), previous, workflow.getStatus(), request.comment());
+        record(workflow, actor, result.name(), previous, workflow.getStatus(), request.comment(),
+                null, null, actorRole);
         recordTimeline(workflow.getDocumentId(), workflow.getSubmittedDocumentVersion(),
                 "STAFF_" + result.name(),
                 comment != null ? comment : "Staff review completed: " + result.name(),
@@ -452,6 +453,9 @@ public class DocumentWorkflowService {
         if (expectedVersion <= 0) {
             throw conflict("The document has no editable version.");
         }
+        if (request.expectedVersion() != null && request.expectedVersion() != expectedVersion) {
+            throw conflict("The document version changed. Reload before saving.");
+        }
         JsonNode editedVersion = DocumentationGenerationService.callWithChangeLogOverride(
                 authorities, true,
                 () -> documents.editOwnedDocument(actor, workflow.getDocumentId(),
@@ -459,11 +463,6 @@ public class DocumentWorkflowService {
         int newVersion = editedVersion != null
                 ? editedVersion.path("number").asInt(expectedVersion + 1)
                 : expectedVersion + 1;
-        if (request.expectedVersion() != null && request.expectedVersion() != expectedVersion) {
-            throw conflict("The document version changed. Reload before saving.");
-        }
-        documents.editOwnedDocument(actor, workflow.getDocumentId(),
-                expectedVersion, request.content(), comment);
         record(workflow, actor, "DOCUMENT_EDITED", current, current, comment);
         recordTimeline(workflow.getDocumentId(), newVersion, "CONTENT_UPDATED",
                 comment != null ? comment : "Updated documentation content to version " + newVersion,
