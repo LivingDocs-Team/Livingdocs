@@ -55,6 +55,9 @@ Templates are stored by the AI service and shared by all users. Built-in templat
 | POST | `/api/documentation/templates` | `201` + the new template |
 | PUT | `/api/documentation/templates/{id}` | The updated template |
 | DELETE | `/api/documentation/templates/{id}` | `204` |
+| GET | `/api/documentation/templates/{id}/versions` | LD-227: saved versions, newest first: `template_id`, `version`, `name`, `description`, `instructions`, `sections`, `created_at`, `restored_from` |
+| GET | `/api/documentation/templates/{id}/versions/{n}` | LD-227: one version (`404 TEMPLATE_NOT_FOUND` when missing) |
+| POST | `/api/documentation/templates/{id}/versions/{n}/restore` | LD-227: saves version `n` again as a new version and returns the template (`403` built-in, `409` name now taken) |
 
 Body for POST and PUT:
 

@@ -47,7 +47,9 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | POST | `/retrieval/preview` | Index summary and the related code (C) / docs (D) each file would get (LD-335) |
 | GET/POST | `/templates` | List (built-in first, then custom by name) / create templates |
 | GET | `/templates/sections` | Sections a template may contain |
-| GET/PUT/DELETE | `/templates/{id}` | Read / update / delete (built-ins are read-only) |
+| GET/PUT/DELETE | `/templates/{id}` | Read / update / delete (built-ins are read-only); every change saves a new version (LD-227) |
+| GET | `/templates/{id}/versions`, `/templates/{id}/versions/{n}` | Saved versions of a template, newest first / one version (LD-227) |
+| POST | `/templates/{id}/versions/{n}/restore` | Make an older version current again, saved as a new version (LD-227) |
 | POST | `/documents` | Save a completed job as version 1 of a document (LD-195) |
 | GET | `/documents`, `/documents/{id}` | List / read documents |
 | GET | `/documents/{id}/content?version=N` | Markdown of the current (or given) version |

@@ -38,6 +38,7 @@ class JobOutput:
     template_id: str
     template_name: Optional[str]
     output_language: str
+    template_version: Optional[int] = None   # LD-227
     sections: List[Tuple[str, str, str, Optional[float]]] = field(default_factory=list)
     """(path, markdown, status, confidence) for every documented file, in request order."""
     skipped: List[Tuple[str, str]] = field(default_factory=list)   # (path, reason)
@@ -58,6 +59,7 @@ class JobStore:
         job = Job(id=uuid.uuid4().hex, scope=req.scope, target=req.target,
                   template_id=req.template_id, files_total=len(req.files),
                   template_name=tpl.name if tpl else None,
+                  template_version=tpl.version if tpl else None,
                   template_sections=list(tpl.sections) if tpl else [])
         with self._lock:
             self._jobs[job.id] = job
@@ -128,16 +130,19 @@ def run_job(job_id: str, req: GenerateRequest, generator: Optional[DocGenerator]
     results: List[FileResult] = []
     file_reports: List[FileReport] = []
     try:
-        tpl = template or templates.get(req.template_id)
+        tpl = template or templates.at_version(req.template_id, req.template_version)
         if tpl is None:
-            raise ValueError(f"Template '{req.template_id}' not found")
+            raise ValueError(f"Template '{req.template_id}'"
+                             + (f" version {req.template_version}" if req.template_version else "")
+                             + " not found")
         gen = generator or get_generator()
         for f in req.files:
             normalize(f)                  # unique entity names, module from path
         index = build_index(req)          # related code + documentation context for retrieval
         total = len(req.files)
         jobs.update(job_id, status=JobStatus.running, message="Generating documentation",
-                    template_name=tpl.name, template_sections=list(tpl.sections))
+                    template_name=tpl.name, template_version=tpl.version,
+                    template_sections=list(tpl.sections))
 
         docs, documented, skipped, sections = [], [], [], []
         for i, f in enumerate(req.files, start=1):
@@ -180,6 +185,7 @@ def run_job(job_id: str, req: GenerateRequest, generator: Optional[DocGenerator]
             job_id=job_id,
             template_id=tpl.id,
             template_name=tpl.name,
+            template_version=tpl.version,
             template_instructions=tpl.instructions,
             template_sections=list(tpl.sections),
             confidence=overall,
@@ -200,6 +206,7 @@ def run_job(job_id: str, req: GenerateRequest, generator: Optional[DocGenerator]
             target=req.target,
             template_id=tpl.id,
             template_name=tpl.name,
+            template_version=tpl.version,
             output_language=req.output_language,
             sections=sections,
             skipped=list(skipped),

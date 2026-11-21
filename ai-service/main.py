@@ -26,7 +26,7 @@ from app.jobs import jobs, run_job
 from app.models import (SECTION_KINDS, SECTION_NAMES, FileRetrieval, GenerateRequest, IndexSummary,
                         Job, JobReport, RetrievalHit, RetrievalPreview,
                         JobStatus, ReviewEvidenceResponse, Template, TemplateIn,
-                        TemplateSections)
+                        TemplateSections, TemplateVersion)
 from app.normalize import normalize
 from app.retrieval import build_index, retrieve
 from app.templates import TemplateNameTaken, templates
@@ -95,9 +95,10 @@ def system_analytics(start: AwareDatetime = Query(alias="from"),
 @app.post("/generate", response_model=Job, status_code=202)
 def generate(req: GenerateRequest, background: BackgroundTasks):
     """Start generating docs for a file, module or repository. Returns a job to poll."""
-    tpl = templates.get(req.template_id)
+    tpl = templates.at_version(req.template_id, req.template_version)
     if tpl is None:
-        raise HTTPException(404, f"Template '{req.template_id}' not found")
+        what = f"Template '{req.template_id}'" + (f" version {req.template_version}" if req.template_version else "")
+        raise HTTPException(404, f"{what} not found")
     job = jobs.create(req, tpl)
     # the job keeps the template as it was now: editing or deleting it later does not change this job
     background.add_task(run_job, job.id, req, None, tpl)
@@ -207,6 +208,36 @@ def update_template(template_id: str, data: TemplateIn):
         return templates.update(template_id, data)
     except KeyError:
         raise HTTPException(404, "Template not found")
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except TemplateNameTaken as e:
+        raise HTTPException(409, str(e))
+
+
+@app.get("/templates/{template_id}/versions", response_model=List[TemplateVersion])
+def list_template_versions(template_id: str):
+    """LD-227: every saved version of a template, newest first (built-in templates have one)."""
+    try:
+        return templates.versions(template_id)
+    except KeyError:
+        raise HTTPException(404, "Template not found")
+
+
+@app.get("/templates/{template_id}/versions/{number}", response_model=TemplateVersion)
+def get_template_version(template_id: str, number: int):
+    try:
+        return templates.version(template_id, number)
+    except KeyError:
+        raise HTTPException(404, "Template version not found")
+
+
+@app.post("/templates/{template_id}/versions/{number}/restore", response_model=Template)
+def restore_template_version(template_id: str, number: int):
+    """LD-227: make an older version current again; its content is saved as a new version."""
+    try:
+        return templates.restore(template_id, number)
+    except KeyError:
+        raise HTTPException(404, "Template or version not found")
     except PermissionError as e:
         raise HTTPException(403, str(e))
     except TemplateNameTaken as e:
