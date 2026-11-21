@@ -150,7 +150,7 @@ jobs:
           echo "Frontend did not start"; cat "$RUNNER_TEMP/frontend.log"; exit 1
 
       - name: Run documentation preview, editing (LD-105), template (LD-96) and RBAC screen-flow UI tests
-        run: python -m pytest -v tests/test_documentation_preview_editing.py tests/test_frontend_templates.py tests/test_repository_activity.py tests/test_profile_preferences.py tests/test_rbac_screen_flow.py
+        run: python -m pytest -v tests/test_documentation_preview_editing.py tests/test_frontend_templates.py tests/test_repository_activity.py tests/test_profile_preferences.py tests/test_rbac_screen_flow.py tests/test_frontend_admin.py
 
       - name: Upload test report
         if: always()

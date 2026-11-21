@@ -1,5 +1,6 @@
 // Screen 2 (signed in): sidebar and breadcrumb rendered from the role's screen flow, and the
 // current screen rendered from the registry below. No role-specific if/else lives here.
+import AdminDashboard from '../AdminDashboard';
 import DocumentationCollections from '../DocumentationCollections';
 import DocumentationManagement from '../DocumentationManagement';
 import DocumentationSearch from '../DocumentationSearch';
@@ -47,6 +48,7 @@ function ChildIndex({ node }) {
 const SCREENS = {
   ChildIndex: { Component: ChildIndex },
   Profile: { Component: Profile },
+  AdminDashboard: { Component: AdminDashboard },
   NotificationPreferences: { Component: NotificationPreferences },
   GitHubConnection: { Component: GitHubConnection },
   RepositoryManagement: { Component: RepositoryManagement },
