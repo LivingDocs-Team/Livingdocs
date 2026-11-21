@@ -326,14 +326,18 @@ class ResolutionEvent(BaseModel):
     status: ResolutionStatus
     actor: Optional[str] = None
     note: Optional[str] = None
+    accepted_update: Optional[str] = None      # LD-161
     at: datetime = Field(default_factory=now)
 
 
 class FindingResolution(BaseModel):
-    """LD-346: review and resolution of one finding, with its history."""
+    """LD-346: review and resolution of one finding, with its history (LD-167)."""
     status: ResolutionStatus = ResolutionStatus.open
     actor: Optional[str] = None
     note: Optional[str] = None
+    accepted_update: Optional[str] = None
+    """LD-161: documentation text the reviewer accepted when resolving: the AI's
+    `suggested_update` as is, or edited. Cleared when the finding is reopened."""
     updated_at: Optional[datetime] = None
     history: List[ResolutionEvent] = Field(default_factory=list)
 
@@ -342,6 +346,8 @@ class ResolutionUpdate(BaseModel):
     status: ResolutionStatus
     actor: Optional[str] = Field(default=None, max_length=200)
     note: Optional[str] = Field(default=None, max_length=2000)
+    accepted_update: Optional[str] = Field(default=None, max_length=20_000)
+    """LD-161: only with status `resolved`."""
 
 
 class ReviewStatus(str, Enum):
