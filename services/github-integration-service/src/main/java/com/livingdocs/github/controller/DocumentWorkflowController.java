@@ -216,6 +216,10 @@ public class DocumentWorkflowController {
     public WorkflowResponse approve(@RequestHeader(USER_HEADER) String userId,
             @RequestHeader(AUTHORITIES_HEADER) String authorities, @PathVariable UUID id,
             @Valid @RequestBody(required = false) ManagerDecisionRequest request) {
+        if (request != null && request.documentVersion() != null) {
+            return workflowService.decide(userId, parse(authorities), id, ManagerDecision.APPROVED,
+                    request.comment(), request.documentVersion());
+        }
         return workflowService.decide(userId, parse(authorities), id, ManagerDecision.APPROVED,
                 request == null ? null : request.comment());
     }
@@ -224,6 +228,10 @@ public class DocumentWorkflowController {
     public WorkflowResponse reject(@RequestHeader(USER_HEADER) String userId,
             @RequestHeader(AUTHORITIES_HEADER) String authorities, @PathVariable UUID id,
             @Valid @RequestBody(required = false) ManagerDecisionRequest request) {
+        if (request != null && request.documentVersion() != null) {
+            return workflowService.decide(userId, parse(authorities), id, ManagerDecision.REJECTED,
+                    request.comment(), request.documentVersion());
+        }
         return workflowService.decide(userId, parse(authorities), id, ManagerDecision.REJECTED,
                 request == null ? null : request.comment());
     }

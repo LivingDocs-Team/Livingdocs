@@ -33,7 +33,7 @@ from app.normalize import normalize
 from app.retrieval import build_index, retrieve
 from app.templates import TemplateNameTaken, templates
 from app.version_models import (Document, DocumentContentEdit, DocumentCreate, DocumentVersion,
-                                HistoryEvent, InternalDocumentCreate, InternalVersionDecision,
+                                FileSection, HistoryEvent, InternalDocumentCreate, InternalVersionDecision, RevisionDraftRequest,
                                 InternalRollbackRequest, VersionComparison,
                                 VersionSummary)
 from app.versions import VersionError, documents
@@ -287,6 +287,55 @@ def create_owned_document(data: InternalDocumentCreate,
     owner_user_id=user_id,
     report=jobs.get_report(data.job_id),
 )
+
+
+@app.get("/internal/revision-draft-candidates/{repository_id}", response_model=List[Document],
+         dependencies=[Depends(require_internal_service)])
+def revision_draft_candidates(repository_id: str):
+    return documents.revision_candidates(repository_id)
+
+
+@app.post("/internal/documents/{doc_id}/revision-drafts", response_model=Optional[DocumentVersion],
+          dependencies=[Depends(require_internal_service)])
+def propose_revision_draft(doc_id: str, data: RevisionDraftRequest,
+                           user_id: str = Header(alias="X-User-Id")):
+    def generate(doc, files):
+        from app.confidence import METHOD, average, level_of
+        from app.models import FileResultStatus
+
+        tpl = templates.at_version(doc.template_id, doc.template_version)
+        if tpl is None:
+            raise VersionError(409, "The original documentation template is unavailable")
+        generator = get_generator()
+        request = GenerateRequest(
+            scope=doc.scope, target=doc.target, files=files, template_id=tpl.id,
+            template_version=tpl.version, output_language=doc.output_language,
+            source_snapshot=data.source_snapshot,
+        )
+        for file in files:
+            normalize(file)
+        index = build_index(request)
+        replacements, reports = {}, []
+        for file in files:
+            if file.status.value != "ok":
+                raise VersionError(503, "The source file could not be analyzed")
+            result = generator.document_file(file, tpl, doc.output_language, retrieve(index, file))
+            if result.status != FileResultStatus.generated:
+                raise VersionError(503, "Grounded AI generation is currently unavailable")
+            replacements[file.path] = FileSection(
+                path=file.path, markdown=result.markdown,
+                status=result.status.value, confidence=result.confidence,
+            )
+            reports.append(result.report)
+        score = average([entity.confidence for report in reports for entity in report.entities])
+        return replacements, JobReport(
+            job_id=data.source_change_id, template_id=tpl.id, template_name=tpl.name,
+            template_version=tpl.version, template_instructions=tpl.instructions,
+            template_sections=list(tpl.sections), confidence=score, level=level_of(score),
+            method=METHOD, files=reports,
+        )
+
+    return _call(documents.propose_revision, doc_id, user_id, data, generate)
 
 
 @app.get("/internal/documents/{doc_id}", response_model=Document,
