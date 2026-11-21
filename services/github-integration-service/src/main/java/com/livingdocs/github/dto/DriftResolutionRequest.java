@@ -7,10 +7,21 @@ package com.livingdocs.github.dto;
  * @param note   ghi chú; bắt buộc khi dismissed (lý do không phải lệch tài liệu)
  * @param acceptedUpdate LD-161: nội dung tài liệu được chấp nhận khi resolved (gợi ý AI nguyên văn
  *                       hoặc đã sửa); chỉ dùng với status resolved
+ * @param decision lựa chọn trong luồng tạo bản nháp
+ * @param proposed nội dung chỉnh sửa cho bản nháp
  */
-public record DriftResolutionRequest(String status, String note, String acceptedUpdate) {
+public record DriftResolutionRequest(
+        String status, String note, String acceptedUpdate, String decision, String proposed) {
 
     public DriftResolutionRequest(String status, String note) {
-        this(status, note, null);
+        this(status, note, null, null, null);
+    }
+
+    public DriftResolutionRequest(String status, String note, String acceptedUpdate) {
+        this(status, note, acceptedUpdate, null, null);
+    }
+
+    public DriftResolutionRequest(String status, String note, String decision, String proposed) {
+        this(status, note, null, decision, proposed);
     }
 }

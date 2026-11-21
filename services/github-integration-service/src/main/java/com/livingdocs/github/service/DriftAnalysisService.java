@@ -6,6 +6,7 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -14,13 +15,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -87,20 +87,25 @@ public class DriftAnalysisService {
     private final RestClient analyzerClient;
     private final RestClient aiServiceClient;
     private final JsonNodeFactory json = JsonNodeFactory.instance;
-    /** Báo cáo -> người tạo (giữ trong bộ nhớ như báo cáo của ai-service). */
-    private final ConcurrentMap<String, String> reportOwners = new ConcurrentHashMap<>();
+    private final JdbcTemplate jdbc;
+    private final DocumentWorkflowService workflows;
+
+    private record ReportOwner(String user, UUID repository) { }
 
     public DriftAnalysisService(
             RepositorySyncService repositorySyncService,
             GitHubConnectionService connectionService,
             GitHubClient gitHubClient,
             @Qualifier("codeAnalyzerRestClient") RestClient analyzerClient,
-            @Qualifier("aiServiceRestClient") RestClient aiServiceClient) {
+            @Qualifier("aiServiceRestClient") RestClient aiServiceClient, JdbcTemplate jdbc,
+            DocumentWorkflowService workflows) {
         this.repositorySyncService = repositorySyncService;
         this.connectionService = connectionService;
         this.gitHubClient = gitHubClient;
         this.analyzerClient = analyzerClient;
         this.aiServiceClient = aiServiceClient;
+        this.jdbc = jdbc;
+        this.workflows = workflows;
     }
 
     // ------------------------------------------------------------------ analyze one Pull Request
@@ -136,7 +141,7 @@ public class DriftAnalysisService {
 
         List<ObjectNode> docs = request.includeRepositoryDocs() == null || request.includeRepositoryDocs()
                 ? repositoryDocs(ctx, pr.head().sha()) : List.of();
-        List<String> documentIds = documentIds(ctx, request.documentIds());
+        List<String> documentIds = documentIds(ctx, userId, repositoryId, request.documentIds());
 
         ObjectNode body = driftRequest(ctx, pr, number, baseSha, files, before, after, docs, documentIds);
         ObjectNode report = postDrift(body);
@@ -146,7 +151,8 @@ public class DriftAnalysisService {
             report.path("warnings").forEach(warnings::add);
         }
         report.set("warnings", warnings);
-        reportOwners.put(report.path("id").asText(), userId);
+        jdbc.update("INSERT INTO drift_report_owners (report_id, repository_id, owner_user_id) VALUES (?, ?, ?)",
+                report.path("id").asText(), repositoryId, userId);
         return report;
     }
 
@@ -165,8 +171,11 @@ public class DriftAnalysisService {
             throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid response.");
         }
         ArrayNode own = json.arrayNode();
+        var ownIds = new HashSet<>(jdbc.queryForList("""
+                SELECT report_id FROM drift_report_owners WHERE repository_id = ? AND owner_user_id = ?
+                """, String.class, repositoryId, userId));
         for (JsonNode row : rows) {
-            if (Objects.equals(reportOwners.get(row.path("id").asText()), userId)) {
+            if (ownIds.contains(row.path("id").asText())) {
                 own.add(row);
             }
         }
@@ -258,14 +267,26 @@ public class DriftAnalysisService {
         if (accepted != null && accepted.length() > 20_000) {
             throw ApiException.badRequest("acceptedUpdate must be 20000 characters or fewer.");
         }
+        if (request.proposed() != null && request.proposed().length() > 20000) {
+            throw ApiException.badRequest("Proposed text must be 20000 characters or fewer.");
+        }
         ObjectNode body = json.objectNode();
         body.put("status", status);
         body.put("actor", userId);
         putIfPresent(body, "note", note);
         putIfPresent(body, "accepted_update", accepted);
+        putIfPresent(body, "decision", request.decision());
+        putIfPresent(body, "proposed", request.proposed());
+        boolean createsDraft = "accept".equals(request.decision()) || "edit".equals(request.decision());
+        if (createsDraft) {
+            requireFreshDraftSource(userId, repositoryId, reportId, findingId);
+        }
         try {
-            JsonNode finding = aiServiceClient.put()
-                    .uri("/drift/reports/{id}/findings/{finding}/resolution", reportId, findingId)
+            var route = createsDraft
+                    ? aiServiceClient.put().uri("/internal/repositories/{repo}/drift/reports/{id}/findings/{finding}/resolution",
+                            repositoryId, reportId, findingId).header("X-User-Id", userId)
+                    : aiServiceClient.put().uri("/drift/reports/{id}/findings/{finding}/resolution", reportId, findingId);
+            JsonNode finding = route
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
                     .retrieve()
@@ -273,10 +294,22 @@ public class DriftAnalysisService {
             if (finding == null || !finding.isObject() || !finding.path("resolution").isObject()) {
                 throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid finding.");
             }
+            if (createsDraft) {
+                int version = finding.path("resolution").path("draft_version").asInt();
+                String documentId = finding.path("document").path("document_id").asText();
+                if (version < 1 || documentId.isBlank()) {
+                    throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The drift draft was not confirmed.");
+                }
+                workflows.submitDriftDraft(userId, documentId, version);
+            }
             return finding;
         } catch (RestClientResponseException e) {
             if (e.getStatusCode().value() == 404) {
                 throw ApiException.notFound("Drift report or finding not found in the AI service.");
+            }
+            if (e.getStatusCode().value() == 409) {
+                throw new ApiException(HttpStatus.CONFLICT, "DRIFT_RESOLUTION_CONFLICT",
+                        DocumentationTemplateService.detail(e));
             }
             if (e.getStatusCode().value() == 422) {
                 String detail = DocumentationTemplateService.detail(e);
@@ -289,16 +322,49 @@ public class DriftAnalysisService {
         }
     }
 
+    private void requireFreshDraftSource(String userId, UUID repositoryId, String reportId, String findingId) {
+        JsonNode report = getReport(userId, repositoryId, reportId, null);
+        for (JsonNode finding : report.path("findings")) {
+            if (!findingId.equals(finding.path("id").asText())) {
+                continue;
+            }
+            if (finding.path("resolution").path("draft_version").isIntegralNumber()) {
+                return;
+            }
+            if (!finding.path("document").path("document_id").isTextual()) {
+                throw new ApiException(HttpStatus.CONFLICT, "DRIFT_DOCUMENT_REQUIRED",
+                        "This finding does not point to a saved LivingDocs document.");
+            }
+            JsonNode pr = report.path("pull_request");
+            var context = new Context(report.path("repository").asText(), connectionService.getActiveConnection(userId));
+            GitHubPullRequest live = gitHubClient.getPullRequest(
+                    context.token(), context.owner, context.name, pr.path("number").asInt());
+            if (live == null || live.head() == null || live.head().sha() == null
+                    || live.base() == null || live.base().sha() == null
+                    || !live.head().sha().equals(pr.path("head_sha").asText())
+                    || !live.base().sha().equals(pr.path("base_head_sha").asText())) {
+                throw new ApiException(HttpStatus.CONFLICT, "DRIFT_SOURCE_CHANGED",
+                        "The pull request revision could not be verified. Run drift analysis again.");
+            }
+            return;
+        }
+        throw ApiException.notFound("Drift finding not found.");
+    }
+
     /** Owner check; returns the repository name when a repository id is given. */
     private String requireReport(String userId, UUID repositoryId, String reportId) {
         String repository = repositoryId == null ? null
                 : repositorySyncService.requireOwned(userId, repositoryId).getFullName();
-        String owner = reportOwners.get(reportId);
-        if (owner == null) {
-            throw ApiException.notFound("Drift report not found or the service was restarted.");
-        }
-        if (!Objects.equals(owner, userId)) {
+        ReportOwner owner = jdbc.query("""
+                SELECT owner_user_id, repository_id FROM drift_report_owners WHERE report_id = ?
+                """, (row, index) -> new ReportOwner(row.getString("owner_user_id"),
+                row.getObject("repository_id", UUID.class)), reportId).stream().findFirst()
+                .orElseThrow(() -> ApiException.notFound("Drift report not found."));
+        if (!Objects.equals(owner.user(), userId)) {
             throw ApiException.forbidden("This drift report belongs to another user.");
+        }
+        if (repositoryId != null && !Objects.equals(owner.repository(), repositoryId)) {
+            throw ApiException.notFound("Drift report not found for this repository.");
         }
         return repository;
     }
@@ -542,13 +608,13 @@ public class DriftAnalysisService {
     // ------------------------------------------------------------------ AI service
 
     /** Tài liệu đã lưu cần kiểm tra: chỉ tài liệu sinh cho repo này (target = owner/name). */
-    private List<String> documentIds(Context ctx, List<String> requested) {
-        JsonNode documents = getAiJson(aiServiceClient.get().uri("/documents"),
+    private List<String> documentIds(Context ctx, String userId, UUID repositoryId, List<String> requested) {
+        JsonNode documents = getAiJson(aiServiceClient.get().uri("/internal/revision-draft-candidates/{id}", repositoryId),
                 "The AI service could not list saved documents.");
         Set<String> ofRepository = new LinkedHashSet<>();
         if (documents.isArray()) {
             for (JsonNode d : documents) {
-                if (ctx.fullName.equalsIgnoreCase(d.path("target").asText())) {
+                if (userId.equals(d.path("owner_user_id").asText())) {
                     ofRepository.add(d.path("id").asText());
                 }
             }
@@ -583,6 +649,7 @@ public class DriftAnalysisService {
         putIfPresent(p, "base_branch", cut(pr.base().ref(), 300));
         p.put("head_sha", pr.head().sha());
         p.put("base_sha", baseSha);
+        p.put("base_head_sha", pr.base().sha());
 
         ArrayNode out = body.putArray("files");
         Set<String> seen = new LinkedHashSet<>();

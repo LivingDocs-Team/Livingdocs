@@ -279,13 +279,31 @@ def resolve(report: DriftReport, finding_id: str, update: ResolutionUpdate) -> D
     accepted = (update.accepted_update or "").strip() or None
     if accepted and update.status != ResolutionStatus.resolved:
         raise ResolutionError(422, "An accepted update can only be given when resolving a finding")
+    proposed = None
+    if update.decision in ("accept", "edit"):
+        if update.status != ResolutionStatus.acknowledged:
+            raise ResolutionError(422, "Accepting or editing requires acknowledged status")
+        if update.decision == "accept":
+            suggested = f.ai_review.suggested_update if f.ai_review else None
+            proposed = (suggested or f.suggestion).strip()
+        else:
+            proposed = (update.proposed or "").strip()
+        if not proposed or len(proposed) > 20000:
+            raise ResolutionError(422, "Provide proposed text of 1 to 20000 characters")
+    elif update.decision == "dismiss" and update.status != ResolutionStatus.dismissed:
+        raise ResolutionError(422, "Dismissing requires dismissed status")
     r: FindingResolution = f.resolution
-    if r.status == update.status and r.note == note and r.accepted_update == accepted:
+    if (r.status, r.note, r.accepted_update, r.decision, r.proposed) == (
+        update.status, note, accepted, update.decision, proposed
+    ):
         return f                                   # no change: no new history entry
+    if r.draft_version is not None:
+        raise ResolutionError(409, "This finding already has a draft in the review workflow")
     at = now()
-    r.history.append(ResolutionEvent(status=update.status, actor=update.actor, note=note,
-                                     accepted_update=accepted, at=at))
+    r.history.append(ResolutionEvent(status=update.status, actor=update.actor, note=note, at=at,
+                                     accepted_update=accepted, decision=update.decision, proposed=proposed))
     r.status, r.actor, r.note, r.updated_at = update.status, update.actor, note, at
+    r.decision, r.proposed = update.decision, proposed
     r.accepted_update = accepted
     refresh_progress(report)
     return f

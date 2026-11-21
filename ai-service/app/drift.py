@@ -44,6 +44,7 @@ import json
 import logging
 import os
 import pathlib
+import tempfile
 import threading
 import uuid
 from collections import Counter, OrderedDict
@@ -250,7 +251,8 @@ class DriftReportStore:
             return
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-            reports = [DriftReport.model_validate(r) for r in raw.get("reports", [])]
+            rows = raw if isinstance(raw, list) else raw["reports"]
+            reports = [DriftReport.model_validate(row) for row in rows]
         except Exception as exc:  # corrupt file: keep it for inspection, start clean
             stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
             backup = self.path.with_suffix(f".corrupt-{stamp}.json")
@@ -260,34 +262,49 @@ class DriftReportStore:
         for r in reports[-self.limit:]:
             self._reports[r.id] = r
 
-    def _save(self) -> None:
+    def _persist(self, reports: "OrderedDict[str, DriftReport]") -> None:
         if self.path is None:
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        data = {"reports": [r.model_dump(mode="json") for r in self._reports.values()]}
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, self.path)  # atomic: a crash never leaves a half-written file
+        output = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.path.parent,
+                                             prefix=self.path.name, suffix=".tmp", delete=False)
+        temporary = pathlib.Path(output.name)
+        try:
+            with output:
+                data = {"reports": [report.model_dump(mode="json") for report in reports.values()]}
+                json.dump(data, output, ensure_ascii=False)
+            os.replace(temporary, self.path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def add(self, report: DriftReport) -> DriftReport:
         with self._lock:
-            self._reports[report.id] = report
-            while len(self._reports) > self.limit:
-                self._reports.popitem(last=False)   # oldest first
-            self._save()
+            reports = self._reports.copy()
+            reports[report.id] = report
+            while len(reports) > self.limit:
+                reports.popitem(last=False)
+            self._persist(reports)
+            self._reports = reports
         return report
 
     def get(self, report_id: str) -> Optional[DriftReport]:
         return self._reports.get(report_id)
 
-    def resolve(self, report_id: str, finding_id: str, update: ResolutionUpdate):
+    def resolve(self, report_id: str, finding_id: str, update: ResolutionUpdate, draft=None):
         """LD-346: set the resolution of one finding (None when the report is unknown)."""
         with self._lock:
             report = self._reports.get(report_id)
             if report is None:
                 return None
-            finding = resolve(report, finding_id, update)
-            self._save()
+            candidate = report.model_copy(deep=True)
+            finding = resolve(candidate, finding_id, update)
+            if draft is not None:
+                finding.resolution.draft_version = draft(candidate, finding)
+            if candidate != report:
+                reports = self._reports.copy()
+                reports[report_id] = candidate
+                self._persist(reports)
+                self._reports = reports
             return finding
 
     def list(self, repository: Optional[str] = None,

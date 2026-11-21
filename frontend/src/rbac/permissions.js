@@ -7,8 +7,7 @@
 //  - rows without a screen in the role's official flow are removed: Developer #11; Staff #7, #9, #11, #15,
 //    #16; Manager #7, #8, #9, #15, #16, #18.
 //  - #8 gains E (Export Markdown in the document editor), for Developer only.
-//  - rows #4, #14, #15 and #16 are removed from the web for every role; the other rows keep
-//    their original numbers.
+//  - rows #4, #14 and #15 are removed from the web; P0-06 restores #16 for Developer.
 import { normalizeRole, ROLE_ORDER } from './roles.js';
 
 export const ACTIONS = Object.freeze(['C', 'R', 'U', 'D', 'A', 'E']);
@@ -20,7 +19,7 @@ const ROWS = [
   [1, 'authentication', 'Authentication', 'R', FULL, FULL, FULL, FULL, FULL],
   [2, 'profile', 'Own Profile & Notification Preferences', 'RU', FULL, FULL, FULL, FULL, FULL],
   [3, 'notifications', 'Notifications', 'R', 'R', '', '', '', ''],
-  [5, 'githubConnection', 'GitHub Connection', 'CRD', 'CRD', '', '', '', ''],
+  [5, 'githubConnection', 'GitHub Connection', 'CRD', 'CRD', '', 'CRD', '', ''],
   [6, 'repositories', 'Repository Management & Synchronization', 'CRUD', 'CRUD', '', '', '', 'CRUD'],
   [7, 'pullRequests', 'Pull Request & Commit data', 'R', 'R', '', '', 'R', ''],
   [8, 'documentation', 'Documentation Generation & Editing', 'CRUE', 'CRUE', 'RU', '', 'R', ''],
@@ -29,6 +28,7 @@ const ROWS = [
   [11, 'managerApproval', 'Manager Approval (decision, delegation)', 'RUA', '', '', 'RUA', 'R', ''],
   [12, 'approvalPolicies', 'Approval & Merge Policies', 'CRU', '', '', 'CRU', '', ''],
   [13, 'approvalAudit', 'Approval Audit Trail & History', 'R', '', 'R', 'R', 'R', 'R'],
+  [16, 'driftAlerts', 'Drift Alerts', 'CRU', 'CRU', '', '', '', ''],
   [17, 'driftPolicies', 'Drift Policies & Thresholds', 'CRU', '', '', '', 'CRU', ''],
   [18, 'versionHistory', 'Version History, Change Log & Comparison', 'R', 'R', 'R', '', 'R', ''],
   [19, 'documentRollback', 'Document Rollback', 'U', 'U', '', 'U', 'U', ''],

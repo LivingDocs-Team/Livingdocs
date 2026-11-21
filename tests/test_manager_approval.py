@@ -207,6 +207,33 @@ def test_empty_manager_queue(page: Page):
     expect(page.get_by_role("status").filter(has_text="No documents are waiting for Manager approval")).to_be_visible()
 
 
+def test_approving_manager_commits_exact_revision_to_github(page: Page):
+    path = f"/api/document-workflows/{WORKFLOW_ID}/versions/3/github-commit"
+
+    class CommitApi(FakeApi):
+        def handle(self, route):
+            request = route.request
+            if request.method == "POST" and request.url.endswith(path):
+                self.requests.append((request.method, path, request.post_data))
+                return route.fulfill(status=200, json={"path": ".livingdocs/shop-v3.md",
+                                                      "observedHeadSha": "a" * 40, "alreadyPresent": False})
+            return super().handle(route)
+
+    api = CommitApi(workflow(status="APPROVED"))
+    api.events.append(event("REVISION_DRAFT_SUBMITTED", "APPROVED", "PENDING_STAFF_REVIEW",
+                            actor="AI", role="AI", comment="Version 3 from fixture repository"))
+    open_manager_approval(page, api)
+    button = page.get_by_role("button", name="Commit to GitHub")
+    expect(button).to_be_visible()
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    button.click()
+    assert ("POST", path, None) not in api.requests
+    page.once("dialog", lambda dialog: dialog.accept())
+    button.click()
+    expect(page.get_by_role("status", name="").filter(has_text="Committed on GitHub: .livingdocs/shop-v3.md")).to_be_visible()
+    assert ("POST", path, None) in api.requests
+
+
 def test_approved_and_rejected_history_survives_reload_and_uses_backend_fields(page: Page):
     approved = workflow("APPROVED", "44444444-4444-4444-8444-444444444444")
     rejected_with_reason = workflow(
@@ -342,16 +369,16 @@ def test_manager_queue_page_change_shows_loading_without_previous_page_rows(page
         server_thread.join(timeout=2)
 
 
-def test_approve_posts_an_empty_json_body_refreshes_queue_and_audit(page: Page):
+def test_approve_posts_reviewed_version_and_reason_refreshes_queue_and_audit(page: Page):
     api = FakeApi(workflow())
     open_manager_approval(page, api)
+    page.get_by_label("Approval reason (optional)").fill("The revision matches the reviewed source.")
     page.get_by_role("button", name="Approve document").click()
 
     expect(page.get_by_role("status").filter(has_text="Backend confirmed APPROVED")).to_be_visible()
     expect(page.get_by_label("Last Manager workflow result")).to_contain_text("APPROVED")
-    # An empty JSON body, so that the request carries Content-Type: application/json (a body-less POST is
-    # answered with HTTP 415 by the real GitHub Integration service).
-    assert ("POST", f"/api/document-workflows/{WORKFLOW_ID}/approve", {}) in api.requests
+    assert ("POST", f"/api/document-workflows/{WORKFLOW_ID}/approve",
+            {"documentVersion": 2, "comment": "The revision matches the reviewed source."}) in api.requests
     expect(page.get_by_label("Approval audit history")).to_contain_text("APPROVED", timeout=7000)
     assert any(method == "GET" and path == f"/api/document-workflows/{WORKFLOW_ID}/history" for method, path, _ in api.requests)
     assert sum(method == "GET" and path == "/api/document-workflows/manager/queue" for method, path, _ in api.requests) >= 2
@@ -368,7 +395,7 @@ def test_reject_requires_reason_and_posts_backend_request(page: Page):
     page.get_by_role("button", name="Reject document").click()
     expect(page.get_by_role("status").filter(has_text="Backend confirmed REJECTED")).to_be_visible()
     assert ("POST", f"/api/document-workflows/{WORKFLOW_ID}/reject",
-        {"comment": "The evidence does not cover all endpoints."}) in api.requests
+            {"documentVersion": 2, "comment": "The evidence does not cover all endpoints."}) in api.requests
     expect(page.get_by_label("Last Manager workflow result")).to_contain_text("The evidence does not cover all endpoints.")
 
 

@@ -6,10 +6,10 @@ review actions (LD-134) or rollback (LD-189). Versions are never modified or del
 """
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
+from typing import Literal, List, Optional
 
-from pydantic import BaseModel, Field
-from .models import JobReport, Scope, SourceSnapshot, now
+from pydantic import AwareDatetime, BaseModel, Field
+from .models import FileAnalysis, JobReport, ReviewEvidenceResponse, Scope, SourceSnapshot, now
 
 
 class SourceChangeRef(BaseModel):
@@ -20,6 +20,27 @@ class SourceChangeRef(BaseModel):
 
 
 # ---------- Requests ----------
+
+class RevisionFileChange(BaseModel):
+    path: str = Field(min_length=1)
+    action: Literal["added", "updated", "removed", "renamed", "dependent"]
+    previous_path: Optional[str] = None
+    blob_sha: Optional[str] = Field(default=None, pattern="^[0-9a-fA-F]{40}$")
+
+
+class RevisionReviewEvidence(ReviewEvidenceResponse):
+    revision_files: List[RevisionFileChange] = Field(default_factory=list)
+
+
+class RevisionDraftRequest(BaseModel):
+    source_change_id: str = Field(min_length=1)
+    trigger: str = Field(pattern="^(COMMIT|PULL_REQUEST)$")
+    pull_request_number: Optional[int] = Field(default=None, ge=1)
+    source_snapshot: SourceSnapshot
+    base_version: int = Field(ge=1)
+    files: List[FileAnalysis] = Field(max_length=20)
+    file_changes: List[RevisionFileChange] = Field(default_factory=list, max_length=50)
+
 
 class _Actor(BaseModel):
     actor: Optional[str] = Field(default=None, max_length=200)   # who did it (user id / name)
@@ -121,9 +142,21 @@ class VersionSummary(BaseModel):
     evidence_from_version: Optional[int] = None
 
 
+class PreparedRevision(BaseModel):
+    replacements: dict[str, FileSection] = Field(default_factory=dict)
+    report: Optional[JobReport] = None
+
+
+class RevisionDraftCommit(RevisionDraftRequest):
+    prepared: PreparedRevision
+    lease_expires_at: AwareDatetime
+
+
 class DocumentVersion(VersionSummary):
     content: str
+    drift_finding: Optional[dict] = None
     sections: List[FileSection] = Field(default_factory=list)
+    revision_files: List[RevisionFileChange] = Field(default_factory=list)
     skipped: List[SkippedFile] = Field(default_factory=list)
     sections_match_content: bool = True
     evidence_report: Optional[JobReport] = None
@@ -147,6 +180,7 @@ class Document(BaseModel):
     owner_user_id: Optional[str] = None
     current_version: int = 1               # newest accepted version
     pending_version: Optional[int] = None  # proposal waiting for review, if any
+    pending_revision: Optional[SourceSnapshot] = None
     versions_total: int = 1
     created_at: datetime = Field(default_factory=now)
     updated_at: datetime = Field(default_factory=now)
