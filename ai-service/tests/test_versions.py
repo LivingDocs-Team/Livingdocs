@@ -652,3 +652,102 @@ def test_rollback_retry_returns_existing_matching_proposal():
     assert retry.number == first.number
     assert store.get(doc.id).versions_total == 2
     assert len(store.history(doc.id)) == 3
+def test_revision_draft_is_grounded_idempotent_and_only_exact_version_can_publish(monkeypatch):
+    from app.generator import FileDocResult
+    from app.models import SourceSnapshot
+    monkeypatch.setenv("INTERNAL_API_SECRET", "workflow-internal-secret")
+    store, doc = create_approved_owned_document()
+    base = store.version(doc.id)
+    base.source_snapshot = SourceSnapshot(
+        repository_id="repo-1", repository_full_name="org/repo",
+        branch="main", commit_sha="a" * 40,
+    )
+    monkeypatch.setattr("main.documents", store)
+    calls = []
+
+    class Generator:
+        def document_file(self, file, template, language, retrieved):
+            calls.append(file.path)
+            return FileDocResult(
+                "# Updated documentation\n", FileResultStatus.generated,
+                report=FileReport(path=file.path, status=FileResultStatus.generated, confidence=0.9),
+            )
+
+    monkeypatch.setattr("main.get_generator", Generator)
+    headers = {"Authorization": "Bearer workflow-internal-secret", "X-User-Id": "73"}
+    url = f"/internal/documents/{doc.id}/revision-drafts"
+    data = {
+        "source_change_id": "change-1",
+        "trigger": "COMMIT",
+        "source_snapshot": base.source_snapshot.model_dump(mode="json") | {"commit_sha": "b" * 40},
+        "base_version": 1,
+        "files": [{"path": "a.py", "language": "python"}],
+    }
+    assert client.post(url, json=data).status_code in (401, 403)
+    assert client.post(url, headers=headers | {"X-User-Id": "someone-else"}, json=data).status_code == 404
+    assert client.post(url, headers=headers, json=data | {
+        "source_snapshot": data["source_snapshot"] | {"repository_id": "repo-2"},
+    }).status_code == 409
+
+    response = client.post(url, headers=headers, json=data)
+    assert response.status_code == 200, response.text
+    draft = response.json()
+    assert draft["number"] == 2
+    assert draft["base_version"] == 1
+    assert draft["source_snapshot"]["commit_sha"] == "b" * 40
+    assert draft["evidence_report"]["files"][0]["path"] == "a.py"
+    assert store.version(doc.id).content == "# Original document\n"
+    assert client.post(url, headers=headers, json=data).json()["number"] == 2
+    assert calls == ["a.py"]
+    assert client.post(url, headers=headers, json=data | {"source_change_id": "other"}).status_code == 409
+
+    with pytest.raises(VersionError, match="pending document version has changed"):
+        store.resolve_workflow_version(doc.id, "73", 1, "APPROVED", "manager")
+    store.resolve_workflow_version(doc.id, "73", 2, "APPROVED", "manager")
+    assert store.version(doc.id).number == 2
+    assert [event.actor for event in store.history(doc.id)][-2:] == ["AI", "manager"]
+
+def test_concurrent_revision_drafts_persist_one_version_and_rollback_requires_review(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from app.models import SourceSnapshot
+    from app.version_models import FileSection, RevisionDraftRequest
+
+    path = tmp_path / "documents.json"
+    store = DocumentStore(str(path))
+    source = SourceSnapshot(repository_id="repo-1", repository_full_name="org/repo",
+                            branch="main", commit_sha="a" * 40)
+    doc = store.create_from_job(
+        "seed", JobOutput(scope=Scope.file, target="a.py", template_id="default",
+                          template_name="Standard", output_language="en",
+                          sections=[("a.py", "# Original", "generated", 0.8)], source_snapshot=source),
+        owner_user_id="owner",
+    )
+    store.resolve_workflow_version(doc.id, "owner", 1, "APPROVED", "manager")
+    request = RevisionDraftRequest(
+        source_change_id="change-1", trigger="COMMIT", base_version=1,
+        source_snapshot=source.model_copy(update={"commit_sha": "b" * 40}),
+        files=[{"path": "a.py"}],
+    )
+    simultaneous = Barrier(2, timeout=5)
+
+    def generate(document, files):
+        simultaneous.wait()
+        return {"a.py": FileSection(path="a.py", markdown="# New", status="generated")}, REVIEW_REPORT
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(store.propose_revision, doc.id, "owner", request, generate)
+        second = pool.submit(store.propose_revision, doc.id, "owner", request, generate)
+        assert first.result(timeout=6).number == second.result(timeout=6).number == 2
+
+    restored = DocumentStore(str(path))
+    assert [version.number for version in restored.versions(doc.id)] == [2, 1]
+    assert restored.get(doc.id).pending_revision.commit_sha == "b" * 40
+    restored.resolve_workflow_version(doc.id, "owner", 2, "APPROVED", "manager")
+    rollback = restored.rollback_owned(doc.id, "owner", 1, "manager")
+    assert rollback.number == 3
+    assert restored.version(doc.id).content == "# New"
+    assert restored.get(doc.id).pending_revision is None
+    restored.resolve_workflow_version(doc.id, "owner", 3, "APPROVED", "manager")
+    assert restored.version(doc.id).content == "# Original"

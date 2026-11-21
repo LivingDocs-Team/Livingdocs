@@ -43,7 +43,7 @@ public final class WorkflowDtos {
                                         List<ReviewCommentResponse> relatedComments) { }
     public record StaffReviewRequest(@NotNull StaffReviewResult result,
                                      @Size(max = 2000) String comment) { }
-    public record ManagerDecisionRequest(@Size(max = 2000) String comment) { }
+    public record ManagerDecisionRequest(@Size(max = 2000) String comment, @Positive Integer documentVersion) { }
     public record SubmitWorkflowRequest(@Positive Integer expectedVersion) { }
     public record ReassignRequest(@NotNull @Positive Long targetStaffUserId,
                                  @NotBlank @Size(max = 1000) String reason) { }
