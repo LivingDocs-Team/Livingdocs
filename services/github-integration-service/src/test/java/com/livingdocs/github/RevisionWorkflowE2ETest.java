@@ -219,9 +219,17 @@ class RevisionWorkflowE2ETest {
         var ai = aiService.mutate().defaultHeader(USER_HEADER, owner).build();
         var analysis = Map.of("path", PATH, "language", "java", "classes",
                 List.of(Map.of("name", "Invoice", "lineno", 1)));
+        String templateName = "Invoice revision " + UUID.randomUUID();
+        var template = ai.post().uri("/templates").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("name", templateName, "instructions", "Describe the source.",
+                        "sections", List.of("Overview", "Classes")))
+                .retrieve().body(JsonNode.class);
+        String templateId = template.path("id").asText();
+        assertThat(template.path("version").asInt()).isEqualTo(1);
         var job = ai.post().uri("/generate").contentType(MediaType.APPLICATION_JSON)
                 .body(Map.of("scope", "file", "target", PATH,
-                "output_language", "en", "files", List.of(analysis), "source_snapshot",
+                "output_language", "en", "files", List.of(analysis), "template_id", templateId,
+                "template_version", 1, "source_snapshot",
                 Map.of("repository_id", repo.id(), "repository_full_name", "acme/docs",
                         "branch", "main", "commit_sha", newSha()))).retrieve().body(JsonNode.class);
         String jobId = job.path("id").asText();
@@ -243,6 +251,11 @@ class RevisionWorkflowE2ETest {
         workflows.staffReview(staff, staffPermissions, id,
                 new StaffReviewRequest(StaffReviewResult.PASSED, "Baseline for source revision"));
         workflows.decide(manager, managerPermissions, id, ManagerDecision.APPROVED, null, 1);
+        var updatedTemplate = ai.put().uri("/templates/{id}", templateId).contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("name", templateName, "instructions", "Describe the new format.",
+                        "sections", List.of("Overview", "API Endpoints")))
+                .retrieve().body(JsonNode.class);
+        assertThat(updatedTemplate.path("version").asInt()).isEqualTo(2);
         if (scenario == Scenario.POLICY_DISABLED || scenario == Scenario.DOCUMENT_OVERRIDE) {
             var rules = new java.util.ArrayList<Map<String, Object>>();
             rules.add(Map.of("scope", "REPOSITORY", "target", "", "onCommit", true, "onPullRequest", false));
@@ -316,6 +329,17 @@ class RevisionWorkflowE2ETest {
         assertThatThrownBy(() -> workflows.decide(manager, managerPermissions, id, ManagerDecision.APPROVED, null, 2))
                 .hasMessageContaining("successful staff review");
         workflows.claim(staff, staffPermissions, id);
+        var comparison = workflows.reviewComparison(staff, staffPermissions, id);
+        var revision = comparison.path("pending_version");
+        assertThat(revision.path("number").asInt()).isEqualTo(2);
+        var snapshot = revision.path("evidence_report");
+        assertThat(snapshot.path("template_id").asText()).isEqualTo(templateId);
+        assertThat(snapshot.path("template_version").asInt()).isEqualTo(1);
+        assertThat(snapshot.path("template_instructions").asText()).isEqualTo("Describe the source.");
+        assertThat(snapshot.path("template_sections")).extracting(JsonNode::asText)
+                .containsExactly("Overview", "Classes");
+        assertThat(revision.path("content").asText()).contains("## Overview", "## Classes")
+                .doesNotContain("## API Endpoints");
         workflows.staffReview(staff, staffPermissions, id,
                 new StaffReviewRequest(StaffReviewResult.PASSED, "Verified against source"));
         assertThatThrownBy(() -> workflows.decide(manager, managerPermissions, id, ManagerDecision.APPROVED, null, 1))
