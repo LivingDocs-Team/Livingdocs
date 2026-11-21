@@ -33,11 +33,13 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     boolean existsByUsernameIgnoreCaseAndIdNot(String username, Long id);
 
+    // `search` is cast to a string: a null parameter is otherwise sent to PostgreSQL as bytea and
+    // lower(bytea) fails ("function lower(bytea) does not exist"), which broke an unfiltered user list.
     @Query("""
             select u from User u
-            where (:search is null or
-                   lower(u.username) like lower(concat('%', :search, '%')) or
-                   lower(u.email) like lower(concat('%', :search, '%')))
+            where (cast(:search as string) is null or
+                   lower(u.username) like lower(concat('%', cast(:search as string), '%')) or
+                   lower(u.email) like lower(concat('%', cast(:search as string), '%')))
               and (:role is null or u.role = :role)
               and (:active is null or u.active = :active)
             """)
