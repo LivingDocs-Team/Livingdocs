@@ -1187,6 +1187,7 @@ export default function DocumentationManagement({ userId }) {
                         <strong>{event.action || 'Action unavailable'}</strong>
                         <p>Actor user ID: {event.actorUserId || 'Unavailable'}</p>
                         <p>Actor role: {event.actorRole || 'Not recorded'}</p>
+                        <p>Trigger source: {event.triggerSource || 'Not recorded'}</p>
                         <p>Timestamp: {formatAuditTimestamp(event.createdAt)}</p>
                         <p>Previous status: {event.previousStatus || '—'}</p>
                         <p>New status: {event.newStatus || '—'}</p>

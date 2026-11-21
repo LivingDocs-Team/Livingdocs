@@ -47,6 +47,9 @@ public class DocumentWorkflowAudit {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @Column(name = "trigger_source", length = 40, updatable = false)
+    private String triggerSource;
+
     @Column(name = "document_version")
     private Integer documentVersion;
 
@@ -108,6 +111,8 @@ public class DocumentWorkflowAudit {
     public UUID getWorkflowId() { return workflowId; }
     public String getActorUserId() { return actorUserId; }
     public String getActorRole() { return actorRole; }
+    public String getTriggerSource() { return triggerSource; }
+    public void setTriggerSource(String triggerSource) { this.triggerSource = triggerSource; }
     public String getPreviousReviewerUserId() { return previousReviewerUserId; }
     public String getNewReviewerUserId() { return newReviewerUserId; }
     public String getAction() { return action; }

@@ -501,6 +501,7 @@ export default function ManagerApprovalQueue({ userId }) {
                             <article className="documentation-version-card">
                               <strong>{event.action || 'Action unavailable'}</strong>
                               <p>Actor: {event.actorUserId || 'Unavailable'}{event.actorRole ? ` (${event.actorRole})` : ''}</p>
+                              <p>Trigger source: {event.triggerSource || 'Not recorded'}</p>
                               <p>Time: {formatTimestamp(event.createdAt)}</p>
                               {event.documentVersion && <p>Document version: {event.documentVersion}</p>}
                               <p>Workflow: {event.previousStatus || '—'} → {event.newStatus || '—'}</p>
