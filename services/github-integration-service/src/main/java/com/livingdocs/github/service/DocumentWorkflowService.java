@@ -66,6 +66,15 @@ public class DocumentWorkflowService {
         this.documents = documents;
     }
 
+    public boolean acceptsRevisionDraft(String documentId) {
+        return acceptsRevisionDraft(workflows.findByDocumentId(documentId).orElse(null));
+    }
+
+    private static boolean acceptsRevisionDraft(DocumentWorkflow workflow) {
+        return workflow == null || workflow.getStatus() == DocumentWorkflowStatus.APPROVED
+                || workflow.getStatus() == DocumentWorkflowStatus.REJECTED;
+    }
+
     @Transactional(propagation = Propagation.MANDATORY)
     public void submitRevisionDraft(JsonNode candidate, SourceChangeRequest revision,
             Supplier<JsonNode> generate) {
@@ -74,10 +83,9 @@ public class DocumentWorkflowService {
         DocumentWorkflow workflow = workflows.lockByDocumentId(id).orElse(null);
         if (workflow != null) {
             requireOwner(workflow, owner);
-            if (workflow.getStatus() != DocumentWorkflowStatus.APPROVED
-                    && workflow.getStatus() != DocumentWorkflowStatus.REJECTED) {
-                return;
-            }
+        }
+        if (!acceptsRevisionDraft(workflow)) {
+            return;
         }
 
         JsonNode draft = generate.get();

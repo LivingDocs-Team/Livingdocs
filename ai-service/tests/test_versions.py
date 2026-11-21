@@ -654,7 +654,8 @@ def test_rollback_retry_returns_existing_matching_proposal():
     assert len(store.history(doc.id)) == 3
 def test_revision_draft_is_grounded_idempotent_and_only_exact_version_can_publish(monkeypatch):
     from app.generator import FileDocResult
-    from app.models import SourceSnapshot
+    from datetime import timedelta
+    from app.models import SourceSnapshot, now
     monkeypatch.setenv("INTERNAL_API_SECRET", "workflow-internal-secret")
     store, doc = create_approved_owned_document()
     base = store.version(doc.id)
@@ -676,6 +677,7 @@ def test_revision_draft_is_grounded_idempotent_and_only_exact_version_can_publis
     monkeypatch.setattr("main.get_generator", Generator)
     headers = {"Authorization": "Bearer workflow-internal-secret", "X-User-Id": "73"}
     url = f"/internal/documents/{doc.id}/revision-drafts"
+    prepare, commit = url + "/prepare", url + "/commit"
     data = {
         "source_change_id": "change-1",
         "trigger": "COMMIT",
@@ -683,13 +685,21 @@ def test_revision_draft_is_grounded_idempotent_and_only_exact_version_can_publis
         "base_version": 1,
         "files": [{"path": "a.py", "language": "python"}],
     }
-    assert client.post(url, json=data).status_code in (401, 403)
-    assert client.post(url, headers=headers | {"X-User-Id": "someone-else"}, json=data).status_code == 404
-    assert client.post(url, headers=headers, json=data | {
+    assert client.post(prepare, json=data).status_code in (401, 403)
+    assert client.post(prepare, headers=headers | {"X-User-Id": "someone-else"}, json=data).status_code == 404
+    assert client.post(prepare, headers=headers, json=data | {
         "source_snapshot": data["source_snapshot"] | {"repository_id": "repo-2"},
     }).status_code == 409
 
-    response = client.post(url, headers=headers, json=data)
+    response = client.post(prepare, headers=headers, json=data)
+    assert response.status_code == 200, response.text
+    assert store.get(doc.id).pending_version is None
+    commit_data = data | {"prepared": response.json(), "lease_expires_at": now().isoformat()}
+    assert client.post(commit, headers=headers, json=commit_data).status_code == 409
+    assert store.get(doc.id).versions_total == 1
+    assert store.get(doc.id).pending_version is None
+    commit_data["lease_expires_at"] = (now() + timedelta(minutes=15)).isoformat()
+    response = client.post(commit, headers=headers, json=commit_data)
     assert response.status_code == 200, response.text
     draft = response.json()
     assert draft["number"] == 2
@@ -697,9 +707,11 @@ def test_revision_draft_is_grounded_idempotent_and_only_exact_version_can_publis
     assert draft["source_snapshot"]["commit_sha"] == "b" * 40
     assert draft["evidence_report"]["files"][0]["path"] == "a.py"
     assert store.version(doc.id).content == "# Original document\n"
-    assert client.post(url, headers=headers, json=data).json()["number"] == 2
+    retry = client.post(prepare, headers=headers, json=data)
+    assert retry.status_code == 200
+    assert client.post(commit, headers=headers, json=commit_data | {"prepared": retry.json()}).json()["number"] == 2
     assert calls == ["a.py"]
-    assert client.post(url, headers=headers, json=data | {"source_change_id": "other"}).status_code == 409
+    assert client.post(prepare, headers=headers, json=data | {"source_change_id": "other"}).status_code == 409
 
     with pytest.raises(VersionError, match="pending document version has changed"):
         store.resolve_workflow_version(doc.id, "73", 1, "APPROVED", "manager")

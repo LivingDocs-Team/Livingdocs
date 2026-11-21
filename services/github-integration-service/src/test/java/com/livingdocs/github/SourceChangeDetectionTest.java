@@ -117,19 +117,24 @@ class SourceChangeDetectionTest {
 
     @Autowired DocumentWorkflowService workflows;
     @Autowired DocumentWorkflowRepository workflowRows;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate revisionJdbc;
+    @Autowired com.livingdocs.github.change.RevisionJobWorker revisionWorker;
 
     @MockitoBean(name = "aiServiceRestClient", answers = org.mockito.Answers.RETURNS_DEEP_STUBS)
     RestClient revisionAi;
     @MockitoBean(name = "codeAnalyzerRestClient", answers = org.mockito.Answers.RETURNS_DEEP_STUBS)
     RestClient revisionAnalyzer;
+    @MockitoBean(name = "revisionAiRestClient", answers = org.mockito.Answers.RETURNS_DEEP_STUBS)
+    RestClient revisionPreparation;
     @MockitoBean DocumentationGenerationService workflowDocuments;
 
-    @Test
-    void signedWebhookDraftNeedsStaffAndExactCurrentManagerApproval() throws Exception {
-        String owner = "revision-owner";
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void signedWebhookDraftNeedsStaffAndExactCurrentManagerApproval(boolean replaceWorker) throws Exception {
+        String owner = "revision-owner-" + replaceWorker;
         String manager = "revision-manager";
         String staff = "revision-staff";
-        String document = "revision-e2e";
+        String document = "revision-e2e-" + replaceWorker;
         var repo = connectAndAddRepo(owner);
         UUID repositoryId = UUID.fromString(repo.id());
         String sha = newSha();
@@ -146,14 +151,48 @@ class SourceChangeDetectionTest {
         when(revisionAnalyzer.post().uri("/api/v1/analyze-repo")
                 .body(org.mockito.ArgumentMatchers.any(AnalysisInput.class)).retrieve()
                 .body(JsonNode.class)).thenReturn(analysis);
+        var preparationRequest = mock(RestClient.RequestBodySpec.class, org.mockito.Answers.RETURNS_SELF);
+        var preparationResponse = mock(RestClient.ResponseSpec.class);
+        when(revisionPreparation.post().uri("/internal/documents/{id}/revision-drafts/prepare", document))
+                .thenReturn(preparationRequest);
+        when(preparationRequest.retrieve()).thenReturn(preparationResponse);
+        var preparing = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var preparations = new java.util.concurrent.atomic.AtomicInteger();
+        when(preparationResponse.body(JsonNode.class)).thenAnswer(invocation -> {
+            if (preparations.incrementAndGet() == 1 && replaceWorker) {
+                preparing.countDown();
+                assertThat(release.await(20, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                return json.createObjectNode().put("worker", "expired");
+            }
+            return json.createObjectNode().put("worker", "current");
+        });
         var draftRequest = mock(RestClient.RequestBodySpec.class, org.mockito.Answers.RETURNS_SELF);
         var draftResponse = mock(RestClient.ResponseSpec.class);
-        when(revisionAi.post().uri("/internal/documents/{id}/revision-drafts", document)).thenReturn(draftRequest);
+        when(revisionAi.post().uri("/internal/documents/{id}/revision-drafts/commit", document)).thenReturn(draftRequest);
+        when(draftRequest.body(org.mockito.ArgumentMatchers.any(Object.class))).thenAnswer(invocation -> {
+            JsonNode body = invocation.getArgument(0);
+            assertThat(body.path("prepared").path("worker").asText()).isEqualTo("current");
+            return draftRequest;
+        });
         when(draftRequest.retrieve()).thenReturn(draftResponse);
         when(draftResponse.body(JsonNode.class)).thenReturn(
                 json.createObjectNode().put("status", "proposed").put("number", 2));
 
         sendWebhook("push", pushPayload(repo.githubId(), "refs/heads/main", sha)).andExpect(status().isAccepted());
+        if (replaceWorker) {
+            try {
+                assertThat(preparing.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                assertThat(workflowRows.findByOwnerUserIdOrderByCreatedAtDesc(owner, PageRequest.of(0, 10)))
+                        .isEmpty();
+                assertThat(revisionJdbc.update("UPDATE revision_jobs SET available_at = ? WHERE repository_id = ?",
+                        java.time.OffsetDateTime.now().minusSeconds(1), repositoryId)).isEqualTo(1);
+                revisionWorker.poll();
+                assertThat(preparations.get()).isEqualTo(2);
+            } finally {
+                release.countDown();
+            }
+        }
         var page = PageRequest.of(0, 10);
         UUID workflowId = null;
         for (int attempt = 0; attempt < 100 && workflowId == null; attempt++) {
@@ -164,6 +203,7 @@ class SourceChangeDetectionTest {
             }
         }
         assertThat(workflowId).as("webhook revision job entered Staff queue").isNotNull();
+        verify(draftRequest, times(1)).retrieve();
         UUID id = workflowId;
         var draft = json.createObjectNode().put("owner_user_id", owner)
                 .put("pending_version", 2).put("current_version", 1);
