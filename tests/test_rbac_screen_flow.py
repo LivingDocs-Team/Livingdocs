@@ -245,11 +245,17 @@ def test_developer_reviews_drift_alert(page: Page):
     api = DriftApi("DEVELOPER", {
         **SAVED_DOCUMENT_ROUTES,
         f"{base}/reports": [{"id": "report-1", "pull_request_number": 7, "pull_request_title": "Update cart"}],
+        f"/api/repositories/{REPOSITORY_ID}/source-changes": [
+            {"id": "change-1", "pullRequestNumber": 7, "commitSha": "a" * 40, "documentsStatus": "FOUND",
+             "affectedDocuments": [{"title": "Cart guide"}]},
+            {"id": "change-2", "pullRequestNumber": 8, "documentsStatus": "FOUND", "affectedDocuments": []},
+        ],
     })
     start(page, api, f"{FRONTEND}/#/drift/alerts")
     expect(page.get_by_role("heading", name="Drift Alerts")).to_be_visible()
-    page.get_by_label("Pull request number").fill("7")
-    page.get_by_role("button", name="Check for drift").click()
+    expect(page.get_by_role("region", name="Source changes affecting documentation")).to_contain_text("aaaaaaa")
+    expect(page.get_by_role("button", name="Review current PR #8")).to_have_count(0)
+    page.get_by_role("button", name="Review current PR #7").click()
     expect(page.get_by_role("heading", name="Outdated parameter")).to_be_visible()
     page.get_by_role("button", name="Accept", exact=True).click()
     expect(page.get_by_role("status").filter(has_text="Accepted")).to_be_visible()

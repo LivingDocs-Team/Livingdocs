@@ -64,11 +64,14 @@ export default function DeveloperDriftAlerts({ userId }) {
   const [repoId, setRepoId] = useState('');
   const [pullRequest, setPullRequest] = useState('');
   const [reports, setReports] = useState([]);
+  const [sourceChanges, setSourceChanges] = useState(null);
+  const [inboxError, setInboxError] = useState('');
   const [report, setReport] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [loadingReports, setLoadingReports] = useState(false);
-  const base = repoId && `/api/repositories/${encodeURIComponent(repoId)}/drift`;
+  const repositoryPath = repoId && `/api/repositories/${encodeURIComponent(repoId)}`;
+  const base = repositoryPath && `${repositoryPath}/drift`;
 
   useEffect(() => {
     let current = true;
@@ -92,6 +95,18 @@ export default function DeveloperDriftAlerts({ userId }) {
     return () => { current = false; };
   }, [base]);
 
+  useEffect(() => {
+    if (!repositoryPath) return undefined;
+    let current = true;
+    githubApi(`${repositoryPath}/source-changes`)
+      .then((changes) => {
+        if (current) setSourceChanges(changes.filter((change) =>
+          change.documentsStatus === 'FOUND' && change.affectedDocuments?.length));
+      })
+      .catch((failure) => { if (current) setInboxError(failure.message); });
+    return () => { current = false; };
+  }, [repositoryPath]);
+
   async function run(request) {
     setBusy(true);
     setError('');
@@ -108,6 +123,8 @@ export default function DeveloperDriftAlerts({ userId }) {
 
   function chooseRepository(id) {
     setReports([]);
+    setSourceChanges(null);
+    setInboxError('');
     setReport(null);
     setError('');
     setLoadingReports(Boolean(id));
@@ -116,9 +133,14 @@ export default function DeveloperDriftAlerts({ userId }) {
 
   function analyze(event) {
     event.preventDefault();
+    return analyzePullRequest(Number(pullRequest));
+  }
+
+  function analyzePullRequest(number) {
+    setPullRequest(String(number));
     return run(async () => {
       const result = await githubApi(`${base}/analyze`, {
-        method: 'POST', body: { pullRequestNumber: Number(pullRequest) },
+        method: 'POST', body: { pullRequestNumber: number },
       });
       setReport(result);
       setReports(await githubApi(`${base}/reports`));
@@ -157,6 +179,29 @@ export default function DeveloperDriftAlerts({ userId }) {
         </label>
         <button disabled={!base || busy || loadingReports} type="submit">Check for drift</button>
       </form>
+      {repositoryPath && (
+        <section aria-label="Source changes affecting documentation">
+          <h2>Source changes affecting documentation</h2>
+          {inboxError && <p role="alert">{inboxError}</p>}
+          {!inboxError && sourceChanges === null && <p role="status">Loading source changes…</p>}
+          {sourceChanges?.length === 0 && <p>No affected documentation detected.</p>}
+          <ul>
+            {sourceChanges?.map((change) => (
+              <li key={change.id}>
+                {change.pullRequestNumber ? `Pull request #${change.pullRequestNumber}` : 'Commit'}
+                {' · '}<code>{change.commitSha?.slice(0, 7)}</code>
+                {' · '}{change.affectedDocuments.length} affected documentation section(s)
+                {Number.isInteger(change.pullRequestNumber) && (
+                  <button type="button" disabled={busy || loadingReports}
+                    onClick={() => void analyzePullRequest(change.pullRequestNumber)}>
+                    Review current PR #{change.pullRequestNumber}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {base && (
         <label>Report history
           <select disabled={busy || loadingReports} value={report?.id || ''} onChange={(event) => {
