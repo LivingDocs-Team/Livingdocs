@@ -276,11 +276,16 @@ def resolve(report: DriftReport, finding_id: str, update: ResolutionUpdate) -> D
     note = (update.note or "").strip() or None
     if update.status == ResolutionStatus.dismissed and not note:
         raise ResolutionError(422, "A reason (note) is required to dismiss a finding")
+    accepted = (update.accepted_update or "").strip() or None
+    if accepted and update.status != ResolutionStatus.resolved:
+        raise ResolutionError(422, "An accepted update can only be given when resolving a finding")
     r: FindingResolution = f.resolution
-    if r.status == update.status and r.note == note:
+    if r.status == update.status and r.note == note and r.accepted_update == accepted:
         return f                                   # no change: no new history entry
     at = now()
-    r.history.append(ResolutionEvent(status=update.status, actor=update.actor, note=note, at=at))
+    r.history.append(ResolutionEvent(status=update.status, actor=update.actor, note=note,
+                                     accepted_update=accepted, at=at))
     r.status, r.actor, r.note, r.updated_at = update.status, update.actor, note, at
+    r.accepted_update = accepted
     refresh_progress(report)
     return f

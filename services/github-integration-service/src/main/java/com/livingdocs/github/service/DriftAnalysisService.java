@@ -249,10 +249,20 @@ public class DriftAnalysisService {
         if (note != null && note.length() > 2000) {
             throw ApiException.badRequest("note must be 2000 characters or fewer.");
         }
+        // LD-161: the AI suggestion as accepted, as is or edited by the reviewer
+        String accepted = request.acceptedUpdate() == null || request.acceptedUpdate().isBlank()
+                ? null : request.acceptedUpdate().trim();
+        if (accepted != null && !"resolved".equals(status)) {
+            throw ApiException.badRequest("An accepted update can only be given when resolving a finding.");
+        }
+        if (accepted != null && accepted.length() > 20_000) {
+            throw ApiException.badRequest("acceptedUpdate must be 20000 characters or fewer.");
+        }
         ObjectNode body = json.objectNode();
         body.put("status", status);
         body.put("actor", userId);
         putIfPresent(body, "note", note);
+        putIfPresent(body, "accepted_update", accepted);
         try {
             JsonNode finding = aiServiceClient.put()
                     .uri("/drift/reports/{id}/findings/{finding}/resolution", reportId, findingId)
