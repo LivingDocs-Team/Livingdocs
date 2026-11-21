@@ -262,6 +262,23 @@ class DriftReportStore:
             reports[report.id] = report
         return raw, list(reports.values())
 
+    @staticmethod
+    def _contains_legacy_history(current: DriftReport, legacy: DriftReport) -> bool:
+        if current.model_dump(exclude={"findings", "review"}) != legacy.model_dump(
+                exclude={"findings", "review"}):
+            return False
+        if len(current.findings) != len(legacy.findings):
+            return False
+        for newer, older in zip(current.findings, legacy.findings):
+            if newer.model_dump(exclude={"resolution"}) != older.model_dump(exclude={"resolution"}):
+                return False
+            before, after = older.resolution, newer.resolution
+            if after.history[:len(before.history)] != before.history:
+                return False
+            if len(after.history) == len(before.history) and after != before:
+                return False
+        return True
+
     def _import_legacy_file(self) -> None:
         if self.path is None or self.path.name != "drift-reports.json":
             return
@@ -274,8 +291,11 @@ class DriftReportStore:
         _, previous = self._read_file(legacy)
         by_id = {report.id: report for report in previous}
         for report in current:
-            if not already_imported and report.id in by_id and by_id[report.id] != report:
-                raise ValueError(f"Conflicting persisted drift report {report.id}")
+            legacy_report = by_id.get(report.id)
+            if legacy_report is not None and legacy_report != report:
+                # An import marker alone cannot distinguish stale legacy data from a rollback write.
+                if not already_imported or not self._contains_legacy_history(report, legacy_report):
+                    raise ValueError(f"Conflicting persisted drift report {report.id}; preserve both stores")
             by_id[report.id] = report
         reports = OrderedDict(
             (report.id, report) for report in sorted(by_id.values(), key=lambda report: report.created_at)

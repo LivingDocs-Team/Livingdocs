@@ -586,6 +586,24 @@ class DocumentWorkflowServiceTest {
     }
 
     @Test
+    void committedManagerRetryRepairsAiWithoutCreatingAnotherAuditRow() {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+        workflow.review(StaffReviewResult.PASSED, "Checks passed");
+        workflow.decide(MANAGER, ManagerDecision.REJECTED, "Original reason");
+        when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
+        Set<String> permissions = Set.of("ROLE_MANAGER", "DOCUMENT_REJECT");
+
+        assertThatThrownBy(() -> service.decide(MANAGER, permissions, ID,
+                ManagerDecision.REJECTED, "Changed reason", 1)).isInstanceOf(ApiException.class);
+        service.decide(MANAGER, permissions, ID, ManagerDecision.REJECTED, " Original reason ", 1);
+
+        verify(documents).resolveDocumentVersion(MANAGER, OWNER, "doc-1", 1,
+                "REJECTED", "Original reason", true);
+        verify(audit, never()).save(any(DocumentWorkflowAudit.class));
+        verify(workflows, never()).saveAndFlush(workflow);
+    }
+
+    @Test
     void ownerAndRolePermissionsAreRequiredToReadOrAct() {
         DocumentWorkflow workflow = submittedWorkflow();
         when(workflows.findById(ID)).thenReturn(Optional.of(workflow));

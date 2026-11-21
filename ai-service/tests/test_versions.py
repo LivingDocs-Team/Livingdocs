@@ -551,6 +551,46 @@ def create_approved_owned_document():
     return store, doc
 
 
+@pytest.mark.parametrize("decision", ["APPROVED", "REJECTED"])
+@pytest.mark.parametrize("sync_failure", ["file", "directory"])
+def test_manager_decision_retries_failed_sync(tmp_path, monkeypatch, decision, sync_failure):
+    import os
+    import stat
+    from types import SimpleNamespace
+    store, doc = create_approved_owned_document()
+    store.path = tmp_path / "documents.json"
+    store.rollback_owned(doc.id, "73", 1, "manager")
+    simulate_directory = sync_failure == "directory" and os.name != "posix"
+    synced = []
+
+    def fail_sync(descriptor):
+        directory = descriptor == -1 or stat.S_ISDIR(os.fstat(descriptor).st_mode)
+        synced.append("directory" if directory else "file")
+        if directory == (sync_failure == "directory"):
+            raise OSError("Injected fsync failure")
+        os.fsync(descriptor)
+
+    with monkeypatch.context() as patch:
+        io = SimpleNamespace(name="posix" if simulate_directory else os.name,
+                             fsync=fail_sync, replace=os.replace, O_RDONLY=os.O_RDONLY,
+                             O_DIRECTORY=getattr(os, "O_DIRECTORY", 0),
+                             open=(lambda *args: -1) if simulate_directory else os.open,
+                             close=(lambda descriptor: None) if simulate_directory else os.close)
+        patch.setattr("app.versions.os", io)
+        with pytest.raises(OSError, match="Injected fsync failure"):
+            store.resolve_workflow_version(doc.id, "73", 2, decision, "manager", "Original note")
+    assert store.get(doc.id).pending_version == 2
+    assert synced == (["file"] if sync_failure == "file" else ["file", "directory"])
+    if sync_failure == "file":
+        assert DocumentStore(str(store.path)).get(doc.id).pending_version == 2
+    store.resolve_workflow_version(doc.id, "73", 2, decision, "manager", "Original note")
+    restarted = DocumentStore(str(store.path))
+    restarted.resolve_workflow_version(doc.id, "73", 2, decision, "manager", "Original note")
+    action = "accepted" if decision == "APPROVED" else "dismissed"
+    events = [e for e in restarted.history(doc.id) if e.version == 2 and e.action == action]
+    assert [(e.actor, e.note) for e in events] == [("manager", "Original note")]
+
+
 def test_rollback_creates_new_proposal_from_approved_version():
     store, doc = create_approved_owned_document()
 
@@ -863,7 +903,7 @@ def test_concurrent_revision_drafts_persist_one_version_and_rollback_requires_re
     assert restored.version(doc.id).content == "# Original"
 
 @pytest.mark.parametrize("decision", ["accept", "edit", "dismiss"])
-def test_drift_decisions_create_at_most_one_grounded_draft(monkeypatch, decision):
+def test_drift_decisions_create_at_most_one_grounded_draft(monkeypatch, tmp_path, decision):
     from app.drift import DriftReportStore
     from app.drift_models import DriftReport
     from app.models import SourceSnapshot
@@ -923,6 +963,13 @@ def test_drift_decisions_create_at_most_one_grounded_draft(monkeypatch, decision
     outcome_url = "/internal/drift/reports/drift-1/findings/F1/workflow-decision"
     outcome_body = {"document_id": doc.id, "version": 2, "decision": outcome, "actor": "manager"}
     assert client.put(outcome_url, headers=headers, json=outcome_body).status_code == 409
+    store.path = tmp_path / "documents.json"
+    store._save()
+    previous_snapshot = store.path.read_bytes()
+    committed = outcome_body | {"owner_user_id": "73", "note": "Manager's actual note"}
+    assert client.put(outcome_url, json=committed).status_code in (401, 403)
+    assert client.put(outcome_url, headers=headers,
+                      json=committed | {"owner_user_id": "other"}).status_code == 404
 
     def unavailable():
         raise OSError("simulated document write failure")
@@ -934,6 +981,11 @@ def test_drift_decisions_create_at_most_one_grounded_draft(monkeypatch, decision
     assert store.get(doc.id).pending_version == 2
     assert store.version(doc.id, 2).status == "proposed"
     store.resolve_workflow_version(doc.id, "73", 2, outcome, "manager")
+    # A crash after the AI write and before SQL commit retains the original AI decision.
+    restarted = DocumentStore(str(store.path))
+    restarted.resolve_workflow_version(doc.id, "73", 2, outcome, "manager")
+    action = "accepted" if outcome == "APPROVED" else "dismissed"
+    assert sum(e.version == 2 and e.action == action for e in restarted.history(doc.id)) == 1
     for actor, note in [("another-manager", None), ("manager", "different note")]:
         with pytest.raises(VersionError, match="No matching Manager decision"):
             store.resolve_workflow_version(doc.id, "73", 2, outcome, actor, note)
@@ -941,11 +993,18 @@ def test_drift_decisions_create_at_most_one_grounded_draft(monkeypatch, decision
                           json=outcome_body | {"actor": actor, "note": note}).status_code == 409
     assert client.put(outcome_url.replace("/F1/", "/unrelated/"), headers=headers,
                       json=outcome_body).status_code == 409
-    store.resolve_workflow_version(doc.id, "73", 2, outcome, "manager")
+    # The inverse crash leaves SQL's audit intact and the AI snapshot pending.
+    store.path.write_bytes(previous_snapshot)
+    store = DocumentStore(str(store.path))
+    monkeypatch.setattr("main.documents", store)
     for _ in range(2):
-        assert client.put(outcome_url, headers=headers, json=outcome_body).status_code == 204
+        assert client.put(outcome_url, headers=headers, json=committed).status_code == 204
+    persisted = DocumentStore(str(store.path))
+    events = [e for e in persisted.history(doc.id) if e.version == 2 and e.action == action]
+    assert [(e.actor, e.note) for e in events] == [("manager", committed["note"])]
     reconciled = reports.get(report.id).findings[0].resolution
     assert [event.workflow_decision for event in reconciled.history] == [None, outcome]
+    assert reconciled.history[-1].note == committed["note"]
     if outcome == "APPROVED":
         assert reconciled.status == "resolved"
         assert client.put(url, headers=headers, json=body).json()["resolution"]["status"] == "resolved"

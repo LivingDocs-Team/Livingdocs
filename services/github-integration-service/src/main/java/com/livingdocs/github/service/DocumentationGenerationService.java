@@ -552,9 +552,15 @@ public class DocumentationGenerationService {
 
     public void resolveDocumentVersion(String actorUserId, String ownerUserId, String documentId,
             int version, String decision, String note) {
+        resolveDocumentVersion(actorUserId, ownerUserId, documentId, version, decision, note, false);
+    }
+
+    public void resolveDocumentVersion(String actorUserId, String ownerUserId, String documentId,
+            int version, String decision, String note, boolean replay) {
         try {
             ObjectNode request = JsonNodeFactory.instance.objectNode()
                     .put("version", version).put("decision", decision);
+            if (replay) request.put("replay", true);
             if (note != null) request.put("note", note);
             aiServiceClient.post().uri("/internal/documents/{id}/review-decision", documentId)
                     .header("X-User-Id", actorUserId)

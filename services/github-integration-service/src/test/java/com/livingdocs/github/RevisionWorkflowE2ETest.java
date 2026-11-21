@@ -98,6 +98,7 @@ class RevisionWorkflowE2ETest {
     @Autowired DocumentWorkflowService workflows;
     @Autowired DocumentCommitBackService commitBack;
     @Autowired DocumentWorkflowRepository workflowRows;
+    @Autowired org.springframework.transaction.support.TransactionTemplate transactions;
     @Autowired org.springframework.jdbc.core.JdbcTemplate revisionJdbc;
     @Autowired com.livingdocs.github.change.RevisionJobWorker revisionWorker;
     @Autowired @org.springframework.beans.factory.annotation.Qualifier("aiServiceRestClient")
@@ -194,9 +195,11 @@ class RevisionWorkflowE2ETest {
     RestClient revisionAnalyzer;
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings = {"accept", "edit", "dismiss"})
+    @org.junit.jupiter.params.provider.CsvSource({
+            "accept, false", "edit, false", "dismiss, false", "accept, true", "edit, true"
+    })
     @org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable(named = "LIVINGDOCS_E2E_RESTART_PHASE", matches = ".+")
-    void driftDecisionUsesRealAiHttpAndExactReviewVersion(String decision) throws Exception {
+    void driftDecisionUsesRealAiHttpAndExactReviewVersion(String decision, boolean sqlCommittedFirst) throws Exception {
         String owner = Long.toString(java.util.concurrent.ThreadLocalRandom.current().nextLong(1, Long.MAX_VALUE));
         var repo = connectAndAddRepo(owner);
         var ai = aiService.mutate().defaultHeader(USER_HEADER, owner).build();
@@ -301,24 +304,34 @@ class RevisionWorkflowE2ETest {
         ManagerDecision outcome = approved ? ManagerDecision.APPROVED : ManagerDecision.REJECTED;
         String note = approved ? "Approved after review" : "Needs correction";
         var permissions = Set.of("ROLE_MANAGER", "DOCUMENT_APPROVE", "DOCUMENT_REJECT");
-        // Persist the remote decision while SQL is still pending, as after a Java crash.
-        aiService.post().uri("/internal/documents/{id}/review-decision", documentId)
-                .header(USER_HEADER, "manager").header("X-Document-Owner-Id", owner)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(Map.of("version", 2, "decision", outcome.name(), "note", note))
-                .retrieve().toBodilessEntity();
-        assertThatThrownBy(() -> workflows.decide("manager-b", permissions, workflow, outcome, note, 2))
-                .isInstanceOf(com.livingdocs.github.exception.ApiException.class);
-        assertThatThrownBy(() -> workflows.decide("manager", permissions, workflow, outcome, "Changed note", 2))
-                .isInstanceOf(com.livingdocs.github.exception.ApiException.class);
-        assertThat(workflowRows.findById(workflow).orElseThrow().getStatus().name())
-                .isEqualTo("PENDING_MANAGER_APPROVAL");
-        workflows.decide("manager", permissions, workflow, outcome, note, 2);
-        workflows.decide("manager", permissions, workflow, outcome, note, 2);
-        assertThat(revisionJdbc.queryForList("""
-                SELECT actor_user_id, comment FROM document_workflow_audit
-                WHERE workflow_id = ? AND document_version = 2 AND action = ?
-                """, workflow, outcome.name())).containsExactly(Map.of("actor_user_id", "manager", "comment", note));
+        if (sqlCommittedFirst) {
+            // Simulate losing the AI write after the workflow and its audit committed together.
+            transactions.executeWithoutResult(transaction -> {
+                var saved = workflowRows.findById(workflow).orElseThrow();
+                saved.decide("manager", outcome, note);
+                workflowRows.saveAndFlush(saved);
+                revisionJdbc.update("""
+                        INSERT INTO document_workflow_audit
+                          (id, workflow_id, actor_user_id, actor_role, action, previous_status,
+                           new_status, comment, document_version, created_at)
+                        VALUES (?, ?, 'manager', 'MANAGER', ?, 'PENDING_MANAGER_APPROVAL', ?, ?, 2, CURRENT_TIMESTAMP)
+                        """, UUID.randomUUID(), workflow, outcome.name(), outcome.name(), note);
+            });
+        } else {
+            // Persist the remote decision while SQL is still pending, as after a Java crash.
+            aiService.post().uri("/internal/documents/{id}/review-decision", documentId)
+                    .header(USER_HEADER, "manager").header("X-Document-Owner-Id", owner)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("version", 2, "decision", outcome.name(), "note", note))
+                    .retrieve().toBodilessEntity();
+            assertThatThrownBy(() -> workflows.decide("manager-b", permissions, workflow, outcome, note, 2))
+                    .isInstanceOf(com.livingdocs.github.exception.ApiException.class);
+            assertThatThrownBy(() -> workflows.decide("manager", permissions, workflow, outcome, "Changed note", 2))
+                    .isInstanceOf(com.livingdocs.github.exception.ApiException.class);
+            assertThat(workflowRows.findById(workflow).orElseThrow().getStatus().name())
+                    .isEqualTo("PENDING_MANAGER_APPROVAL");
+            workflows.decide("manager", permissions, workflow, outcome, note, 2);
+        }
         String listRoute = "/api/repositories/{repo}/drift/reports";
         String detailRoute = listRoute + "/{report}";
         if (approved) {
@@ -338,6 +351,11 @@ class RevisionWorkflowE2ETest {
                 .andExpect(jsonPath("$.findings[0].resolution.note").value(note));
         assertThat(ai.get().uri("/internal/documents/{id}", documentId).retrieve().body(JsonNode.class)
                 .path("current_version").asInt()).isEqualTo(approved ? 2 : 1);
+        workflows.decide("manager", permissions, workflow, outcome, note, 2);
+        assertThat(revisionJdbc.queryForList("""
+                SELECT actor_user_id, comment FROM document_workflow_audit
+                WHERE workflow_id = ? AND document_version = 2 AND action = ?
+                """, workflow, outcome.name())).containsExactly(Map.of("actor_user_id", "manager", "comment", note));
     }
 
     @org.junit.jupiter.params.ParameterizedTest

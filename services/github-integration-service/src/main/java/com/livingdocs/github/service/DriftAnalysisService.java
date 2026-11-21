@@ -17,6 +17,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -191,15 +192,35 @@ public class DriftAnalysisService {
                     && (ownIds.contains(reportId)
                     || (isAttested(userId, repositoryId, reportId) && restoreOwner(userId, repositoryId, reportId)))) {
                 if (row.path("review").path("acknowledged").asInt() > 0) {
-                    JsonNode report = fetchReport(reportId, null, repository.getFullName());
-                    if (reconcileWorkflowDecisions(userId, reportId, report)) {
-                        ((ObjectNode) row).set("review", fetchReport(reportId, null, repository.getFullName()).path("review"));
+                    ObjectNode summary = row.deepCopy();
+                    try {
+                        JsonNode report = fetchReport(reportId, null, repository.getFullName());
+                        if (reconcileWorkflowDecisions(userId, reportId, report)) {
+                            report = fetchReport(reportId, null, repository.getFullName());
+                        }
+                        JsonNode review = report.path("review");
+                        if (!review.isObject()) {
+                            throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The drift review summary is missing.");
+                        }
+                        summary.set("review", review);
+                    } catch (ApiException e) {
+                        markReconciliationFailure(summary, e.getCode());
+                    } catch (DataAccessException e) {
+                        markReconciliationFailure(summary, "DRIFT_WORKFLOW_AUDIT_UNAVAILABLE");
                     }
+                    own.add(summary);
+                } else {
+                    own.add(row);
                 }
-                own.add(row);
             }
         }
         return own;
+    }
+
+    private void markReconciliationFailure(ObjectNode summary, String code) {
+        summary.putNull("review");
+        summary.putObject("reconciliation_error").put("code", code)
+                .put("message", "The current review status could not be verified for this report.");
     }
 
     public JsonNode getReport(String userId, String reportId) {
@@ -257,6 +278,7 @@ public class DriftAnalysisService {
                     """, (row, index) -> {
                         ObjectNode body = json.objectNode();
                         body.put("document_id", document).put("version", version);
+                        body.put("owner_user_id", userId);
                         body.put("decision", row.getString("action")).put("actor", row.getString("actor_user_id"));
                         body.put("note", row.getString("comment"));
                         return body;

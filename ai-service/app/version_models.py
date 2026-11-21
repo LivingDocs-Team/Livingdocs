@@ -67,6 +67,7 @@ class DocumentContentEdit(BaseModel):
 
 
 class InternalVersionDecision(BaseModel):
+    replay: bool = False
     version: int = Field(ge=1)
     decision: str = Field(pattern="^(APPROVED|REJECTED)$")
     note: Optional[str] = Field(default=None, max_length=1000)

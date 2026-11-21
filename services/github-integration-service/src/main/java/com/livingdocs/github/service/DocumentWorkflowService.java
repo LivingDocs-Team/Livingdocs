@@ -582,6 +582,9 @@ public class DocumentWorkflowService {
                 && expectedVersion != null && expectedVersion.equals(workflow.getSubmittedDocumentVersion())
                 && decision == workflow.getManagerDecision() && actor.equals(workflow.getManagerUserId())
                 && Objects.equals(note, workflow.getManagerComment())) {
+            documents.resolveDocumentVersion(workflow.getManagerUserId(), workflow.getOwnerUserId(),
+                    workflow.getDocumentId(), workflow.getSubmittedDocumentVersion(),
+                    workflow.getManagerDecision().name(), workflow.getManagerComment(), true);
             return toResponse(workflow);
         }
         if (workflow.getStatus() != DocumentWorkflowStatus.PENDING_MANAGER_APPROVAL

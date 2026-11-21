@@ -353,6 +353,58 @@ class DriftAnalysisServiceTest {
     }
 
     @Test
+    void listUsesTheFreshReviewWhenAnotherRequestAlreadyReconciled() {
+        new JdbcTemplate(database).update("INSERT INTO drift_report_owners VALUES (?, ?, ?)",
+                "report-1", REPOSITORY_ID, USER_ID);
+        aiServiceServer.expect(requestTo(startsWith("http://ai.test/drift/reports?repository=")))
+                .andRespond(withSuccess("""
+                        [{"id":"report-1","repository":"acme/shop","review":{"acknowledged":1}}]
+                        """, MediaType.APPLICATION_JSON));
+        // The other request finishes after the list snapshot and before this detail read.
+        aiServiceServer.expect(requestTo("http://ai.test/drift/reports/report-1"))
+                .andRespond(withSuccess("""
+                        {"id":"report-1","repository":"acme/shop",
+                         "review":{"acknowledged":0,"resolved":1},
+                         "findings":[{"resolution":{"status":"resolved","draft_version":2}}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        JsonNode result = driftService.listReports(USER_ID, REPOSITORY_ID, null);
+        assertEquals(1, result.at("/0/review/resolved").asInt());
+        assertEquals(0, result.at("/0/review/acknowledged").asInt(-1));
+        aiServiceServer.verify();
+    }
+
+    @Test
+    void listIsolatesAnUnavailableReportButDetailAndMarkdownFailClosed() {
+        var jdbc = new JdbcTemplate(database);
+        for (String id : List.of("report-1", "report-2")) {
+            jdbc.update("INSERT INTO drift_report_owners VALUES (?, ?, ?)", id, REPOSITORY_ID, USER_ID);
+        }
+        aiServiceServer.expect(requestTo(startsWith("http://ai.test/drift/reports?repository=")))
+                .andRespond(withSuccess("""
+                        [{"id":"report-1","repository":"acme/shop","review":{"acknowledged":1}},
+                         {"id":"private","repository":"acme/shop","review":{"acknowledged":1}},
+                         {"id":"report-2","repository":"acme/shop","review":{"resolved":1}}]
+                        """, MediaType.APPLICATION_JSON));
+        for (int attempt = 0; attempt < 3; attempt++) {
+            aiServiceServer.expect(requestTo("http://ai.test/drift/reports/report-1"))
+                    .andRespond(withServerError());
+        }
+
+        JsonNode result = driftService.listReports(USER_ID, REPOSITORY_ID, null);
+        assertEquals(2, result.size());
+        assertTrue(result.at("/0/review").isNull());
+        assertEquals("AI_SERVICE_FAILED", result.at("/0/reconciliation_error/code").asText());
+        assertEquals("report-2", result.at("/1/id").asText());
+        assertEquals(1, result.at("/1/review/resolved").asInt());
+        assertEquals(HttpStatus.BAD_GATEWAY, assertThrows(ApiException.class,
+                () -> driftService.getReport(USER_ID, REPOSITORY_ID, "report-1", null)).getStatus());
+        assertEquals(HttpStatus.BAD_GATEWAY, assertThrows(ApiException.class,
+                () -> driftService.getReportMarkdown(USER_ID, REPOSITORY_ID, "report-1", null)).getStatus());
+        aiServiceServer.verify();
+    }
+
+    @Test
     void reportReplaysOnlyTheCommittedManagerAuditForItsDraftVersion() {
         var jdbc = new JdbcTemplate(database);
         jdbc.execute("""
