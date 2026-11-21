@@ -6,6 +6,7 @@ import org.springframework.stereotype.Repository;
 
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -56,12 +57,22 @@ public class RevisionJobQueue {
                 lease.attempt() - 1) == 1);
     }
 
-    public boolean lockCurrentLease(Lease lease, OffsetDateTime now) {
+    public Optional<OffsetDateTime> renew(Lease lease, OffsetDateTime now) {
+        OffsetDateTime deadline = now.plus(LEASE_DURATION).truncatedTo(ChronoUnit.MICROS);
+        int updated = jdbc.update("""
+                UPDATE revision_jobs SET available_at = GREATEST(available_at, ?)
+                WHERE id = ? AND lease_token = ? AND status = 'RUNNING' AND available_at > ?
+                """, deadline, lease.id(), lease.token(), now);
+        return updated == 1 ? Optional.of(deadline) : Optional.empty();
+    }
+
+    public boolean lockCurrentLease(Lease lease, OffsetDateTime now, OffsetDateTime deadline) {
         return !jdbc.queryForList("""
                 SELECT id FROM revision_jobs
-                WHERE id = ? AND lease_token = ? AND status = 'RUNNING' AND available_at > ?
+                WHERE id = ? AND lease_token = ? AND status = 'RUNNING'
+                      AND available_at >= ? AND available_at > ?
                 FOR UPDATE
-                """, UUID.class, lease.id(), lease.token(), now).isEmpty();
+                """, UUID.class, lease.id(), lease.token(), deadline, now).isEmpty();
     }
 
     public void finish(Lease lease, OffsetDateTime now, String errorCode, boolean retryable) {

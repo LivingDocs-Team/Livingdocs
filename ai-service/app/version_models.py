@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field
 from .models import FileAnalysis, JobReport, Scope, SourceSnapshot, now
 
 
@@ -128,6 +128,16 @@ class VersionSummary(BaseModel):
     # LD-402: an edit or a rollback keeps the generation evidence (evidence_report, review_report,
     # source_snapshot) of the version it was made from; this is that version (None: its own)
     evidence_from_version: Optional[int] = None
+
+
+class PreparedRevision(BaseModel):
+    replacements: dict[str, FileSection] = Field(default_factory=dict)
+    report: Optional[JobReport] = None
+
+
+class RevisionDraftCommit(RevisionDraftRequest):
+    prepared: PreparedRevision
+    lease_expires_at: AwareDatetime
 
 
 class DocumentVersion(VersionSummary):

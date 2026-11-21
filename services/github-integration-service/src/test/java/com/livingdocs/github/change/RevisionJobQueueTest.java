@@ -70,6 +70,35 @@ class RevisionJobQueueTest {
     }
 
     @Test
+    void heartbeatExtendsLeaseBeyondOriginalFifteenMinutes() {
+        queue.enqueue(request, now);
+        var lease = queue.claim(now).orElseThrow();
+        var secondWorker = new RevisionJobQueue(jdbc);
+
+        assertThat(queue.renew(lease, now.plusMinutes(14))).contains(now.plusMinutes(29));
+        assertThat(secondWorker.claim(now.plusMinutes(16))).isEmpty();
+        queue.finish(lease, now.plusMinutes(16), null, false);
+        assertThat(status()).isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void replacementFencesExpiredWorkerEvenWhileItTriesToCommit() {
+        queue.enqueue(request, now);
+        var old = queue.claim(now).orElseThrow();
+        var later = now.plusMinutes(15);
+        var secondWorker = new RevisionJobQueue(jdbc);
+        var replacement = secondWorker.claim(later).orElseThrow();
+
+        assertThat(queue.renew(old, later)).isEmpty();
+        var deadline = secondWorker.renew(replacement, later).orElseThrow();
+        transaction.executeWithoutResult(status -> {
+            assertThat(queue.lockCurrentLease(old, later, deadline)).isFalse();
+            assertThat(secondWorker.lockCurrentLease(replacement, later, deadline)).isTrue();
+        });
+        assertThat(secondWorker.renew(replacement, deadline)).isEmpty();
+    }
+
+    @Test
     void retryableFailuresBackOffAndStopAfterFourthAttempt() {
         var attemptTime = now;
         queue.enqueue(request, now);
