@@ -457,7 +457,8 @@ def resolve_owned_document_version(doc_id: str, data: InternalVersionDecision,
                                    owner_id: str = Header(alias="X-Document-Owner-Id")):
     try:
         documents.resolve_workflow_version(doc_id, owner_id,
-                                           data.version, data.decision, user_id, data.note)
+                                           data.version, data.decision, user_id, data.note,
+                                           replay=data.replay)
     except VersionError as e:
         raise HTTPException(e.status, e.message)
 
@@ -637,6 +638,7 @@ def submit_drift_resolution(repository_id: str, report_id: str, finding_id: str,
 
 class DriftWorkflowDecision(BaseModel):
     document_id: str
+    owner_user_id: Optional[str] = None
     version: int
     decision: Literal["APPROVED", "REJECTED"]
     actor: str
@@ -646,11 +648,16 @@ class DriftWorkflowDecision(BaseModel):
 @app.put("/internal/drift/reports/{report_id}/findings/{finding_id}/workflow-decision",
          status_code=204, dependencies=[Depends(require_internal_service)])
 def apply_drift_workflow_decision(report_id: str, finding_id: str, update: DriftWorkflowDecision):
-    version = _call(documents.require_workflow_decision, update.document_id, update.version,
-                    update.decision, update.actor, update.note)
+    version = _call(documents.version, update.document_id, update.version)
     link = version.drift_finding or {}
     if link.get("report_id") != report_id or link.get("finding_id") != finding_id:
         raise HTTPException(409, "Workflow decision does not match the linked drift draft")
+    if update.owner_user_id is not None:
+        _call(documents.resolve_workflow_version, update.document_id, update.owner_user_id,
+              update.version, update.decision, update.actor, update.note, replay=True)
+    else:
+        _call(documents.require_workflow_decision, update.document_id, update.version,
+              update.decision, update.actor, update.note)
     try:
         drift_reports.apply_workflow_decision(report_id, finding_id, update.document_id, update.version,
                                             update.decision, update.actor, update.note)

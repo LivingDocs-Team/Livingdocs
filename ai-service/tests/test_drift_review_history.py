@@ -131,6 +131,25 @@ def test_failed_import_keeps_legacy_file_and_can_retry(tmp_path, monkeypatch):
     assert DriftReportStore(path=str(current_path)).get(old.id) == old
 
 
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_reupgrade_preserves_legacy_changes_and_fails_closed(tmp_path, corrupt):
+    legacy_path = tmp_path / "drift_reports.json"
+    current_path = tmp_path / "drift-reports.json"
+    old = DriftReportStore(path=str(legacy_path)).add(reviewed())
+    finding_id, suggested = suggestion_of(old)
+    DriftReportStore(path=str(current_path))
+    rollback = DriftReportStore(path=str(legacy_path))
+    rollback.resolve(old.id, finding_id, ResolutionUpdate(
+        status="resolved", actor="rollback-reviewer", accepted_update=suggested))
+    if corrupt:
+        legacy_path.write_text("{broken", encoding="utf-8")
+    before = [path.read_bytes() for path in (legacy_path, current_path)]
+    error = json.JSONDecodeError if corrupt else ValueError
+    with pytest.raises(error):
+        DriftReportStore(path=str(current_path))
+    assert [path.read_bytes() for path in (legacy_path, current_path)] == before
+
+
 def test_import_above_retention_limit_survives_next_write_and_restart(tmp_path):
     legacy_path = tmp_path / "drift_reports.json"
     current_path = tmp_path / "drift-reports.json"

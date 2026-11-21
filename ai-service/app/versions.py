@@ -184,9 +184,21 @@ class DocumentStore:
             "events": {k: [e.model_dump(mode="json") for e in es] for k, es in self._events.items()},
             "plans": {k: {str(n): p for n, p in ps.items()} for k, ps in self._plans.items()},
         }
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(tmp, self.path)  # atomic: a crash never leaves a half-written file
+        tmp = self.path.with_name(f"{self.path.name}.tmp")
+        try:
+            with tmp.open("w", encoding="utf-8") as output:
+                json.dump(data, output, ensure_ascii=False, indent=2)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(tmp, self.path)
+            if os.name == "posix":
+                directory = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
+        finally:
+            tmp.unlink(missing_ok=True)
 
     # ---------- queries (LD-195) ----------
 
@@ -783,19 +795,23 @@ class DocumentStore:
 
     def resolve_workflow_version(self, doc_id: str, owner_user_id: str, version_number: int,
                                  decision: str, actor_user_id: str,
-                                 note: Optional[str] = None) -> None:
+                                 note: Optional[str] = None, *, replay: bool = False) -> None:
         with self._lock:
             doc = self.get_owned(doc_id, owner_user_id)
             if decision not in ("APPROVED", "REJECTED"):
                 raise VersionError(400, "Unknown review decision")
-            if doc.pending_version is None:
-                if decision == "APPROVED" and doc.current_version != version_number:
+            if doc.pending_version is None or (replay and doc.pending_version != version_number):
+                if not replay and decision == "APPROVED" and doc.current_version != version_number:
                     raise VersionError(409, "The current document version has changed")
                 self.require_workflow_decision(doc_id, version_number, decision, actor_user_id, note)
+                # A visible rename from a previous attempt may not have been synced yet.
+                self._save()
                 return
             if doc.pending_version != version_number:
                 raise VersionError(409, "The pending document version has changed")
             version = self.version(doc_id, version_number)
+            if version.status != VersionStatus.proposed:
+                raise VersionError(409, "The document version is no longer pending")
             previous_document = doc.model_copy(deep=True)
             previous_version = version.model_copy(deep=True)
             if decision == "APPROVED":
