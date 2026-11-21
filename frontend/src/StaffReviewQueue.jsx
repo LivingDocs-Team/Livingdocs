@@ -449,6 +449,13 @@ export default function StaffReviewQueue({ userId }) {
                 {detail.evidence && (
                   <section>
                     <h5>Review evidence</h5>
+                    {detail.evidence.template_sections?.length > 0 && (
+                      <p className="documentation-hint">
+                        Template {detail.evidence.template_name || detail.evidence.template_id}
+                        {' · v'}{detail.evidence.template_version}
+                        {' · Sections: '}{detail.evidence.template_sections.join(', ')}
+                      </p>
+                    )}
                     {detail.evidence.source_snapshot && <p className="documentation-hint">
                       Source: {detail.evidence.source_snapshot.repository_full_name || 'Unknown repository'} / {detail.evidence.source_snapshot.branch || 'unknown branch'} @ {detail.evidence.source_snapshot.commit_sha?.slice(0, 12) || 'unknown commit'}
                     </p>}

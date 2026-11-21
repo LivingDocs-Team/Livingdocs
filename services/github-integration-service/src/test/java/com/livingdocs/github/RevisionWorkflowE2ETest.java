@@ -16,10 +16,12 @@ import com.livingdocs.github.client.GitHubBlob;
 import com.livingdocs.github.client.GitHubChangedFile;
 import com.livingdocs.github.client.GitHubClient;
 import com.livingdocs.github.client.GitHubRepo;
+import com.livingdocs.github.client.GitHubTree;
 import com.livingdocs.github.client.GitHubPullRequest;
 import com.livingdocs.github.entity.ConnectionStatus;
 import com.livingdocs.github.entity.GitHubConnection;
 import com.livingdocs.github.repository.GitHubConnectionRepository;
+import com.livingdocs.github.service.DocumentCommitBackService;
 import com.livingdocs.github.sync.AnalysisInput;
 import org.mockito.invocation.InvocationOnMock;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -92,6 +94,7 @@ class RevisionWorkflowE2ETest {
     @Autowired ObjectMapper json;
     @Autowired GitHubConnectionRepository connectionRepository;
     @Autowired DocumentWorkflowService workflows;
+    @Autowired DocumentCommitBackService commitBack;
     @Autowired DocumentWorkflowRepository workflowRows;
     @Autowired org.springframework.jdbc.core.JdbcTemplate revisionJdbc;
     @Autowired com.livingdocs.github.change.RevisionJobWorker revisionWorker;
@@ -110,11 +113,17 @@ class RevisionWorkflowE2ETest {
         String owner = Long.toString(java.util.concurrent.ThreadLocalRandom.current().nextLong(1, Long.MAX_VALUE));
         var repo = connectAndAddRepo(owner);
         var ai = aiService.mutate().defaultHeader(USER_HEADER, owner).build();
+        String templateName = "Drift template " + UUID.randomUUID();
+        var template = ai.post().uri("/templates").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("name", templateName, "instructions", "Describe the source.",
+                        "sections", List.of("Overview", "Classes")))
+                .retrieve().body(JsonNode.class);
+        String templateId = template.path("id").asText();
         String base = newSha(), head = newSha();
         var previousFile = Map.of("path", PATH, "language", "java",
                 "classes", List.of(Map.of("name", "Invoice", "lineno", 1)));
         var job = ai.post().uri("/generate").contentType(MediaType.APPLICATION_JSON)
-                .body(Map.of("scope", "file", "target", PATH, "output_language", "en",
+                .body(Map.of("scope", "file", "target", PATH, "output_language", "en", "template_id", templateId,
                         "files", List.of(previousFile), "source_snapshot",
                         Map.of("repository_id", repo.id(), "repository_full_name", "acme/docs",
                                 "branch", "main", "commit_sha", base)))
@@ -133,6 +142,12 @@ class RevisionWorkflowE2ETest {
         workflows.claim("staff", staff, workflow);
         workflows.staffReview("staff", staff, workflow, new StaffReviewRequest(StaffReviewResult.PASSED, null));
         workflows.decide("manager", manager, workflow, ManagerDecision.APPROVED, null, 1);
+        String baselineContent = ai.get().uri("/internal/documents/{id}/content", documentId)
+                .retrieve().body(String.class);
+        ai.put().uri("/templates/{id}", templateId).contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("name", templateName, "instructions", "Describe the new format.",
+                        "sections", List.of("Overview", "API Endpoints")))
+                .retrieve().toBodilessEntity();
 
         var report = ai.post().uri("/drift/analyze").contentType(MediaType.APPLICATION_JSON)
                 .body(Map.of("repository", "acme/docs", "document_ids", List.of(documentId),
@@ -149,7 +164,8 @@ class RevisionWorkflowE2ETest {
         String endpoint = "/api/repositories/{repo}/drift/reports/{report}/findings/{finding}/resolution";
         boolean dismiss = decision.equals("dismiss");
         var body = json.writeValueAsBytes(Map.of("status", dismiss ? "dismissed" : "acknowledged",
-                "decision", decision, "note", "Reviewed drift", "proposed", "## Receipt"));
+                "decision", decision, "note", "Reviewed drift",
+                "proposed", baselineContent.replace("`Invoice`", "`Receipt`")));
         var request = put(endpoint, repo.id(), reportId, findingId).header(USER_HEADER, owner)
                 .contentType(MediaType.APPLICATION_JSON).content(body);
         if (!dismiss) {
@@ -162,6 +178,14 @@ class RevisionWorkflowE2ETest {
         when(gitHubClient.getPullRequest(TOKEN, "acme", "docs", 7)).thenReturn(new GitHubPullRequest(
                 7, "Rename Invoice", null, "open", null, null, new GitHubPullRequest.Ref("feature", head),
                 new GitHubPullRequest.Ref("main", base), null, null, null, null));
+        if (decision.equals("edit")) {
+            var invalid = Map.of("status", "acknowledged", "decision", "edit", "proposed",
+                    "# " + PATH + "\n\n## Overview\n\nMissing Classes.");
+            mvc.perform(put(endpoint, repo.id(), reportId, findingId).header(USER_HEADER, owner)
+                    .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsBytes(invalid)))
+                    .andExpect(status().isConflict());
+            assertThat(workflowRows.findById(workflow).orElseThrow().getSubmittedDocumentVersion()).isEqualTo(1);
+        }
         var result = mvc.perform(request).andExpect(status().isOk());
         mvc.perform(request).andExpect(status().isOk()).andExpect(jsonPath("$.resolution.history.length()").value(1));
         if (dismiss) {
@@ -174,6 +198,15 @@ class RevisionWorkflowE2ETest {
         assertThat(draft.path("source_snapshot").path("commit_sha").asText()).isEqualTo(head);
         assertThat(draft.path("drift_finding").path("evidence").isEmpty()).isFalse();
         workflows.claim("staff", staff, workflow);
+        var reviewedDraft = workflows.reviewComparison("staff", staff, workflow).path("pending_version");
+        assertThat(reviewedDraft.path("evidence_report").path("template_version").asInt()).isEqualTo(1);
+        assertThat(reviewedDraft.path("evidence_report").path("template_sections"))
+                .extracting(JsonNode::asText).containsExactly("Overview", "Classes");
+        assertThat(reviewedDraft.path("content").asText()).startsWith("# " + PATH + "\n")
+                .contains("## Overview", "## Classes", draft.path("drift_finding").path("proposed").asText());
+        if (decision.equals("edit")) {
+            assertThat(reviewedDraft.path("content").asText()).contains("`Receipt`");
+        }
         workflows.staffReview("staff", staff, workflow, new StaffReviewRequest(StaffReviewResult.PASSED, null));
         assertThatThrownBy(() -> workflows.decide("manager", manager, workflow, ManagerDecision.APPROVED, null, 1))
                 .isInstanceOf(com.livingdocs.github.exception.ApiException.class);
@@ -389,9 +422,51 @@ class RevisionWorkflowE2ETest {
         String visible = ai.get().uri(docUrl + "/content").retrieve().body(String.class);
         if (reject) {
             assertThat(visible).doesNotContain("Calculates invoice totals with tax.");
+            assertThatThrownBy(() -> commitBack.commit(manager, managerPermissions, id, 2))
+                    .hasMessageContaining("not approved");
         } else {
             assertThat(visible).contains("Calculates invoice totals with tax.");
         }
+        if (scenario == Scenario.APPROVE) {
+            assertCommitBackAudit(manager, managerPermissions, id, repo, documentId, sha, visible, owner);
+        }
+    }
+
+    private void assertCommitBackAudit(String manager, Set<String> permissions, UUID workflowId,
+            Repo repo, String documentId, String sourceSha, String content, String owner) throws Exception {
+        saveConnection(manager);
+        String publishedSha = newSha();
+        String treeSha = newSha();
+        String path = ".livingdocs/" + documentId + "-v2.md";
+        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+        when(gitHubClient.getPublicationBranch(TOKEN, "acme", "docs")).thenReturn(
+                new GitHubClient.PublicationBranch(repo.githubId(), "acme/docs", "ref", "main", sourceSha, treeSha));
+        when(gitHubClient.getTree(TOKEN, "acme", "docs", treeSha))
+                .thenReturn(new GitHubTree(treeSha, false, List.of()));
+        String message = "Publish LivingDocs document " + documentId + " v2";
+        when(gitHubClient.commitFileOnBranch(TOKEN, "ref", sourceSha, path, bytes, message))
+                .thenReturn(publishedSha);
+        assertThat(commitBack.commit(manager, permissions, workflowId, 2).observedHeadSha()).isEqualTo(publishedSha);
+
+        var hash = java.security.MessageDigest.getInstance("SHA-1");
+        hash.update(("blob " + bytes.length + "\0").getBytes(StandardCharsets.US_ASCII));
+        String blob = java.util.HexFormat.of().formatHex(hash.digest(bytes));
+        when(gitHubClient.getPublicationBranch(TOKEN, "acme", "docs")).thenReturn(
+                new GitHubClient.PublicationBranch(repo.githubId(), "acme/docs", "ref", "main", publishedSha, treeSha));
+        when(gitHubClient.getTree(TOKEN, "acme", "docs", treeSha)).thenReturn(new GitHubTree(treeSha, false,
+                List.of(new GitHubTree.Entry(path, "100644", "blob", blob, (long) bytes.length))));
+        assertThat(commitBack.commit(manager, permissions, workflowId, 2).alreadyPresent()).isTrue();
+        org.mockito.Mockito.verify(gitHubClient).commitFileOnBranch(TOKEN, "ref", sourceSha, path, bytes, message);
+        assertThat(workflows.history(owner, Set.of("DOCUMENT_VIEW"), workflowId))
+                .filteredOn(entry -> entry.action().equals("COMMIT_BACK_CONFIRMED"))
+                .singleElement().satisfies(entry -> {
+                    assertThat(entry.documentId()).isEqualTo(documentId);
+                    assertThat(entry.documentVersion()).isEqualTo(2);
+                    assertThat(entry.actorUserId()).isEqualTo(manager);
+                    assertThat(entry.actorRole()).isEqualTo("MANAGER");
+                    assertThat(entry.createdAt()).isNotNull();
+                    assertThat(entry.comment()).contains(sourceSha, publishedSha, "Published approved version");
+                });
     }
 
     enum Scenario {
@@ -522,7 +597,7 @@ class RevisionWorkflowE2ETest {
     private record Repo(String id, long githubId) {
     }
 
-    private Repo connectAndAddRepo(String user) throws Exception {
+    private void saveConnection(String user) {
         GitHubConnection connection = new GitHubConnection();
         connection.setUserId(user);
         connection.setGithubUserId(9200L);
@@ -531,7 +606,10 @@ class RevisionWorkflowE2ETest {
         connection.setAccessTokenExpiresAt(Instant.now().plus(Duration.ofHours(8)));
         connection.setStatus(ConnectionStatus.ACTIVE);
         connectionRepository.save(connection);
+    }
 
+    private Repo connectAndAddRepo(String user) throws Exception {
+        saveConnection(user);
         long githubId = NEXT_GITHUB_REPO_ID.incrementAndGet();
         GitHubRepo docs = new GitHubRepo(githubId, "acme/docs", false, "main", "https://github.com/acme/docs");
         when(gitHubClient.listUserRepositories(TOKEN)).thenReturn(List.of(docs));

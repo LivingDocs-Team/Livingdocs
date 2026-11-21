@@ -12,6 +12,7 @@ import com.livingdocs.github.entity.RepositoryStatus;
 import com.livingdocs.github.exception.ApiException;
 import com.livingdocs.github.exception.GitHubApiException;
 import com.livingdocs.github.repository.ConnectedRepositoryRepository;
+import com.livingdocs.github.repository.DocumentWorkflowAuditRepository;
 import com.livingdocs.github.repository.DocumentWorkflowRepository;
 import com.livingdocs.github.service.DocumentCommitBackService;
 import com.livingdocs.github.service.DocumentationGenerationService;
@@ -55,7 +56,8 @@ class DocumentCommitBackServiceTest {
     private final GitHubConnectionService connections = mock(GitHubConnectionService.class);
     private final GitHubClient github = mock(GitHubClient.class);
     private final DocumentCommitBackService service =
-            new DocumentCommitBackService(workflows, repositories, documents, connections, github);
+            new DocumentCommitBackService(workflows, repositories, documents, connections, github,
+                    mock(DocumentWorkflowAuditRepository.class));
 
     @BeforeEach
     void approvedRevision() {
