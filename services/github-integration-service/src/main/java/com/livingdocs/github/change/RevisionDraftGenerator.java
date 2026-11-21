@@ -19,7 +19,10 @@ import org.springframework.web.client.RestClientException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 @Component
 public class RevisionDraftGenerator {
@@ -61,15 +64,25 @@ public class RevisionDraftGenerator {
         if (candidates.isEmpty()) {
             return;
         }
-        var revision = source.draftSource(repo, request);
-        if (revision.files().isEmpty()) {
+        var revision = source.draftSource(repo, request, change.getId());
+        if (revision.operations().isEmpty()) {
             return;
         }
-        JsonNode analysis = analyzer.post().uri("/api/v1/analyze-repo")
-                .body(new AnalysisInput("repository", repo.getFullName(), revision.files()))
-                .retrieve().body(JsonNode.class);
-        if (analysis == null || !analysis.path("files").isArray() || analysis.path("files").isEmpty()) {
-            throw new SourceChangeException("ANALYZER_UNAVAILABLE", "Missing source analysis for revision draft.");
+        var analyzedFiles = JsonNodeFactory.instance.arrayNode();
+        if (!revision.files().isEmpty()) {
+            JsonNode analysis = analyzer.post().uri("/api/v1/analyze-repo")
+                    .body(new AnalysisInput("repository", repo.getFullName(), revision.files()))
+                    .retrieve().body(JsonNode.class);
+            if (analysis == null || !analysis.path("files").isArray()) {
+                throw new SourceChangeException("ANALYZER_UNAVAILABLE", "Missing source analysis for revision draft.");
+            }
+            var paths = StreamSupport.stream(analysis.path("files").spliterator(), false)
+                    .map(file -> file.path("path").asText()).collect(Collectors.toSet());
+            var expected = revision.files().stream().map(AnalysisInput.FileInput::path).collect(Collectors.toSet());
+            if (!paths.equals(expected) || analysis.path("files").size() != expected.size()) {
+                throw new SourceChangeException("ANALYZER_UNAVAILABLE", "Incomplete source analysis for revision draft.");
+            }
+            analysis.path("files").forEach(analyzedFiles::add);
         }
 
         for (JsonNode candidate : candidates) {
@@ -83,7 +96,32 @@ public class RevisionDraftGenerator {
             body.put("trigger", request.trigger().name());
             body.put("pull_request_number", request.pullRequestNumber());
             body.put("base_version", candidate.path("current_version").asInt());
-            body.set("files", analysis.path("files"));
+            var paths = new HashSet<String>();
+            var operations = body.putArray("file_changes");
+            for (var file : revision.operations()) {
+                if (file.documentId() != null && (!id.equals(file.documentId())
+                        || !Objects.equals(file.documentVersion(), candidate.path("current_version").asInt()))) {
+                    continue;
+                }
+                var entry = operations.addObject().put("path", file.path()).put("action", file.action());
+                entry.put("previous_path", file.previousPath());
+                entry.put("blob_sha", file.blobSha());
+                if (file.blobSha() != null) {
+                    paths.add(file.path());
+                }
+            }
+            if (operations.isEmpty()) {
+                continue;
+            }
+            if (operations.size() > 50) {
+                throw new SourceChangeException("DRAFT_FILE_LIMIT_EXCEEDED", "Too many source operations for one draft.");
+            }
+            var files = body.putArray("files");
+            analyzedFiles.forEach(file -> {
+                if (paths.contains(file.path("path").asText())) {
+                    files.add(file);
+                }
+            });
             ObjectNode snapshot = body.putObject("source_snapshot");
             snapshot.put("repository_id", repo.getId().toString());
             snapshot.put("repository_full_name", repo.getFullName());
