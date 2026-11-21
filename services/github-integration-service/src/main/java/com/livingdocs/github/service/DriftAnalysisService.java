@@ -6,6 +6,7 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -14,13 +15,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -87,8 +87,7 @@ public class DriftAnalysisService {
     private final RestClient analyzerClient;
     private final RestClient aiServiceClient;
     private final JsonNodeFactory json = JsonNodeFactory.instance;
-    /** Báo cáo -> người tạo (giữ trong bộ nhớ như báo cáo của ai-service). */
-    private final ConcurrentMap<String, ReportOwner> reportOwners = new ConcurrentHashMap<>();
+    private final JdbcTemplate jdbc;
 
     private record ReportOwner(String user, UUID repository) { }
 
@@ -97,12 +96,13 @@ public class DriftAnalysisService {
             GitHubConnectionService connectionService,
             GitHubClient gitHubClient,
             @Qualifier("codeAnalyzerRestClient") RestClient analyzerClient,
-            @Qualifier("aiServiceRestClient") RestClient aiServiceClient) {
+            @Qualifier("aiServiceRestClient") RestClient aiServiceClient, JdbcTemplate jdbc) {
         this.repositorySyncService = repositorySyncService;
         this.connectionService = connectionService;
         this.gitHubClient = gitHubClient;
         this.analyzerClient = analyzerClient;
         this.aiServiceClient = aiServiceClient;
+        this.jdbc = jdbc;
     }
 
     // ------------------------------------------------------------------ analyze one Pull Request
@@ -148,7 +148,8 @@ public class DriftAnalysisService {
             report.path("warnings").forEach(warnings::add);
         }
         report.set("warnings", warnings);
-        reportOwners.put(report.path("id").asText(), new ReportOwner(userId, repositoryId));
+        jdbc.update("INSERT INTO drift_report_owners (report_id, repository_id, owner_user_id) VALUES (?, ?, ?)",
+                report.path("id").asText(), repositoryId, userId);
         return report;
     }
 
@@ -167,9 +168,11 @@ public class DriftAnalysisService {
             throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid response.");
         }
         ArrayNode own = json.arrayNode();
-        var expectedOwner = new ReportOwner(userId, repositoryId);
+        var ownIds = new HashSet<>(jdbc.queryForList("""
+                SELECT report_id FROM drift_report_owners WHERE repository_id = ? AND owner_user_id = ?
+                """, String.class, repositoryId, userId));
         for (JsonNode row : rows) {
-            if (Objects.equals(reportOwners.get(row.path("id").asText()), expectedOwner)) {
+            if (ownIds.contains(row.path("id").asText())) {
                 own.add(row);
             }
         }
@@ -291,10 +294,11 @@ public class DriftAnalysisService {
     private String requireReport(String userId, UUID repositoryId, String reportId) {
         String repository = repositoryId == null ? null
                 : repositorySyncService.requireOwned(userId, repositoryId).getFullName();
-        ReportOwner owner = reportOwners.get(reportId);
-        if (owner == null) {
-            throw ApiException.notFound("Drift report not found or the service was restarted.");
-        }
+        ReportOwner owner = jdbc.query("""
+                SELECT owner_user_id, repository_id FROM drift_report_owners WHERE report_id = ?
+                """, (row, index) -> new ReportOwner(row.getString("owner_user_id"),
+                row.getObject("repository_id", UUID.class)), reportId).stream().findFirst()
+                .orElseThrow(() -> ApiException.notFound("Drift report not found."));
         if (!Objects.equals(owner.user(), userId)) {
             throw ApiException.forbidden("This drift report belongs to another user.");
         }
