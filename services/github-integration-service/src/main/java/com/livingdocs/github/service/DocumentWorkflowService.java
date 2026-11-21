@@ -482,6 +482,20 @@ public class DocumentWorkflowService {
             throw ApiException.badRequest("A comment is required when requesting changes.");
         }
         DocumentWorkflowStatus previous = workflow.getStatus();
+        EditDocumentRequest edit = request.edit();
+        if (edit != null) {
+            String reason = normalizeComment(edit.note());
+            if (reason == null || edit.expectedVersion() == null) {
+                throw ApiException.badRequest("A version and reason are required for a Staff edit.");
+            }
+            if (!edit.expectedVersion().equals(workflow.getSubmittedDocumentVersion())) {
+                throw conflict("The submitted document version changed. Reload before editing.");
+            }
+            int version = documents.editStaffDraft(actor, workflow.getOwnerUserId(), workflow.getDocumentId(),
+                    edit.expectedVersion(), edit.content(), reason);
+            workflow.updateReviewedVersion(version);
+            record(workflow, actor, "STAFF_DRAFT_EDITED", previous, previous, reason, null, null, "STAFF");
+        }
         workflow.review(result, normalizeComment(request.comment()));
         workflows.saveAndFlush(workflow);
         record(workflow, actor, result.name(), previous, workflow.getStatus(), request.comment(),

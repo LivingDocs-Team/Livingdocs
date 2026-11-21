@@ -42,7 +42,12 @@ public final class WorkflowDtos {
                                         String comment, Instant createdAt,
                                         List<ReviewCommentResponse> relatedComments) { }
     public record StaffReviewRequest(@NotNull StaffReviewResult result,
-                                     @Size(max = 2000) String comment) { }
+                                     @Size(max = 2000) String comment,
+                                     @jakarta.validation.Valid EditDocumentRequest edit) {
+        public StaffReviewRequest(StaffReviewResult result, String comment) {
+            this(result, comment, null);
+        }
+    }
     public record ManagerDecisionRequest(@Size(max = 2000) String comment, @Positive Integer documentVersion) { }
     public record SubmitWorkflowRequest(@Positive Integer expectedVersion) { }
     public record ReassignRequest(@NotNull @Positive Long targetStaffUserId,

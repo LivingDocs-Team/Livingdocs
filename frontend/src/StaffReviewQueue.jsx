@@ -79,6 +79,7 @@ export default function StaffReviewQueue({ userId }) {
   const [reviewOutcome, setReviewOutcome] = useState(null);
   const [reviewResult, setReviewResult] = useState('');
   const [reviewComment, setReviewComment] = useState('');
+  const [editedContent, setEditedContent] = useState(null);
   const [commentDraft, setCommentDraft] = useState('');
   const [selectedPassage, setSelectedPassage] = useState(null);
   const contentRef = useRef(null);
@@ -174,6 +175,7 @@ export default function StaffReviewQueue({ userId }) {
         ? errorMessage(contentResult.reason, 'view document content') : '', comparison, evidence, comparisonError, evidenceError });
       setReviewResult('');
       setReviewComment(workflow?.staffComment || '');
+      setEditedContent(null);
       setCommentDraft('');
       setSelectedPassage(null);
       }).catch((error) => {
@@ -265,12 +267,16 @@ export default function StaffReviewQueue({ userId }) {
   function submitReview(event) {
     event.preventDefault();
     if (!['PASSED', 'CHANGES_REQUESTED'].includes(reviewResult)) return;
-    if (reviewResult === 'CHANGES_REQUESTED' && !reviewComment.trim()) {
-      setActionMessage({ type: 'error', text: 'A comment is required when requesting changes.' });
+    const comment = reviewComment.trim();
+    const edit = editedContent !== null && editedContent !== detail.content?.content
+      ? { content: editedContent, expectedVersion: selectedWorkflow.submittedDocumentVersion, note: comment }
+      : undefined;
+    if ((reviewResult === 'CHANGES_REQUESTED' || edit) && !comment) {
+      setActionMessage({ type: 'error', text: 'Add a comment to explain the edit or requested changes.' });
       return;
     }
     const resultingStatus = reviewResult === 'PASSED' ? 'PENDING_MANAGER_APPROVAL' : 'CHANGES_REQUESTED';
-    runAction('review', 'staff-review', resultingStatus, { result: reviewResult, comment: reviewComment.trim() || undefined });
+    runAction('review', 'staff-review', resultingStatus, { result: reviewResult, comment: comment || undefined, edit });
   }
 
   return (
@@ -490,9 +496,19 @@ export default function StaffReviewQueue({ userId }) {
                         <option value="CHANGES_REQUESTED">Request changes</option>
                       </select>
                       <label htmlFor="staff-review-comment">Review comment</label>
-                      <textarea id="staff-review-comment" value={reviewComment} maxLength={2000}
+                      <textarea id="staff-review-comment" value={reviewComment} maxLength={editedContent === null ? 2000 : 1000}
                         required={reviewResult === 'CHANGES_REQUESTED'}
                         onChange={(event) => setReviewComment(event.target.value)} />
+                      {detail.content?.content && (editedContent === null ? (
+                        <button type="button" onClick={() => setEditedContent(detail.content.content)}>Edit draft</button>
+                      ) : (
+                        <>
+                          <label htmlFor="staff-draft-content">Draft content</label>
+                          <textarea id="staff-draft-content" value={editedContent} required maxLength={2000000}
+                            onChange={(event) => setEditedContent(event.target.value)} />
+                          <button type="button" onClick={() => setEditedContent(null)}>Discard edits</button>
+                        </>
+                      ))}
                       <p className="documentation-hint">A comment is required when requesting changes. Maximum 2,000 characters.</p>
                       <button type="submit" className="documentation-primary-button" disabled={Boolean(action) || !reviewResult}>
                         {action === 'review' ? 'Submitting review...' : 'Submit review'}
