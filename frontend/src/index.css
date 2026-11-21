@@ -1,13 +1,41 @@
-
+/* Design tokens: dark indigo workspace. App.css and theme.css read every color from these. */
 :root {
-  font-family: Arial, Helvetica, sans-serif;
-  color: #172033;
-  background: #f3f6fb;
+  --bg: #070b14;
+  --bg-2: #0a101c;
+  --surface: #0e1626;
+  --surface-2: #131d31;
+  --line: #1d2a44;
+  --line-2: #2b3b5e;
+  --text: #e9eef9;
+  --text-2: #b6c1dc;
+  --muted: #8794b1;
+  --faint: #5d6a87;
+  --accent: #5b74ff;
+  --accent-2: #4a62f5;
+  --accent-text: #93a4ff;
+  --accent-soft: rgba(91, 116, 255, 0.14);
+  --cyan: #62d6ea;
+  --ok: #4ade9b;
+  --ok-soft: rgba(61, 220, 151, 0.12);
+  --bad: #ff8a96;
+  --bad-soft: rgba(255, 111, 125, 0.12);
+  --warn: #f3c15a;
+  --warn-soft: rgba(243, 185, 77, 0.12);
+  /* Everything on screen is shown 1.5x larger (like a 150% browser zoom). Change it here only:
+     theme.css applies it as `zoom`; scripts/breakpoints in the CSS were multiplied by it. */
+  --ui-scale: 1.5;
+  --github: #1a2338;
+  --github-hover: #232f4a;
+  --font: Inter, "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", "Cascadia Mono", ui-monospace, Consolas, monospace;
+  font-family: var(--font);
+  color: var(--text);
+  background: var(--bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 * {
@@ -23,8 +51,8 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  font-family: Arial, Helvetica, sans-serif;
-  background: #f3f6fb;
+  font-family: var(--font);
+  background: var(--bg);
 }
 
 #root {
@@ -57,8 +85,9 @@ button {
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
-select:focus-visible {
-  outline: 3px solid #93c5fd;
+select:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent-text);
   outline-offset: 2px;
 }
 

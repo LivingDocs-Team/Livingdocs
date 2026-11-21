@@ -3,6 +3,7 @@ package com.livingdocs.github;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -54,6 +55,134 @@ class DocumentWorkflowServiceTest {
         audit = mock(DocumentWorkflowAuditRepository.class);
         documents = mock(DocumentationGenerationService.class);
         service = new DocumentWorkflowService(workflows, audit, documents);
+    }
+
+    @Test
+    void independentCommentsKeepReviewOpenAndPreserveSubmittedVersion() {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+        workflow.claim(REVIEWER);
+        when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
+        when(audit.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var result = service.addComment(REVIEWER, Set.of("ROLE_STAFF", "DOCUMENT_REVIEW"), ID,
+                new com.livingdocs.github.dto.WorkflowDtos.ReviewCommentRequest(" Clarify setup ", 1));
+
+        assertThat(result.comment()).isEqualTo("Clarify setup");
+        assertThat(result.documentVersion()).isEqualTo(1);
+        assertThat(workflow.getStatus()).isEqualTo(DocumentWorkflowStatus.STAFF_REVIEWING);
+        assertThat(workflow.getStaffReviewResult()).isNull();
+        verify(workflows, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void sectionFeedbackUsesExactOffsetsAndSurvivesNewDocumentVersions() {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+        when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+        when(documents.getDocumentContent(REVIEWER, "doc-1", 1)).thenReturn("Setup\nSetup");
+        when(audit.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        var section = new com.livingdocs.github.dto.WorkflowDtos.SectionFeedback(6, 11, "Setup");
+        var response = service.addComment(REVIEWER, Set.of("ROLE_STAFF", "DOCUMENT_REVIEW"), ID,
+                new com.livingdocs.github.dto.WorkflowDtos.ReviewCommentRequest("Explain this section", 1, section));
+        assertThat(response.section()).isEqualTo(section);
+        var saved = org.mockito.ArgumentCaptor.forClass(DocumentWorkflowAudit.class);
+        verify(audit).saveAndFlush(saved.capture());
+        when(audit.findByWorkflowIdOrderByCreatedAtAsc(ID)).thenReturn(List.of(saved.getValue()));
+        workflow.submit(2);
+        var comments = service.comments(OWNER, Set.of("DOCUMENT_VIEW"), ID);
+        assertThat(comments).singleElement().satisfies(comment -> {
+            assertThat(comment.documentVersion()).isEqualTo(1);
+            assertThat(comment.section()).isEqualTo(section);
+        });
+    }
+
+    @Test
+    void sectionFeedbackRejectsInvalidRangesAndQuotes() {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+        when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
+        when(documents.getDocumentContent(REVIEWER, "doc-1", 1)).thenReturn("Setup");
+        for (var section : List.of(
+                new com.livingdocs.github.dto.WorkflowDtos.SectionFeedback(0, 10, "Setup"),
+                new com.livingdocs.github.dto.WorkflowDtos.SectionFeedback(3, 2, "up"),
+                new com.livingdocs.github.dto.WorkflowDtos.SectionFeedback(0, 5, "Other"),
+                new com.livingdocs.github.dto.WorkflowDtos.SectionFeedback(-1, 5, "Setup"))) {
+            assertThatThrownBy(() -> service.addComment(REVIEWER, Set.of("ROLE_STAFF", "DOCUMENT_REVIEW"), ID,
+                    new com.livingdocs.github.dto.WorkflowDtos.ReviewCommentRequest("Feedback", 1, section)))
+                    .isInstanceOf(ApiException.class);
+        }
+        verify(audit, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void independentCommentsRejectOtherReviewersAndStaleVersions() {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+        workflow.claim(REVIEWER);
+        when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
+        var request = new com.livingdocs.github.dto.WorkflowDtos.ReviewCommentRequest("Clarify setup", 1);
+        assertThatThrownBy(() -> service.addComment("99",
+                Set.of("ROLE_STAFF", "DOCUMENT_REVIEW"), ID, request))
+                .isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> service.addComment(REVIEWER,
+                Set.of("ROLE_STAFF", "DOCUMENT_REVIEW"), ID,
+                new com.livingdocs.github.dto.WorkflowDtos.ReviewCommentRequest("Stale", 2)))
+                .isInstanceOf(ApiException.class);
+        verify(audit, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void commentHistoryRemainsReadableToOwnerAfterResubmission() {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+        DocumentWorkflowAudit entry = new DocumentWorkflowAudit(ID, REVIEWER,
+                "REVIEW_COMMENT", "STAFF_REVIEWING", "STAFF_REVIEWING", "Clarify setup");
+        entry.setDocumentVersion(1);
+        workflow.submit(2);
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+        when(audit.findByWorkflowIdOrderByCreatedAtAsc(ID)).thenReturn(List.of(entry));
+        assertThat(service.comments(OWNER, Set.of("DOCUMENT_VIEW"), ID))
+                .singleElement().satisfies(comment -> assertThat(comment.documentVersion()).isEqualTo(1));
+        assertThatThrownBy(() -> service.comments("99", Set.of("DOCUMENT_VIEW"), ID))
+                .isInstanceOf(ApiException.class);
+    }
+
+    @Test
+    void changeRequestsKeepVersionedFeedbackAcrossReviewRoundsAndLegacyHistory() {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+        when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
+        var firstComment = new DocumentWorkflowAudit(ID, REVIEWER, "REVIEW_COMMENT",
+                "STAFF_REVIEWING", "STAFF_REVIEWING", "Clarify setup");
+        firstComment.setDocumentVersion(1);
+        var legacy = new DocumentWorkflowAudit(ID, REVIEWER, "CHANGES_REQUESTED",
+                "STAFF_REVIEWING", "CHANGES_REQUESTED", "Legacy feedback");
+
+        service.staffReview(REVIEWER, Set.of("ROLE_STAFF", "DOCUMENT_REVIEW"), ID,
+                new StaffReviewRequest(StaffReviewResult.CHANGES_REQUESTED, "Fix setup"));
+        var captor = org.mockito.ArgumentCaptor.forClass(DocumentWorkflowAudit.class);
+        verify(audit).save(captor.capture());
+        var firstRequest = captor.getValue();
+        assertThat(firstRequest.getDocumentVersion()).isEqualTo(1);
+        assertThat(firstRequest.getActorRole()).isEqualTo("STAFF");
+
+        workflow.submit(2);
+        workflow.claim(REVIEWER);
+        var secondComment = new DocumentWorkflowAudit(ID, REVIEWER, "REVIEW_COMMENT",
+                "STAFF_REVIEWING", "STAFF_REVIEWING", "Add an example");
+        secondComment.setDocumentVersion(2);
+        var secondRequest = new DocumentWorkflowAudit(ID, REVIEWER, "CHANGES_REQUESTED",
+                "STAFF_REVIEWING", "CHANGES_REQUESTED", "Fix example");
+        secondRequest.setDocumentVersion(2);
+        when(audit.findByWorkflowIdOrderByCreatedAtAsc(ID))
+                .thenReturn(List.of(legacy, firstComment, firstRequest, secondComment, secondRequest));
+        var requests = service.changeRequests(OWNER, Set.of("DOCUMENT_VIEW"), ID);
+        assertThat(requests).hasSize(3);
+        assertThat(requests.get(0).documentVersion()).isNull();
+        assertThat(requests.get(0).relatedComments()).isEmpty();
+        assertThat(requests.get(1).relatedComments()).singleElement()
+                .satisfies(comment -> assertThat(comment.comment()).isEqualTo("Clarify setup"));
+        assertThat(requests.get(2).relatedComments()).singleElement()
+                .satisfies(comment -> assertThat(comment.comment()).isEqualTo("Add an example"));
+        assertThatThrownBy(() -> service.changeRequests("99", Set.of("DOCUMENT_VIEW"), ID))
+                .isInstanceOf(ApiException.class);
     }
 
     @Test
@@ -369,6 +498,43 @@ class DocumentWorkflowServiceTest {
     }
 
     @Test
+    void revisionRejectsStaleEditorAndSubmissionVersions() throws Exception {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+        workflow.review(StaffReviewResult.CHANGES_REQUESTED, "Clarify setup");
+        when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
+        when(documents.getDocument(OWNER, "doc-1")).thenReturn(new ObjectMapper().readTree(
+                "{\"owner_user_id\":\"73\",\"current_version\":1,\"pending_version\":3}"));
+        assertThatThrownBy(() -> service.editAfterChanges(OWNER, Set.of("DOCUMENT_UPDATE"), ID,
+                new com.livingdocs.github.dto.WorkflowDtos.EditDocumentRequest("Updated text", "Fix setup", 2)))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(409));
+        verify(documents, never()).editOwnedDocument(any(), any(), anyInt(), any(), any());
+        assertThatThrownBy(() -> service.submit(OWNER, Set.of("DOCUMENT_SUBMIT"), ID, 2))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(409));
+        assertThat(workflow.getStatus()).isEqualTo(DocumentWorkflowStatus.CHANGES_REQUESTED);
+        var submitted = service.submit(OWNER, Set.of("DOCUMENT_SUBMIT"), ID, 3);
+        assertThat(submitted.id()).isEqualTo(ID);
+        assertThat(submitted.submittedDocumentVersion()).isEqualTo(3);
+        assertThat(submitted.status()).isEqualTo(DocumentWorkflowStatus.PENDING_STAFF_REVIEW);
+    }
+
+    @Test
+    void revisionRequiresOwnerPermissionAndChangesRequestedState() {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+        when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
+        var request = new com.livingdocs.github.dto.WorkflowDtos.EditDocumentRequest("Updated text", null, 1);
+        assertThatThrownBy(() -> service.editAfterChanges(OWNER, Set.of("DOCUMENT_UPDATE"), ID, request))
+                .isInstanceOf(ApiException.class);
+        workflow.review(StaffReviewResult.CHANGES_REQUESTED, "Clarify setup");
+        assertThatThrownBy(() -> service.editAfterChanges("99", Set.of("DOCUMENT_UPDATE"), ID, request))
+                .isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> service.editAfterChanges(OWNER, Set.of(), ID, request))
+                .isInstanceOf(ApiException.class);
+        verify(documents, never()).editOwnedDocument(any(), any(), anyInt(), any(), any());
+    }
+
+    @Test
     void staffCanRequestChangesOwnerCanEditAndResubmitNewVersion() throws Exception {
         DocumentWorkflow workflow = pendingStaffWorkflow();
         when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
@@ -523,6 +689,63 @@ class DocumentWorkflowServiceTest {
 
         assertThat(result).isEqualTo(comparison);
         verify(documents).getDocumentReviewComparison(REVIEWER, "doc-1");
+    }
+
+    @Test
+    void ownerCanListAndCompareAnyTwoVersionsOfTheirDocument() throws Exception {
+        // LD-183 / LD-184: the owner of a draft compares version 1 with version 3.
+        DocumentWorkflow workflow = new DocumentWorkflow("doc-1", "Document", OWNER);
+        ReflectionTestUtils.setField(workflow, "id", ID);
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+        when(documents.getDocument(OWNER, "doc-1")).thenReturn(new ObjectMapper().readTree(
+                "{\"id\":\"doc-1\",\"owner_user_id\":\"73\",\"current_version\":0,\"pending_version\":3}"));
+        var versions = new ObjectMapper().readTree("[{\"number\":3},{\"number\":2},{\"number\":1}]");
+        var diff = new ObjectMapper().readTree(
+                "{\"from_version\":{\"number\":1},\"to_version\":{\"number\":3},\"rows\":[]}");
+        when(documents.getDocumentVersions(OWNER, "doc-1")).thenReturn(versions);
+        when(documents.compareDocumentVersions(OWNER, "doc-1", 1, 3)).thenReturn(diff);
+        Set<String> owner = Set.of("ROLE_DEVELOPER", "DOCUMENT_VIEW");
+
+        assertThat(service.versions(OWNER, owner, ID)).isEqualTo(versions);
+        assertThat(service.compareVersions(OWNER, owner, ID, 1, 3)).isEqualTo(diff);
+        verify(documents).compareDocumentVersions(OWNER, "doc-1", 1, 3);
+    }
+
+    @Test
+    void comparisonDefaultsToCurrentAgainstPreviousAndValidatesTheChoice() throws Exception {
+        DocumentWorkflow workflow = new DocumentWorkflow("doc-1", "Document", OWNER);
+        ReflectionTestUtils.setField(workflow, "id", ID);
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+        when(documents.getDocument(OWNER, "doc-1")).thenReturn(new ObjectMapper().readTree(
+                "{\"id\":\"doc-1\",\"owner_user_id\":\"73\",\"current_version\":2}"));
+        var diff = new ObjectMapper().readTree("{\"rows\":[]}");
+        when(documents.compareDocumentVersions(OWNER, "doc-1", null, null)).thenReturn(diff);
+        Set<String> owner = Set.of("ROLE_DEVELOPER", "DOCUMENT_VIEW");
+
+        assertThat(service.compareVersions(OWNER, owner, ID, null, null)).isEqualTo(diff);
+        assertThatThrownBy(() -> service.compareVersions(OWNER, owner, ID, 2, 2))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> {
+                    assertThat(((ApiException) error).getStatus().value()).isEqualTo(400);
+                    assertThat(((ApiException) error).getCode()).isEqualTo("DOCUMENT_COMPARISON_INVALID");
+                });
+        assertThatThrownBy(() -> service.compareVersions(OWNER, owner, ID, 0, 2))
+                .isInstanceOf(ApiException.class);
+        verify(documents, never()).compareDocumentVersions(OWNER, "doc-1", 2, 2);
+    }
+
+    @Test
+    void userWhoCannotReadTheWorkflowCannotCompareItsVersions() {
+        DocumentWorkflow workflow = new DocumentWorkflow("doc-1", "Document", OWNER);
+        ReflectionTestUtils.setField(workflow, "id", ID);
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+
+        assertThatThrownBy(() -> service.compareVersions("99", Set.of("ROLE_DEVELOPER", "DOCUMENT_VIEW"), ID, 1, 2))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(404));
+        assertThatThrownBy(() -> service.versions("99", Set.of("ROLE_DEVELOPER", "DOCUMENT_VIEW"), ID))
+                .isInstanceOf(ApiException.class);
+        verify(documents, never()).getDocument(any(), any());
     }
 
     @Test

@@ -74,4 +74,22 @@ class DocumentationTemplateControllerTest {
 
         verify(templateService).delete("a1b2c3d4");
     }
+
+    @Test
+    void listsReadsAndRestoresVersions() throws Exception {
+        when(templateService.versions("a1b2c3d4"))
+                .thenReturn(JSON.readTree("[{\"version\":2},{\"version\":1}]"));
+        when(templateService.version("a1b2c3d4", 1)).thenReturn(JSON.readTree("{\"version\":1}"));
+        when(templateService.restore("a1b2c3d4", 1)).thenReturn(JSON.readTree("{\"id\":\"a1b2c3d4\",\"version\":3}"));
+
+        mockMvc.perform(get("/api/documentation/templates/a1b2c3d4/versions"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].version").value(2));
+        mockMvc.perform(get("/api/documentation/templates/a1b2c3d4/versions/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.version").value(1));
+        mockMvc.perform(post("/api/documentation/templates/a1b2c3d4/versions/1/restore"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.version").value(3));
+    }
 }

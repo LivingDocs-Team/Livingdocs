@@ -13,6 +13,8 @@ from urllib.parse import urlsplit
 
 from playwright.sync_api import Page, expect
 
+from rbac_nav import open_screen
+
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 DOCUMENT_ID = "22222222-2222-4222-8222-222222222222"
 WORKFLOW_ID = "33333333-3333-4333-8333-333333333333"
@@ -37,6 +39,9 @@ class StatefulBackend:
         self.race_claim = False   # another staff member claims right before our claim request
         self.item = None
         self.events = []
+        self.comments = []
+        self.document_version = 2
+        self.document_content = "# Shop guide\n\nReviewed.\n"
         if seed:
             self.item = self._new_item("PENDING_STAFF_REVIEW")
             self.events = [self._event("7", "DEVELOPER", "SUBMITTED", "DRAFT", "PENDING_STAFF_REVIEW", None)]
@@ -74,6 +79,7 @@ class StatefulBackend:
         return {"id": f"audit-{self.minute}", "actorUserId": actor, "actorRole": role, "action": action,
                 "previousStatus": previous, "newStatus": new, "previousReviewerUserId": None,
                 "newReviewerUserId": None, "comment": comment,
+                "documentVersion": self.item["submittedDocumentVersion"] if self.item else None,
                 "createdAt": f"2026-11-10T10:{self.minute:02d}:00Z"}
 
     def _record(self, action, previous, comment=None):
@@ -180,7 +186,16 @@ class StatefulBackend:
             if suffix == "":
                 return send(200, self.item)
             if suffix == "/document":
-                return send(200, {"documentId": DOCUMENT_ID, "version": 2, "content": "# Shop guide\n\nReviewed.\n"})
+                return send(200, {"documentId": DOCUMENT_ID, "version": self.document_version,
+                                  "content": self.document_content})
+            if suffix == "/comments":
+                return send(200, self.comments)
+            if suffix == "/change-requests":
+                return send(200, [
+                    dict(event, relatedComments=[comment for comment in self.comments
+                         if comment["documentVersion"] == event["documentVersion"]])
+                    for event in self.events if event["action"] == "CHANGES_REQUESTED"
+                ])
             if suffix == "/history":
                 return send(200, self.events)
             if suffix in ("/review-comparison", "/review-evidence"):
@@ -199,6 +214,18 @@ class StatefulBackend:
                 return send(200, {"files": [], "source_snapshot": {"repository_full_name": "acme/shop",
                                   "branch": "main", "commit_sha": "abcdef1234567890"}})
 
+        if method == "PUT" and path == f"{base}/{WORKFLOW_ID}/document":
+            if self.item is None or self.user_id != self.item["ownerUserId"]:
+                return send(404, {"message": "Document workflow not found."})
+            if self.user["role"] != "DEVELOPER":
+                return deny()
+            if self.item["status"] != "CHANGES_REQUESTED" or body.get("expectedVersion") != self.document_version:
+                return send(409, {"message": "Document version changed."})
+            self.document_version += 1
+            self.document_content = body["content"]
+            self._record("DOCUMENT_EDITED", self.item["status"], body.get("note"))
+            return send(200, self.item)
+
         if method == "POST" and path.startswith(f"{base}/{WORKFLOW_ID}/"):
             action = path.rsplit("/", 1)[-1]
             if action in self.forced:
@@ -211,8 +238,13 @@ class StatefulBackend:
                     return send(404, {"message": "Document workflow not found."})
                 if previous not in ("DRAFT", "CHANGES_REQUESTED"):
                     return send(409, {"message": "Only a draft or a changes-requested workflow can be submitted."})
+                if (body or {}).get("expectedVersion", self.document_version) != self.document_version:
+                    return send(409, {"message": "Document version changed."})
+                if previous == "CHANGES_REQUESTED" and self.document_version <= self.item["submittedDocumentVersion"]:
+                    return send(409, {"message": "Update the document version before resubmitting."})
                 self.item.update(status="PENDING_STAFF_REVIEW", reviewerUserId=None, staffReviewResult=None,
-                                 staffComment=None, submittedAt="2026-11-10T09:00:00Z")
+                                 staffComment=None, submittedAt="2026-11-10T09:00:00Z",
+                                 submittedDocumentVersion=self.document_version)
                 self._record("SUBMITTED", previous)
                 return send(200, self.item)
             if action == "claim":
@@ -226,6 +258,17 @@ class StatefulBackend:
                 self.item.update(status="STAFF_REVIEWING", reviewerUserId=self.user_id)
                 self._record("CLAIMED", previous)
                 return send(200, self.item)
+            if action == "comments":
+                if self.user["role"] != "STAFF" or previous != "STAFF_REVIEWING" or \
+                        self.item["reviewerUserId"] != self.user_id:
+                    return deny()
+                if body.get("documentVersion") != self.item["submittedDocumentVersion"]:
+                    return send(409, {"message": "Document version changed."})
+                self._record("REVIEW_COMMENT", previous, body["comment"])
+                comment = dict(body, id=self.events[-1]["id"], workflowId=WORKFLOW_ID,
+                               actorUserId=self.user_id, createdAt=self.events[-1]["createdAt"])
+                self.comments.append(comment)
+                return send(201, comment)
             if action == "staff-review":
                 if self.user["role"] != "STAFF" or previous != "STAFF_REVIEWING" or \
                         self.item["reviewerUserId"] != self.user_id:
@@ -256,18 +299,30 @@ class StatefulBackend:
         return send(404, {"message": f"Unexpected request: {method} {path}"})
 
 
+# Each role works from its own screen of the role-based menu (frontend/src/rbac/flows).
+ROLE_SCREEN = {
+    "developer": ("Generated Documents", "Documentation Management"),
+    "staff": ("Review Queue", "Staff Review Queue"),
+    "manager": ("Approval Queue", "Manager Approval"),
+}
+
+
+def open_role_screen(page: Page, backend: StatefulBackend):
+    label, heading = ROLE_SCREEN[backend.current]
+    open_screen(page, label)
+    expect(page.get_by_role("heading", name=heading)).to_be_visible()
+
+
 def open_documentation(page: Page, backend: StatefulBackend):
     page.route("**/api/**", backend.handle)
     page.goto(FRONTEND_URL)
-    page.get_by_role("button", name="Documentation Management").first.click()
-    expect(page.get_by_role("heading", name="Documentation Management")).to_be_visible()
+    open_role_screen(page, backend)
 
 
 def switch_user(page: Page, backend: StatefulBackend, who: str):
     backend.login_as(who)
     page.reload()
-    page.get_by_role("button", name="Documentation Management").first.click()
-    expect(page.get_by_role("heading", name="Documentation Management")).to_be_visible()
+    open_role_screen(page, backend)
 
 
 def actions_in(locator):
@@ -275,6 +330,70 @@ def actions_in(locator):
 
 
 # ---------- end-to-end flows ----------
+
+def test_section_feedback_revision_resubmission_and_final_approval(page: Page):
+    backend = StatefulBackend()
+    open_documentation(page, backend)
+    page.get_by_role("button", name="Open Staff Review Queue").click()
+    page.get_by_role("button", name="Claim review").click()
+    content = page.locator("pre.staff-review-content")
+    expect(content).to_contain_text("Reviewed.")
+    content.evaluate("""element => {
+        const range = document.createRange();
+        const start = element.firstChild.textContent.indexOf('Reviewed.');
+        range.setStart(element.firstChild, start);
+        range.setEnd(element.firstChild, start + 'Reviewed.'.length);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    }""")
+    page.get_by_label("Add review comment", exact=True).fill("Explain the authentication token.")
+    page.get_by_role("button", name="Add comment", exact=True).click()
+    expect(page.get_by_role("status").filter(has_text="Comment added.")).to_be_visible()
+    comment_id = backend.comments[0]["id"]
+    page.get_by_label("Decision").select_option("CHANGES_REQUESTED")
+    page.get_by_label("Review comment", exact=True).fill("Clarify authentication before approval.")
+    page.get_by_role("button", name="Submit review").click()
+    expect(page.get_by_label("Submitted Staff review result")).to_contain_text("CHANGES_REQUESTED")
+
+    switch_user(page, backend, "developer")
+    feedback = page.get_by_role("region", name="Revision feedback")
+    expect(feedback).to_contain_text("Clarify authentication before approval.")
+    expect(feedback).to_contain_text("Explain the authentication token.")
+    expect(feedback).to_contain_text("Reviewed.")
+    page.get_by_label("Revised document Markdown").fill("# Shop guide\n\nUse a GitHub access token.")
+    page.get_by_role("button", name="Save revision", exact=True).click()
+    expect(page.get_by_role("status").filter(has_text="Revision saved as version 3.")).to_be_visible()
+    page.get_by_role("button", name="Resubmit for review", exact=True).click()
+    expect(page.get_by_role("status").filter(has_text="Version 3 submitted for Staff review.")).to_be_visible()
+
+    switch_user(page, backend, "staff")
+    page.get_by_role("button", name="Open Staff Review Queue").click()
+    page.get_by_role("button", name="Claim review").click()
+    expect(page.get_by_label("Referenced passage", exact=True)).to_have_text("Reviewed.")
+    page.get_by_label("Decision").select_option("PASSED")
+    page.get_by_label("Review comment", exact=True).fill("Authentication is now clear.")
+    page.get_by_role("button", name="Submit review").click()
+    expect(page.get_by_label("Submitted Staff review result")).to_contain_text("PENDING_MANAGER_APPROVAL")
+    switch_user(page, backend, "manager")
+    page.get_by_role("button", name="Open Manager Approval").click()
+    page.get_by_role("button", name="Approve document").click()
+    expect(page.get_by_role("status").filter(has_text="Backend confirmed APPROVED")).to_be_visible()
+    switch_user(page, backend, "developer")
+    history = page.get_by_role("region", name="Approval History")
+    expect(history).to_contain_text("Clarify authentication before approval.")
+    expect(history).to_contain_text("APPROVED")
+    assert backend.item["id"] == WORKFLOW_ID
+    assert backend.item["submittedDocumentVersion"] == 3
+    assert backend.comments[0]["id"] == comment_id
+    assert backend.comments[0]["documentVersion"] == 2
+    assert backend.comments[0]["section"]["quote"] == "Reviewed."
+    assert [event["action"] for event in backend.events] == [
+        "SUBMITTED", "CLAIMED", "REVIEW_COMMENT", "CHANGES_REQUESTED", "DOCUMENT_EDITED",
+        "SUBMITTED", "CLAIMED", "PASSED", "APPROVED",
+    ]
+
 
 def test_claim_staff_review_manager_approval_and_history_timeline(page: Page):
     backend = StatefulBackend()
@@ -288,7 +407,7 @@ def test_claim_staff_review_manager_approval_and_history_timeline(page: Page):
     expect(page.get_by_role("heading", name="Submit Staff review")).to_be_visible()
 
     page.get_by_label("Decision").select_option("PASSED")
-    page.get_by_label("Review comment").fill("Endpoints match the source code.")
+    page.get_by_label("Review comment", exact=True).fill("Endpoints match the source code.")
     page.get_by_role("button", name="Submit review").click()
     expect(page.get_by_label("Submitted Staff review result")).to_contain_text("PENDING_MANAGER_APPROVAL")
     expect(page.get_by_role("button", name="Open Manager Approval")).to_have_count(0)
@@ -304,9 +423,8 @@ def test_claim_staff_review_manager_approval_and_history_timeline(page: Page):
     expect(manager_history).to_contain_text("APPROVED", timeout=7000)
     assert actions_in(manager_history) == ["SUBMITTED", "CLAIMED", "PASSED", "APPROVED"]
 
-    # The Approval History panel of DocumentationManagement is fetched when a workflow is selected and
-    # is not refreshed by a decision made in the Manager panel (see the LD-403 report); reload to read it.
-    switch_user(page, backend, "manager")
+    # The owner reads the Approval History panel of Documentation Management (Generated Documents).
+    switch_user(page, backend, "developer")
     approval_history = page.get_by_role("region", name="Approval History")
     expect(approval_history).to_contain_text("Document ID")
     expect(approval_history.locator("li strong").first).to_be_visible()
@@ -325,7 +443,7 @@ def test_manager_rejection_requires_reason_and_is_recorded_in_history(page: Page
     page.get_by_role("button", name="Open Staff Review Queue").click()
     page.get_by_role("button", name="Claim review").click()
     page.get_by_label("Decision").select_option("PASSED")
-    page.get_by_label("Review comment").fill("Evidence is complete.")
+    page.get_by_label("Review comment", exact=True).fill("Evidence is complete.")
     page.get_by_role("button", name="Submit review").click()
     expect(page.get_by_label("Submitted Staff review result")).to_contain_text("PENDING_MANAGER_APPROVAL")
 
@@ -346,7 +464,7 @@ def test_manager_rejection_requires_reason_and_is_recorded_in_history(page: Page
     expect(manager_history).to_contain_text("REJECTED", timeout=7000)
     assert actions_in(manager_history)[-1] == "REJECTED"
     expect(manager_history).to_contain_text("Comment: The guide omits the new endpoints.")
-    switch_user(page, backend, "manager")
+    switch_user(page, backend, "developer")
     approval_history = page.get_by_role("region", name="Approval History")
     expect(approval_history).to_contain_text("Comment / reason: The guide omits the new endpoints.")
     assert actions_in(approval_history)[-1] == "REJECTED"
@@ -361,10 +479,10 @@ def test_staff_changes_requested_needs_a_comment_and_leaves_manager_queue_empty(
     page.get_by_role("button", name="Claim review").click()
     page.get_by_label("Decision").select_option("CHANGES_REQUESTED")
     page.get_by_role("button", name="Submit review").click()
-    expect(page.get_by_label("Review comment")).to_have_js_property("validity.valueMissing", True)
+    expect(page.get_by_label("Review comment", exact=True)).to_have_js_property("validity.valueMissing", True)
     assert "staff-review" not in backend.mutating_posts()
 
-    page.get_by_label("Review comment").fill("Explain the setup steps.")
+    page.get_by_label("Review comment", exact=True).fill("Explain the setup steps.")
     page.get_by_role("button", name="Submit review").click()
     expect(page.get_by_label("Submitted Staff review result")).to_contain_text("CHANGES_REQUESTED")
     assert backend.item["status"] == "CHANGES_REQUESTED"
@@ -404,9 +522,11 @@ def test_developer_role_gets_no_workflow_actions(page: Page):
     backend.login_as("developer")
     open_documentation(page, backend)
 
+    # Matrix row #10: a Developer only reads review feedback, so neither queue panel is offered
+    # (the backend would answer 403 for the Staff queue).
     expect(page.get_by_role("button", name="Open Manager Approval")).to_have_count(0)
-    page.get_by_role("button", name="Open Staff Review Queue").click()
-    expect(page.get_by_role("alert").filter(has_text="not authorized to view the Staff review queue")).to_be_visible()
+    expect(page.get_by_role("button", name="Open Staff Review Queue")).to_have_count(0)
+    assert not any(path.endswith("/staff/queue") for _, path, _ in backend.requests)
     for name in ("Claim review", "Release claim", "Submit review", "Approve document", "Reject document"):
         expect(page.get_by_role("button", name=name)).to_have_count(0)
     assert backend.mutating_posts() == []
@@ -502,7 +622,7 @@ def test_ui_submit_then_claim_review_approve_and_full_history(page: Page):
     page.get_by_role("button", name="Open Staff Review Queue").click()
     page.get_by_role("button", name="Claim review").click()
     page.get_by_label("Decision").select_option("PASSED")
-    page.get_by_label("Review comment").fill("Matches the code.")
+    page.get_by_label("Review comment", exact=True).fill("Matches the code.")
     page.get_by_role("button", name="Submit review").click()
     expect(page.get_by_label("Submitted Staff review result")).to_contain_text("PENDING_MANAGER_APPROVAL")
 
@@ -511,7 +631,7 @@ def test_ui_submit_then_claim_review_approve_and_full_history(page: Page):
     page.get_by_role("button", name="Approve document").click()
     expect(page.get_by_role("status").filter(has_text="Backend confirmed APPROVED")).to_be_visible()
 
-    switch_user(page, backend, "manager")
+    switch_user(page, backend, "developer")
     full = page.get_by_role("region", name="Approval History")
     expect(full.locator("li strong").first).to_be_visible()
     assert actions_in(full) == ["CREATED", "SUBMITTED", "CLAIMED", "PASSED", "APPROVED"]
@@ -556,12 +676,13 @@ def test_ui_submit_retry_continues_from_the_failed_step_without_duplicates(page:
     assert backend.item["status"] == "PENDING_STAFF_REVIEW"
 
 
-def test_ui_submit_shows_403_for_a_role_that_cannot_save_documents(page: Page):
+def test_ui_submit_shows_403_when_the_backend_refuses_to_save_the_document(page: Page):
     backend = StatefulBackend(seed=False)
-    backend.login_as("staff")
+    backend.login_as("developer")
     open_documentation(page, backend)
     generate_documentation(page)
 
+    backend.forced["document"] = 403
     page.get_by_role("button", name="Submit for review").click()
     expect(page.get_by_role("alert").filter(has_text="You are not allowed to save the generated document")).to_be_visible()
     expect(page.get_by_role("button", name="Submit for review")).to_be_enabled()
