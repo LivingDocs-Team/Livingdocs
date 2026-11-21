@@ -67,6 +67,8 @@ public final class ApiRoutePermissions {
         rule("POST", "/api/repositories/{}/sync", need("repositories", 'U'));
         rule("GET", "/api/repositories/{}/sync/latest", need("repositories", 'R'));
         rule("GET", "/api/repositories/{}/sync/latest/analysis-input", need("repositories", 'R'));
+        rule("GET", "/api/repositories/{}/auto-update-policies", need("repositories", 'R'));
+        rule("PUT", "/api/repositories/{}/auto-update-policies", need("repositories", 'U'));
 
         // ---- Pull requests, commits and source changes (#7) ----
         rule("GET", "/api/repositories/{}/pull-requests", need("pullRequests", 'R'));
