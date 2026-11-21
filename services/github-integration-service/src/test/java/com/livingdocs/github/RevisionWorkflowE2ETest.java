@@ -271,11 +271,11 @@ class RevisionWorkflowE2ETest {
                 .get().uri("/internal/revision-draft-candidates/{id}", repo.id()).retrieve().toBodilessEntity())
                 .isInstanceOf(org.springframework.web.client.HttpClientErrorException.Unauthorized.class);
 
-        var event = pushPayload(repo.githubId(), "refs/heads/main", sha);
+        var pushEvent = pushPayload(repo.githubId(), "refs/heads/main", sha);
         String delivery = UUID.randomUUID().toString();
-        sendWebhook(event, delivery).andExpect(status().isAccepted())
+        sendWebhook(pushEvent, delivery).andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.status").value("PROCESSED"));
-        sendWebhook(event, delivery).andExpect(status().isAccepted())
+        sendWebhook(pushEvent, delivery).andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.status").value("DUPLICATE"));
         UUID repositoryId = UUID.fromString(repo.id());
         if (scenario == Scenario.STAGE_RESTART) {
@@ -353,6 +353,35 @@ class RevisionWorkflowE2ETest {
         boolean reject = scenario == Scenario.REJECT;
         var decision = reject ? ManagerDecision.REJECTED : ManagerDecision.APPROVED;
         workflows.decide(manager, managerPermissions, id, decision, reject ? "Needs clarification" : null, 2);
+        var history = workflows.history(owner, Set.of("DOCUMENT_VIEW"), id).stream()
+                .filter(event -> Integer.valueOf(2).equals(event.documentVersion()))
+                .toList();
+        assertThat(history).extracting(event -> event.action())
+                .containsSubsequence("REVISION_DRAFT_SUBMITTED", "PASSED", decision.name());
+        assertThat(history).allSatisfy(event -> {
+            assertThat(event.documentId()).isEqualTo(documentId);
+            assertThat(event.createdAt()).isNotNull();
+        });
+        assertThat(history).anySatisfy(event -> {
+            assertThat(event.action()).isEqualTo("REVISION_DRAFT_SUBMITTED");
+            assertThat(event.actorUserId()).isEqualTo("AI");
+            assertThat(event.actorRole()).isEqualTo("AI");
+            assertThat(event.comment()).contains(sha);
+        });
+        assertThat(history).anySatisfy(event -> {
+            assertThat(event.action()).isEqualTo("PASSED");
+            assertThat(event.actorUserId()).isEqualTo(staff);
+            assertThat(event.actorRole()).isEqualTo("STAFF");
+            assertThat(event.comment()).isEqualTo("Verified against source");
+        });
+        assertThat(history).anySatisfy(event -> {
+            assertThat(event.action()).isEqualTo(decision.name());
+            assertThat(event.actorUserId()).isEqualTo(manager);
+            assertThat(event.actorRole()).isEqualTo("MANAGER");
+            assertThat(event.comment()).isEqualTo(reject ? "Needs clarification" : null);
+        });
+        assertThat(revision.path("source_changes").get(0).path("commit_sha").asText()).isEqualTo(sha);
+        assertThat(revision.path("source_changes").get(0).path("trigger").asText()).isEqualTo("COMMIT");
         var resolved = ai.get().uri(docUrl).retrieve().body(JsonNode.class);
         assertThat(resolved.path("pending_version").isNull()).isTrue();
         assertThat(resolved.path("current_version").asInt()).isEqualTo(reject ? 1 : 2);
