@@ -142,6 +142,7 @@ public final class ApiRoutePermissions {
         rule("POST", "/api/document-workflows/{}/comments", need("staffReview", 'A'));
         rule("PUT", "/api/document-workflows/{}/document", need("documentation", 'U'));
         rule("POST", "/api/document-workflows/{}/approve", need("managerApproval", 'A'));
+        rule("POST", "/api/document-workflows/{}/versions/{}/github-commit", need("managerApproval", 'A'));
         rule("POST", "/api/document-workflows/{}/reject", need("managerApproval", 'A'));
         rule("POST", "/api/document-workflows/{}/rollback", need("documentRollback", 'U'));
         // Reassigning a review to another Staff member is an administration task (also needs DOCUMENT_REASSIGN).
