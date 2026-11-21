@@ -369,16 +369,16 @@ def test_manager_queue_page_change_shows_loading_without_previous_page_rows(page
         server_thread.join(timeout=2)
 
 
-def test_approve_posts_an_empty_json_body_refreshes_queue_and_audit(page: Page):
+def test_approve_posts_reviewed_version_and_reason_refreshes_queue_and_audit(page: Page):
     api = FakeApi(workflow())
     open_manager_approval(page, api)
+    page.get_by_label("Approval reason (optional)").fill("The revision matches the reviewed source.")
     page.get_by_role("button", name="Approve document").click()
 
     expect(page.get_by_role("status").filter(has_text="Backend confirmed APPROVED")).to_be_visible()
     expect(page.get_by_label("Last Manager workflow result")).to_contain_text("APPROVED")
-    # An empty JSON body, so that the request carries Content-Type: application/json (a body-less POST is
-    # answered with HTTP 415 by the real GitHub Integration service).
-    assert ("POST", f"/api/document-workflows/{WORKFLOW_ID}/approve", {}) in api.requests
+    assert ("POST", f"/api/document-workflows/{WORKFLOW_ID}/approve",
+            {"documentVersion": 2, "comment": "The revision matches the reviewed source."}) in api.requests
     expect(page.get_by_label("Approval audit history")).to_contain_text("APPROVED", timeout=7000)
     assert any(method == "GET" and path == f"/api/document-workflows/{WORKFLOW_ID}/history" for method, path, _ in api.requests)
     assert sum(method == "GET" and path == "/api/document-workflows/manager/queue" for method, path, _ in api.requests) >= 2
@@ -395,7 +395,7 @@ def test_reject_requires_reason_and_posts_backend_request(page: Page):
     page.get_by_role("button", name="Reject document").click()
     expect(page.get_by_role("status").filter(has_text="Backend confirmed REJECTED")).to_be_visible()
     assert ("POST", f"/api/document-workflows/{WORKFLOW_ID}/reject",
-        {"comment": "The evidence does not cover all endpoints."}) in api.requests
+            {"documentVersion": 2, "comment": "The evidence does not cover all endpoints."}) in api.requests
     expect(page.get_by_label("Last Manager workflow result")).to_contain_text("The evidence does not cover all endpoints.")
 
 
