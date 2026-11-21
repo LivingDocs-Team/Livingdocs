@@ -62,7 +62,6 @@ class GitHubIntegrationBffDocumentationAuthTest {
             doReturn(headersSpec).when(headersSpec).headers(any());
             
             // Khi gọi exchange(), ném lỗi 404 (Mô phỏng không tìm thấy workspace)
-            // Controller sẽ bắt lỗi này và trả về 404 cho client
             doThrow(new ResponseStatusException(HttpStatus.NOT_FOUND))
                 .when(headersSpec).exchange(any());
             
@@ -111,7 +110,7 @@ class GitHubIntegrationBffDocumentationAuthTest {
         mockMvc.perform(get("/api/documentation/{docId}/change-log", DOC_ID)
                 .principal(createAuth("owner@x")) 
                 .accept(MediaType.APPLICATION_JSON))
-            .andExpect(status().isNotFound()); 
+            .andExpect(status().isForbidden());
     }
 
     @Test
@@ -119,7 +118,7 @@ class GitHubIntegrationBffDocumentationAuthTest {
         mockMvc.perform(get("/api/documentation/{docId}/change-log", DOC_ID)
                 .principal(createAuth("reviewer@x"))
                 .accept(MediaType.APPLICATION_JSON))
-            .andExpect(status().isNotFound());
+            .andExpect(status().isForbidden());
     }
 
     @Test
@@ -127,6 +126,6 @@ class GitHubIntegrationBffDocumentationAuthTest {
         mockMvc.perform(get("/api/documentation/{docId}/change-log", DOC_ID)
                 .principal(createAuth("outsider@x"))
                 .accept(MediaType.APPLICATION_JSON))
-            .andExpect(status().isNotFound());
+            .andExpect(status().isForbidden());
     }
 }
