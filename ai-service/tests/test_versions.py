@@ -919,6 +919,36 @@ def test_drift_decisions_create_at_most_one_grounded_draft(monkeypatch, decision
                                                   "note": "changed"}).status_code == 409
     with pytest.raises(VersionError, match="pending document version has changed"):
         store.resolve_workflow_version(doc.id, "73", 1, "APPROVED", "manager")
-    store.resolve_workflow_version(doc.id, "73", 2, "APPROVED", "manager")
-    assert doc.current_version == 2
-    assert client.put(url, headers=headers, json=body).json() == result.json()
+    outcome = "APPROVED" if decision == "accept" else "REJECTED"
+    outcome_url = "/internal/drift/reports/drift-1/findings/F1/workflow-decision"
+    outcome_body = {"document_id": doc.id, "version": 2, "decision": outcome, "actor": "manager"}
+    assert client.put(outcome_url, headers=headers, json=outcome_body).status_code == 409
+
+    def unavailable():
+        raise OSError("simulated document write failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "_save", unavailable)
+        with pytest.raises(OSError, match="document write failure"):
+            store.resolve_workflow_version(doc.id, "73", 2, outcome, "manager")
+    assert store.get(doc.id).pending_version == 2
+    assert store.version(doc.id, 2).status == "proposed"
+    store.resolve_workflow_version(doc.id, "73", 2, outcome, "manager")
+    store.resolve_workflow_version(doc.id, "73", 2, outcome, "manager")
+    for _ in range(2):
+        assert client.put(outcome_url, headers=headers, json=outcome_body).status_code == 204
+    reconciled = reports.get(report.id).findings[0].resolution
+    assert [event.workflow_decision for event in reconciled.history] == [None, outcome]
+    if outcome == "APPROVED":
+        assert reconciled.status == "resolved"
+        assert client.put(url, headers=headers, json=body).json()["resolution"]["status"] == "resolved"
+        assert store.get(doc.id).versions_total == 2
+    else:
+        assert reconciled.status == "open"
+        assert client.put(url, headers=headers, json=body).status_code == 409
+        retry = body | {"retry_of": 2, "proposed": "Pass a positive quantity."}
+        first_retry = client.put(url, headers=headers, json=retry)
+        assert first_retry.status_code == 200, first_retry.text
+        assert first_retry.json()["resolution"]["draft_version"] == 3
+        assert client.put(url, headers=headers, json=retry).json() == first_retry.json()
+        assert store.get(doc.id).versions_total == 3

@@ -5,11 +5,11 @@ with review and resolution (LD-346).
 Run:  uvicorn main:app --reload --port 8001
 Docs: http://localhost:8001/docs
 """
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import PlainTextResponse
-from pydantic import AwareDatetime
+from pydantic import AwareDatetime, BaseModel
 
 from app.change_context import ChangeContextReport, ChangeContextRequest, change_context
 from app.drift import analyze as analyze_drift
@@ -633,6 +633,28 @@ def submit_drift_resolution(repository_id: str, report_id: str, finding_id: str,
     if finding is None:
         raise HTTPException(404, "Drift report not found")
     return finding
+
+
+class DriftWorkflowDecision(BaseModel):
+    document_id: str
+    version: int
+    decision: Literal["APPROVED", "REJECTED"]
+    actor: str
+    note: Optional[str] = None
+
+
+@app.put("/internal/drift/reports/{report_id}/findings/{finding_id}/workflow-decision",
+         status_code=204, dependencies=[Depends(require_internal_service)])
+def apply_drift_workflow_decision(report_id: str, finding_id: str, update: DriftWorkflowDecision):
+    version = _call(documents.version, update.document_id, update.version)
+    link = version.drift_finding or {}
+    expected = "accepted" if update.decision == "APPROVED" else "dismissed"
+    if link.get("report_id") != report_id or link.get("finding_id") != finding_id or version.status != expected:
+        raise HTTPException(409, "Workflow decision does not match the linked drift draft")
+    drift_reports.apply_workflow_decision(report_id, finding_id, update.document_id, update.version,
+                                        update.decision, update.actor, update.note)
+
+
 @app.post("/internal/affected-documents", response_model=AffectedDocumentsResult,
           dependencies=[Depends(require_internal_service)])
 def affected_documents(req: AffectedDocumentsRequest):

@@ -59,8 +59,8 @@ from .drift_evidence import build_evidence
 from .drift_models import (DRIFT_KINDS, SEVERITY_ORDER, AffectedDocument, DriftAnalyzeRequest,
                            DriftFinding, DriftReport, DriftReportSummary, DriftStatus, DriftSummary,
                            DriftEvidence, DriftType, EntityChangeType, PullRequestAnalysis)
-from .drift_review import DriftReviewer, get_reviewer, resolve
-from .drift_models import ResolutionUpdate
+from .drift_review import DriftReviewer, get_reviewer, refresh_progress, resolve
+from .drift_models import ResolutionEvent, ResolutionStatus, ResolutionUpdate
 from .drift_rules import Classified
 
 METHOD = ("Entity changes from the analyzer's before/after results (or the diff), matched against "
@@ -244,21 +244,53 @@ class DriftReportStore:
         self._reports: "OrderedDict[str, DriftReport]" = OrderedDict()
         self.limit = limit
         self.path = pathlib.Path(path) if path else None
+        self._legacy_imported = False
+        self._import_legacy_file()
         self._load()
+
+    @staticmethod
+    def _read_file(path: pathlib.Path):
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        rows = raw if isinstance(raw, list) else raw["reports"]
+        return raw, [DriftReport.model_validate(row) for row in rows]
+
+    def _import_legacy_file(self) -> None:
+        if self.path is None or self.path.name != "drift-reports.json":
+            return
+        legacy = self.path.with_name("drift_reports.json")
+        if not legacy.exists():
+            return
+        # A failed upgrade must leave both source files available for recovery.
+        raw, current = self._read_file(self.path) if self.path.exists() else ({}, [])
+        if isinstance(raw, dict) and raw.get("legacy_imported") is True:
+            self._legacy_imported = True
+            return
+        _, previous = self._read_file(legacy)
+        by_id: dict[str, DriftReport] = {}
+        for report in [*previous, *current]:
+            if report.id in by_id and by_id[report.id] != report:
+                raise ValueError(f"Conflicting persisted drift report {report.id}")
+            by_id[report.id] = report
+        reports = OrderedDict(
+            (report.id, report) for report in sorted(by_id.values(), key=lambda report: report.created_at)
+        )
+        self._legacy_imported = True
+        self._persist(reports)
 
     def _load(self) -> None:
         if self.path is None or not self.path.exists():
             return
         try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-            rows = raw if isinstance(raw, list) else raw["reports"]
-            reports = [DriftReport.model_validate(row) for row in rows]
+            raw, reports = self._read_file(self.path)
         except Exception as exc:  # corrupt file: keep it for inspection, start clean
             stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
             backup = self.path.with_suffix(f".corrupt-{stamp}.json")
             self.path.rename(backup)
             log.error("Could not read %s (%s); moved it to %s", self.path, exc, backup.name)
             return
+        if isinstance(raw, dict) and raw.get("legacy_imported") is True:
+            self._legacy_imported = True
+            self.limit = max(self.limit, len(reports))
         for r in reports[-self.limit:]:
             self._reports[r.id] = r
 
@@ -272,6 +304,8 @@ class DriftReportStore:
         try:
             with output:
                 data = {"reports": [report.model_dump(mode="json") for report in reports.values()]}
+                if self._legacy_imported:
+                    data["legacy_imported"] = True
                 json.dump(data, output, ensure_ascii=False)
             os.replace(temporary, self.path)
         finally:
@@ -298,14 +332,49 @@ class DriftReportStore:
                 return None
             candidate = report.model_copy(deep=True)
             finding = resolve(candidate, finding_id, update)
-            if draft is not None:
-                finding.resolution.draft_version = draft(candidate, finding)
+            resolution = finding.resolution
+            if draft is not None and resolution.status == ResolutionStatus.acknowledged:
+                resolution.draft_version = draft(candidate, finding)
+                resolution.history[-1].draft_version = resolution.draft_version
             if candidate != report:
                 reports = self._reports.copy()
                 reports[report_id] = candidate
                 self._persist(reports)
                 self._reports = reports
             return finding
+
+    def apply_workflow_decision(self, report_id, finding_id, document_id, version, decision, actor, note):
+        with self._lock:
+            report = self._reports.get(report_id)
+            if report is None:
+                return
+            candidate = report.model_copy(deep=True)
+            finding = next((item for item in candidate.findings if item.id == finding_id), None)
+            if finding is None or finding.document.document_id != document_id:
+                return
+            resolution = finding.resolution
+            if resolution.status != ResolutionStatus.acknowledged or resolution.draft_version != version:
+                return
+            if resolution.history and resolution.history[-1].status == ResolutionStatus.acknowledged:
+                resolution.history[-1].draft_version = version
+            approved = decision == "APPROVED"
+            status = ResolutionStatus.resolved if approved else ResolutionStatus.open
+            accepted = resolution.proposed if approved else None
+            event = ResolutionEvent(status=status, actor=actor, note=note, decision=resolution.decision,
+                                    proposed=resolution.proposed, accepted_update=accepted,
+                                    draft_version=version, workflow_decision=decision)
+            resolution.history.append(event)
+            resolution.status, resolution.actor = status, actor
+            resolution.note, resolution.updated_at = note, event.at
+            resolution.accepted_update = accepted
+            if not approved:
+                resolution.draft_version = None
+                resolution.rejected_draft_version = version
+            refresh_progress(candidate)
+            reports = self._reports.copy()
+            reports[report_id] = candidate
+            self._persist(reports)
+            self._reports = reports
 
     def list(self, repository: Optional[str] = None,
              pull_request: Optional[int] = None) -> List[DriftReportSummary]:
