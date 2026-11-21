@@ -11,7 +11,7 @@
 """
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -41,6 +41,7 @@ class PullRequestInfo(BaseModel):
     base_branch: Optional[str] = Field(default=None, max_length=300)
     head_sha: Optional[str] = Field(default=None, max_length=64)   # commit the PR is checked at
     base_sha: Optional[str] = Field(default=None, max_length=64)
+    base_head_sha: Optional[str] = Field(default=None, max_length=64)
 
 
 class ChangedFile(BaseModel):
@@ -327,6 +328,10 @@ class ResolutionEvent(BaseModel):
     actor: Optional[str] = None
     note: Optional[str] = None
     accepted_update: Optional[str] = None      # LD-161
+    decision: Optional[Literal["accept", "edit", "dismiss"]] = None
+    proposed: Optional[str] = None
+    draft_version: Optional[int] = None
+    workflow_decision: Optional[Literal["APPROVED", "REJECTED"]] = None
     at: datetime = Field(default_factory=now)
 
 
@@ -338,6 +343,10 @@ class FindingResolution(BaseModel):
     accepted_update: Optional[str] = None
     """LD-161: documentation text the reviewer accepted when resolving: the AI's
     `suggested_update` as is, or edited. Cleared when the finding is reopened."""
+    decision: Optional[Literal["accept", "edit", "dismiss"]] = None
+    proposed: Optional[str] = None
+    draft_version: Optional[int] = None
+    rejected_draft_version: Optional[int] = None
     updated_at: Optional[datetime] = None
     history: List[ResolutionEvent] = Field(default_factory=list)
 
@@ -348,6 +357,9 @@ class ResolutionUpdate(BaseModel):
     note: Optional[str] = Field(default=None, max_length=2000)
     accepted_update: Optional[str] = Field(default=None, max_length=20_000)
     """LD-161: only with status `resolved`."""
+    decision: Optional[Literal["accept", "edit", "dismiss"]] = None
+    proposed: Optional[str] = Field(default=None, max_length=20000)
+    retry_of: Optional[int] = Field(default=None, ge=1)
 
 
 class ReviewStatus(str, Enum):

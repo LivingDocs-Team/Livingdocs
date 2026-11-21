@@ -285,7 +285,7 @@ class DocumentWorkflowServiceTest {
         assertThat(approvalEvent.getNewStatus()).isEqualTo("APPROVED");
         assertThat(approvalEvent.getComment()).isEqualTo("Approved");
         assertThat(approvalEvent.getCreatedAt()).isNotNull();
-        verify(documents, never()).resolveDocumentVersion(any(), any(), any(), any(Integer.class), any(), any());
+        verify(documents).resolveDocumentVersion(MANAGER, "73", "doc-1", 1, "APPROVED", "Approved");
     }
 
     @Test
@@ -583,6 +583,24 @@ class DocumentWorkflowServiceTest {
         assertThat(rejectionEvent.getNewStatus()).isEqualTo("REJECTED");
         assertThat(rejectionEvent.getComment()).isEqualTo("Does not meet the documentation standard");
         assertThat(rejectionEvent.getCreatedAt()).isNotNull();
+    }
+
+    @Test
+    void committedManagerRetryRepairsAiWithoutCreatingAnotherAuditRow() {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+        workflow.review(StaffReviewResult.PASSED, "Checks passed");
+        workflow.decide(MANAGER, ManagerDecision.REJECTED, "Original reason");
+        when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
+        Set<String> permissions = Set.of("ROLE_MANAGER", "DOCUMENT_REJECT");
+
+        assertThatThrownBy(() -> service.decide(MANAGER, permissions, ID,
+                ManagerDecision.REJECTED, "Changed reason", 1)).isInstanceOf(ApiException.class);
+        service.decide(MANAGER, permissions, ID, ManagerDecision.REJECTED, " Original reason ", 1);
+
+        verify(documents).resolveDocumentVersion(MANAGER, OWNER, "doc-1", 1,
+                "REJECTED", "Original reason", true);
+        verify(audit, never()).save(any(DocumentWorkflowAudit.class));
+        verify(workflows, never()).saveAndFlush(workflow);
     }
 
     @Test

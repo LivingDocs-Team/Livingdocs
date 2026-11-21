@@ -1,5 +1,6 @@
 package com.livingdocs.github.client;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.livingdocs.github.config.GitHubProperties;
@@ -16,6 +17,7 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -127,6 +129,64 @@ public class GitHubClient {
                 .headers(auth(accessToken))
                 .retrieve()
                 .body(GitHubRepo.class));
+    }
+
+    public PublicationBranch getPublicationBranch(String token, String owner, String repo) {
+        JsonNode data = graphql(token, """
+                query($owner: String!, $repo: String!) {
+                  repository(owner: $owner, name: $repo) {
+                    databaseId
+                    nameWithOwner
+                    defaultBranchRef {
+                      id
+                      name
+                      target { ... on Commit { oid tree { oid } } }
+                    }
+                  }
+                }
+                """, Map.of("owner", owner, "repo", repo)).path("repository");
+        JsonNode ref = data.path("defaultBranchRef");
+        return new PublicationBranch(data.path("databaseId").longValue(), data.path("nameWithOwner").asText(),
+                ref.path("id").asText(), ref.path("name").asText(), ref.at("/target/oid").asText(),
+                ref.at("/target/tree/oid").asText());
+    }
+
+    public String commitFileOnBranch(String token, String refId, String expectedHead,
+            String path, byte[] content, String message) {
+        var input = Map.of(
+                "branch", Map.of("id", refId),
+                "expectedHeadOid", expectedHead,
+                "message", Map.of("headline", message),
+                "fileChanges", Map.of("additions", List.of(Map.of("path", path,
+                        "contents", Base64.getEncoder().encodeToString(content)))));
+        JsonNode response = graphql(token, """
+                mutation($input: CreateCommitOnBranchInput!) {
+                  createCommitOnBranch(input: $input) { commit { oid } }
+                }
+                """, Map.of("input", input));
+        String oid = response.at("/createCommitOnBranch/commit/oid").asText();
+        if (!oid.matches("[0-9a-f]{40}")) {
+            throw new GitHubApiException("GitHub did not confirm the documentation commit.", false);
+        }
+        return oid;
+    }
+
+    private JsonNode graphql(String token, String query, Map<String, ?> variables) {
+        JsonNode response = call(() -> apiClient.post().uri("/graphql")
+                .headers(auth(token)).contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("query", query, "variables", variables))
+                .retrieve().body(JsonNode.class));
+        if (response == null || !response.path("errors").isEmpty()) {
+            if (response != null && response.path("errors").findValuesAsText("type").contains("FORBIDDEN")) {
+                throw new GitHubApiException("GitHub rejected the operation.", 403, HttpHeaders.EMPTY, null);
+            }
+            throw new GitHubApiException("GitHub did not confirm the operation.", false);
+        }
+        return response.path("data");
+    }
+
+    public record PublicationBranch(long repositoryId, String repositoryName, String refId, String branch,
+            String headSha, String treeSha) {
     }
 
     // ------------------------------------------------------------------ Repository sync (LD-63)
