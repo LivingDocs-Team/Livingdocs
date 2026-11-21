@@ -81,6 +81,13 @@ class DocumentWorkflowRoutesSecurityTest {
                     "{\"sourceVersion\":1,\"reason\":\"restore\"}"},
             new String[] {"PUT", "/api/document-workflows/" + ID + "/document", "{\"content\":\"# x\"}"});
 
+    /** The first role of the matrix that may use the route (so the request passes the BFF's role check). */
+    private static String roleAllowedFor(String[] route) {
+        return ScreenPermissions.ROLES.stream()
+                .filter(role -> ApiRoutePermissions.evaluate(route[0], route[1], role).allowed())
+                .findFirst().orElseThrow();
+    }
+
     @Autowired
     private MockMvc mvc;
     @Autowired
@@ -138,11 +145,28 @@ class DocumentWorkflowRoutesSecurityTest {
                             .header("X-XSRF-TOKEN", "wrong-token"))
                     .andExpect(status().isForbidden());
             // The session and CSRF are accepted, so the BFF proxies to GitHub Integration; the test
-            // base URL is unreachable, which the BFF reports as 502 (never 401/403).
+            // base URL is unreachable, which the BFF reports as 502 (never 401/403). The BFF also applies the
+            // Screen Authorization matrix, so the user acts as a role that may use this route.
+            userRepository.findByEmail(EMAIL).orElseThrow().setRole(roleAllowedFor(route));
             mvc.perform(withBody(route).session(session).cookie(csrf.cookie())
                             .header("X-XSRF-TOKEN", csrf.token()))
                     .andExpect(status().isBadGateway());
         }
+    }
+
+    @Test
+    void aValidSessionAndCsrfDoNotLetARoleUseAWorkflowRouteOfAnotherRole() throws Exception {
+        Csrf csrf = fetchCsrf();
+        MockHttpSession session = login(csrf);   // a Developer
+        for (String path : new String[] {"/approve", "/reject", "/claim", "/staff-review"}) {
+            // CSRF is valid, so the 403 can only come from the role check (the proxy would answer 502).
+            mvc.perform(post("/api/document-workflows/" + ID + path).session(session).cookie(csrf.cookie())
+                            .header("X-XSRF-TOKEN", csrf.token())
+                            .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                    .andExpect(status().isForbidden());
+        }
+        mvc.perform(get("/api/document-workflows/manager/queue").session(session))
+                .andExpect(status().isForbidden());
     }
 
     @Test

@@ -17,6 +17,8 @@ pytest.importorskip("pytest_playwright", reason="cần cài pytest-playwright đ
 
 from playwright.sync_api import Page, expect  # noqa: E402
 
+from rbac_nav import open_screen, open_tile  # noqa: E402
+
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 USER_ID = "48"
 
@@ -53,7 +55,7 @@ class FakeBackend:
         if (request.method, path) == ("GET", "/api/auth/csrf"):
             return route.fulfill(status=200, json={"token": "csrf-ld48"})
         if (request.method, path) == ("GET", "/api/auth/me"):
-            return route.fulfill(status=200, json={"id": USER_ID, "email": self.profile["email"]})
+            return route.fulfill(status=200, json={"id": USER_ID, "email": self.profile["email"], "role": self.profile["role"]})
         if (request.method, path) == ("GET", "/api/profile"):
             return route.fulfill(status=200, json=self.profile)
         if (request.method, path) == ("PATCH", "/api/profile"):
@@ -71,11 +73,12 @@ class FakeBackend:
         return route.fulfill(status=404, json={"message": f"Unexpected API request: {request.method} {path}"})
 
 
-def open_page(page: Page, backend: FakeBackend, button: str) -> None:
+def open_page(page: Page, backend: FakeBackend, screen: str) -> None:
     page.add_init_script(f"window.sessionStorage.setItem('livingdocs.userId', '{USER_ID}')")
     page.route("**/api/**", backend.handle)
     page.goto(FRONTEND_URL + "/")
-    page.get_by_role("button", name=button, exact=True).click()  # menu of the signed-in app
+    open_screen(page, "Profile & Settings")  # Account Management; Profile and Notification Preferences are its boxes
+    open_tile(page, screen)
 
 
 def test_profile_is_loaded_and_saved(page: Page):
@@ -108,7 +111,7 @@ def test_taken_username_shows_the_error(page: Page):
 
 def test_notification_preferences_are_loaded_and_saved(page: Page):
     backend = FakeBackend()
-    open_page(page, backend, "Notifications")
+    open_page(page, backend, "Notification Preferences")
 
     expect(page.get_by_role("heading", name="Notification Preferences")).to_be_visible()
     expect(page.get_by_label("Review requests")).not_to_be_checked()
