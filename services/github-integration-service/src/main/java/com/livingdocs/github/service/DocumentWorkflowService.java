@@ -311,7 +311,8 @@ public class DocumentWorkflowService {
         return audit.findByWorkflowIdOrderByCreatedAtAsc(workflowId).stream()
                 .map(e -> new AuditResponse(e.getId(), e.getWorkflowId(), e.getActorUserId(), e.getActorRole(), e.getAction(),
                         e.getPreviousStatus(), e.getNewStatus(), e.getPreviousReviewerUserId(),
-                        e.getNewReviewerUserId(), e.getComment(), e.getCreatedAt()))
+                        e.getNewReviewerUserId(), e.getComment(), e.getCreatedAt(),
+                        workflow.getDocumentId(), e.getDocumentVersion()))
                 .toList();
     }
 
