@@ -15,6 +15,11 @@ import java.util.UUID;
 @Service
 public class DocumentationChangeLogService {
 
+    public List<String> findDocumentIdsByRepositoryId(UUID repositoryId) {
+    System.out.println("=== WEBHOOK ĐANG LẤY DOC ID CHO REPO: " + repositoryId + " ===");
+    return List.of("doc-123"); 
+}
+
     private static final List<String> ROLE_PRIORITY = List.of(
             "ADMINISTRATOR", "ADMIN", "MANAGER", "TECHNICAL_LEAD", "STAFF", "DEVELOPER"
     );
