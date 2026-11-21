@@ -43,9 +43,6 @@ class InternalSystemAnalyticsTest {
     @MockitoBean
     DocumentAccessService documentAccessService;
 
-    @MockitoBean
-    JdbcTemplate jdbcTemplate;
-
     @Autowired MockMvc mvc;
     @Autowired JdbcTemplate jdbc;
     @Autowired AiStub ai;
