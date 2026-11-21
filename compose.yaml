@@ -7,7 +7,7 @@
       POSTGRES_PASSWORD: livingdocs
     ports:
       # Local developer database access only; keep PostgreSQL off host network interfaces.
-      - "127.0.0.1:5434:5432"
+      - "127.0.0.1:${BACKEND_DB_PORT:-5434}:5432"
     volumes:
       - backend-db-data:/var/lib/postgresql/data
     healthcheck:
@@ -26,7 +26,7 @@
       POSTGRES_PASSWORD: livingdocs
     ports:
       # Local developer database access only; keep PostgreSQL off host network interfaces.
-      - "127.0.0.1:5433:5432"
+      - "127.0.0.1:${GITHUB_DB_PORT:-5433}:5432"
     volumes:
       - github-db-data:/var/lib/postgresql/data
     healthcheck:
@@ -43,7 +43,7 @@
       dockerfile: Dockerfile
     image: livingdocs-backend:local
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
     environment:
       DB_URL: jdbc:postgresql://backend-db:5432/cnpm
       DB_USERNAME: livingdocs
@@ -78,12 +78,12 @@
       # custom templates and versioned documents survive restarts (named volume below)
       TEMPLATES_FILE: /app/data/templates.json
       DOCUMENTS_FILE: /app/data/documents.json
-      INTERNAL_API_SECRET: ${GITHUB_INTEGRATION_INTERNAL_SECRET:?GITHUB_INTEGRATION_INTERNAL_SECRET must be set in .env}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-smoke-test-internal-secret}
     volumes:
       - ai-templates:/app/data
     ports:
       # Optional local debugging access; service-to-service traffic uses analysis-internal.
-      - "127.0.0.1:8001:8001"
+      - "127.0.0.1:${AI_SERVICE_PORT:-8001}:8001"
     healthcheck:
       test:
         - CMD
@@ -109,7 +109,7 @@
       - analyzer-data:/app/data
     ports:
       # Optional local debugging access; service-to-service traffic uses analysis-internal.
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${ANALYZER_PORT:-8000}:8000"
     healthcheck:
       test:
         - CMD
@@ -131,7 +131,7 @@
     ports:
       # The GitHub OAuth callback currently redirects the browser to localhost:8082.
       # Other /api requests require the Backend-to-service credential.
-      - "${GITHUB_CALLBACK_BIND_ADDRESS:-127.0.0.1}:8082:8082"
+      - "${GITHUB_CALLBACK_BIND_ADDRESS:-127.0.0.1}:${GITHUB_INTEGRATION_PORT:-8082}:8082"
     environment:
       DB_URL: jdbc:postgresql://github-db:5432/github_integration
       DB_USERNAME: livingdocs
@@ -170,7 +170,7 @@
       dockerfile: Dockerfile
     image: livingdocs-frontend:local
     ports:
-      - "127.0.0.1:3000:80"
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:80"
     depends_on:
       backend:
         condition: service_healthy
