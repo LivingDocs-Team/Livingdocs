@@ -1,12 +1,14 @@
 """LD-403 frontend logic fixes, against the built frontend with every /api call mocked:
 
-- the login page offers "Sign out" after a successful sign-in (the nav with Logout is hidden there)
+- signing out (Logout in the app shell) ends the session and returns to the public Home page
 - removing a repository from a workspace asks for confirmation
 - a documentation generation that was reset does not write its late result back over the screen
 """
 import os
 
 from playwright.sync_api import Page, expect
+
+from rbac_nav import LOGIN_URL, open_screen, sign_in
 
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 USER = {"id": 42, "email": "user@example.test", "username": "user", "firstName": "Test",
@@ -72,42 +74,39 @@ class Api:
         return send(404, {"message": f"Unexpected API request: {request.method} {path}"})
 
 
-def open_app(page: Page, api: Api):
+def open_app(page: Page, api: Api, url=f"{FRONTEND_URL}/"):
     page.route("**/api/**", api.handle)
-    page.goto(f"{FRONTEND_URL}/")
+    page.goto(url)
 
 
-# ---------- sign out from the login page ----------
+# ---------- sign out ----------
 
-def test_login_page_offers_sign_out_after_signing_in_and_clears_the_session(page: Page):
+def test_logout_after_signing_in_clears_the_session_and_returns_home(page: Page):
     api = Api(signed_in=False)
-    open_app(page, api)
-    expect(page.get_by_role("button", name="Sign out")).to_have_count(0)
+    open_app(page, api, LOGIN_URL)
+    expect(page.get_by_role("button", name="Logout")).to_have_count(0)
 
-    page.get_by_label("Email").fill(USER["email"])
-    page.get_by_label("Password").fill("test-only-password")
-    page.get_by_role("button", name="Sign in", exact=True).click()
+    sign_in(page, USER["email"])
     expect(page.get_by_text("Signed in successfully")).to_be_visible()
-    expect(page.get_by_role("button", name="Sign out")).to_be_visible()
+    expect(page.get_by_role("button", name="Logout")).to_be_visible()
 
-    page.get_by_role("button", name="Sign out").click()
-    expect(page.get_by_role("button", name="Sign out")).to_have_count(0)
+    page.get_by_role("button", name="Logout").click()
+    expect(page.get_by_role("button", name="Logout")).to_have_count(0)
     expect(page.get_by_text("Signed in successfully")).to_have_count(0)   # no stale success message
-    expect(page.get_by_role("button", name="Sign in", exact=True)).to_be_visible()
+    expect(page.get_by_role("heading", name="LivingDocs")).to_be_visible()
+    assert page.url.endswith("#/")
     assert ("POST", "/api/auth/logout") in api.requests
     assert page.evaluate("sessionStorage.getItem('livingdocs.userId')") is None
 
 
 def test_sign_out_failure_is_reported_and_keeps_the_user_signed_in(page: Page):
     api = Api(signed_in=False, logout_status=500)
-    open_app(page, api)
-    page.get_by_label("Email").fill(USER["email"])
-    page.get_by_label("Password").fill("test-only-password")
-    page.get_by_role("button", name="Sign in", exact=True).click()
-    page.get_by_role("button", name="Sign out").click()
+    open_app(page, api, LOGIN_URL)
+    sign_in(page, USER["email"])
+    page.get_by_role("button", name="Logout").click()
 
     expect(page.get_by_role("alert").filter(has_text="Could not sign out")).to_be_visible()
-    expect(page.get_by_role("button", name="Sign out")).to_be_visible()
+    expect(page.get_by_role("button", name="Logout")).to_be_visible()
     expect(page.get_by_text("Signed in successfully")).to_be_visible()
 
 
@@ -115,7 +114,7 @@ def test_sign_out_failure_is_reported_and_keeps_the_user_signed_in(page: Page):
 
 def open_workspace_tab(page: Page, api: Api):
     open_app(page, api)
-    page.get_by_role("button", name="Repository Management").first.click()
+    open_screen(page, "Repository List")
     page.get_by_role("button", name="Workspace (1)").click()
     expect(page.get_by_role("heading", name="acme/shop")).to_be_visible()
 
@@ -152,7 +151,7 @@ def test_removing_a_repository_deletes_it_after_the_confirmation_is_accepted(pag
 def test_late_result_of_a_reset_generation_does_not_overwrite_the_screen(page: Page):
     api = Api()
     open_app(page, api)
-    page.get_by_role("button", name="Documentation Management").first.click()
+    open_screen(page, "Generated Documents")
     expect(page.get_by_role("button", name="Generate documentation")).to_be_enabled()
     page.get_by_role("button", name="Generate documentation").click()
     expect(page.get_by_text("Generating…").first).to_be_visible()
@@ -172,7 +171,7 @@ def test_late_result_of_a_reset_generation_does_not_overwrite_the_screen(page: P
 def test_generation_that_is_not_reset_still_completes(page: Page):
     api = Api()
     open_app(page, api)
-    page.get_by_role("button", name="Documentation Management").first.click()
+    open_screen(page, "Generated Documents")
     page.get_by_role("button", name="Generate documentation").click()
     expect(page.get_by_text("Generation completed")).to_be_visible(timeout=15000)
     expect(page.get_by_role("heading", name="Generated Documentation")).to_be_visible()

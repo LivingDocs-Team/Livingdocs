@@ -66,6 +66,55 @@ class DocumentWorkflowControllerTest {
     }
 
     @Test
+    void reviewCommentsValidateBodyAndReturnCreatedComment() throws Exception {
+        var request = new com.livingdocs.github.dto.WorkflowDtos.ReviewCommentRequest("Clarify setup", 2);
+        var response = new com.livingdocs.github.dto.WorkflowDtos.ReviewCommentResponse(
+                UUID.randomUUID(), WORKFLOW_ID, STAFF_ID, 2, "Clarify setup", Instant.now());
+        when(workflowService.addComment(eq(STAFF_ID), anySet(), eq(WORKFLOW_ID), eq(request)))
+                .thenReturn(response);
+        mockMvc.perform(post("/api/document-workflows/" + WORKFLOW_ID + "/comments")
+                .header("X-User-Id", STAFF_ID)
+                .header("X-User-Authorities", "ROLE_STAFF,DOCUMENT_REVIEW")
+                .contentType("application/json")
+                .content(new ObjectMapper().writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.documentVersion").value(2))
+                .andExpect(jsonPath("$.comment").value("Clarify setup"));
+        for (String body : List.of(
+                "{\"comment\":\" \",\"documentVersion\":2}",
+                "{\"comment\":\"Text\"}",
+                "{\"comment\":\"Text\",\"documentVersion\":0}",
+                "{\"comment\":\"Text\",\"documentVersion\":2,\"section\":{\"startOffset\":0,\"endOffset\":5}}",
+                "{\"comment\":\"Text\",\"documentVersion\":2,\"section\":{\"startOffset\":-1,\"endOffset\":5,\"quote\":\"Setup\"}}")) {
+            mockMvc.perform(post("/api/document-workflows/" + WORKFLOW_ID + "/comments")
+                    .header("X-User-Id", STAFF_ID)
+                    .header("X-User-Authorities", "ROLE_STAFF,DOCUMENT_REVIEW")
+                    .contentType("application/json").content(body))
+                    .andExpect(status().isBadRequest());
+        }
+        verify(workflowService, times(1)).addComment(anyString(), anySet(), any(), any());
+    }
+
+    @Test
+    void submitSupportsExpectedVersionAndExistingBodylessClients() throws Exception {
+        String path = "/api/document-workflows/" + WORKFLOW_ID + "/submit";
+        mockMvc.perform(post(path).header("X-User-Id", "owner-1")
+                .header("X-User-Authorities", "DOCUMENT_SUBMIT")
+                .contentType("application/json").content("{\"expectedVersion\":3}"))
+                .andExpect(status().isOk());
+        verify(workflowService).submit("owner-1", Set.of("DOCUMENT_SUBMIT"), WORKFLOW_ID, 3);
+        mockMvc.perform(post(path).header("X-User-Id", "owner-1")
+                .header("X-User-Authorities", "DOCUMENT_SUBMIT"))
+                .andExpect(status().isOk());
+        verify(workflowService).submit("owner-1", Set.of("DOCUMENT_SUBMIT"), WORKFLOW_ID);
+        mockMvc.perform(post(path).header("X-User-Id", "owner-1")
+                .header("X-User-Authorities", "DOCUMENT_SUBMIT")
+                .contentType("application/json").content("{\"expectedVersion\":0}"))
+                .andExpect(status().isBadRequest());
+        verifyNoMoreInteractions(workflowService);
+    }
+
+    @Test
     void managerCanRequestDocumentRollback() throws Exception {
         WorkflowResponse response = new WorkflowResponse(
                 WORKFLOW_ID,
@@ -259,5 +308,36 @@ class DocumentWorkflowControllerTest {
         verify(workflowService).reviewEvidence(STAFF_ID, STAFF_AUTHORITIES, WORKFLOW_ID);
         verify(workflowService).reviewComparison(STAFF_ID, STAFF_AUTHORITIES, WORKFLOW_ID);
         verify(workflowService).history(MANAGER_ID, MANAGER_AUTHORITIES, WORKFLOW_ID);
+    }
+
+    @Test
+    void versionsAndComparisonAreForwardedWithTheChosenVersions() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        when(workflowService.versions(MANAGER_ID, MANAGER_AUTHORITIES, WORKFLOW_ID))
+                .thenReturn(mapper.readTree("[{\"number\":2},{\"number\":1}]"));
+        when(workflowService.compareVersions(MANAGER_ID, MANAGER_AUTHORITIES, WORKFLOW_ID, 1, 2))
+                .thenReturn(mapper.readTree("{\"from_version\":{\"number\":1},\"to_version\":{\"number\":2},"
+                        + "\"stats\":{\"added\":1},\"rows\":[]}"));
+        when(workflowService.compareVersions(MANAGER_ID, MANAGER_AUTHORITIES, WORKFLOW_ID, null, null))
+                .thenReturn(mapper.readTree("{\"rows\":[]}"));
+
+        mockMvc.perform(get("/api/document-workflows/{id}/versions", WORKFLOW_ID)
+                        .header("X-User-Id", MANAGER_ID)
+                        .header("X-User-Authorities", "ROLE_MANAGER,DOCUMENT_APPROVAL_QUEUE_VIEW,DOCUMENT_APPROVE,DOCUMENT_REJECT"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$[0].number").value(2));
+        mockMvc.perform(get("/api/document-workflows/{id}/comparison", WORKFLOW_ID)
+                        .param("from", "1").param("to", "2")
+                        .header("X-User-Id", MANAGER_ID)
+                        .header("X-User-Authorities", "ROLE_MANAGER,DOCUMENT_APPROVAL_QUEUE_VIEW,DOCUMENT_APPROVE,DOCUMENT_REJECT"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.to_version.number").value(2))
+                .andExpect(jsonPath("$.stats.added").value(1));
+        mockMvc.perform(get("/api/document-workflows/{id}/comparison", WORKFLOW_ID)
+                        .header("X-User-Id", MANAGER_ID)
+                        .header("X-User-Authorities", "ROLE_MANAGER,DOCUMENT_APPROVAL_QUEUE_VIEW,DOCUMENT_APPROVE,DOCUMENT_REJECT"))
+                .andExpect(status().isOk());
+
+        verify(workflowService).compareVersions(MANAGER_ID, MANAGER_AUTHORITIES, WORKFLOW_ID, 1, 2);
+        verify(workflowService).compareVersions(MANAGER_ID, MANAGER_AUTHORITIES, WORKFLOW_ID, null, null);
     }
 }

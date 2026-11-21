@@ -1,11 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import { githubApi, githubApiText } from './githubApi';
 import { TemplateManager, TemplatePicker } from './DocumentationTemplates';
 import { useTemplates } from './templateApi';
 import DocumentationSuggestionReview from './DocumentationSuggestionReview';
+import DocumentationRevision from './DocumentationRevision';
 import StaffReviewQueue from './StaffReviewQueue';
 import ManagerApprovalQueue from './ManagerApprovalQueue';
+import DocumentVersionComparison, { DiffSummary, DiffView } from './DocumentVersionComparison';
+import { diffTexts } from './documentationDiff';
+import Can from './rbac/Can';
 
 
 function escapeHtml(value) {
@@ -165,7 +169,7 @@ function submitErrorMessage(error, step) {
   return error?.message || `Could not ${step}. Please try again.`;
 }
 
-export default function DocumentationManagement({ userId, userRole }) {
+export default function DocumentationManagement({ userId }) {
 
   const workspaceId = userId ? `ws-${userId}` : '';
 
@@ -355,6 +359,7 @@ export default function DocumentationManagement({ userId, userRole }) {
   const [history, setHistory] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [historyError, setHistoryError] = useState('');
+  const [revisionNotice, setRevisionNotice] = useState('');
 
   useEffect(() => {
     if (!userId) {
@@ -456,7 +461,7 @@ export default function DocumentationManagement({ userId, userRole }) {
       });
 
     return () => { cancelled = true; };
-  }, [userId, selectedWorkflowId]);
+  }, [userId, selectedWorkflowId, workflowsRefresh]);
 
   const selectedWorkflow = workflowPage.content.find(
     (workflow) => String(workflow.id) === selectedWorkflowId
@@ -913,17 +918,16 @@ export default function DocumentationManagement({ userId, userRole }) {
 
   );
 
-  const currentLines = markdown.split('\n');
   const rawProgress = Number(job?.progress ?? 0);
   const progressFraction = Number.isFinite(rawProgress)
     ? Math.min(1, Math.max(0, rawProgress > 1 ? rawProgress / 100 : rawProgress))
     : 0;
 
-  const comparisonLines = compareVersion
-
-    ? compareVersion.content.split('\n')
-
-    : [];
+  // LD-183: the same line diff as the AI service (added / removed / modified)
+  const sessionDiff = useMemo(
+    () => (compareVersion ? diffTexts(compareVersion.content, markdown) : null),
+    [compareVersion, markdown],
+  );
 
   return (
 
@@ -996,14 +1000,16 @@ export default function DocumentationManagement({ userId, userRole }) {
 
           <div className="documentation-template-heading">
             <label id="documentation-template-label">Documentation template</label>
-            <button
-              type="button"
-              className="documentation-secondary-button"
-              aria-expanded={isManagingTemplates}
-              onClick={() => setIsManagingTemplates((open) => !open)}
-            >
-              {isManagingTemplates ? 'Close template manager' : 'Manage templates'}
-            </button>
+            <Can screen="templates" action="U">
+              <button
+                type="button"
+                className="documentation-secondary-button"
+                aria-expanded={isManagingTemplates}
+                onClick={() => setIsManagingTemplates((open) => !open)}
+              >
+                {isManagingTemplates ? 'Close template manager' : 'Manage templates'}
+              </button>
+            </Can>
           </div>
           <TemplatePicker
             templates={templateList.templates}
@@ -1015,17 +1021,19 @@ export default function DocumentationManagement({ userId, userRole }) {
           />
 
           <div className="documentation-actions">
-            <button
-              type="submit"
-              disabled={
-                status === 'generating'
-                || isLoadingRepositories
-                || repositories.length === 0
-                || !templateList.templates.some((item) => item.id === template)
-              }
-            >
-              {status === 'generating' ? 'Generating…' : 'Generate documentation'}
-            </button>
+            <Can screen="documentation" action="C">
+              <button
+                type="submit"
+                disabled={
+                  status === 'generating'
+                  || isLoadingRepositories
+                  || repositories.length === 0
+                  || !templateList.templates.some((item) => item.id === template)
+                }
+              >
+                {status === 'generating' ? 'Generating…' : 'Generate documentation'}
+              </button>
+            </Can>
 
             <button
               type="button"
@@ -1188,10 +1196,25 @@ export default function DocumentationManagement({ userId, userRole }) {
                   ))}
                 </ol>
               )}
+
+              {selectedWorkflowId && (
+                <DocumentVersionComparison key={selectedWorkflowId} workflowId={selectedWorkflowId} userId={userId} />
+              )}
             </>
           )}
 
         </section>
+
+        {revisionNotice && <p role="status">{revisionNotice}</p>}
+        {selectedWorkflow?.status === 'CHANGES_REQUESTED'
+          && String(selectedWorkflow.ownerUserId) === String(userId) && (
+          <DocumentationRevision key={`${userId}:${selectedWorkflowId}`}
+            userId={userId} workflowId={selectedWorkflowId}
+            onSubmitted={(message) => {
+              setRevisionNotice(message);
+              setWorkflowsRefresh((value) => value + 1);
+            }} />
+        )}
 
         <DocumentationSuggestionReview
           workflows={workflowPage.content}
@@ -1204,9 +1227,12 @@ export default function DocumentationManagement({ userId, userRole }) {
           workflowsError={workflowsError}
         />
 
-        <StaffReviewQueue userId={userId} />
+        {/* Working the Staff queue needs matrix row #10 U (Staff); a Developer only reads review feedback (R). */}
+        <Can screen="staffReview" action="U">
+          <StaffReviewQueue userId={userId} />
+        </Can>
 
-        <ManagerApprovalQueue userId={userId} userRole={userRole} />
+        <ManagerApprovalQueue userId={userId} />
 
         {isManagingTemplates && (
           <TemplateManager
@@ -1257,13 +1283,15 @@ export default function DocumentationManagement({ userId, userRole }) {
                 </p>
               )}
               <div className="documentation-actions">
-                <button
-                  type="button"
-                  onClick={handleSubmitForReview}
-                  disabled={!userId || isSubmitting || isSubmitted || markdown !== originalDocument}
-                >
-                  {isSubmitting ? 'Submitting…' : isSubmitted ? 'Submitted for review' : 'Submit for review'}
-                </button>
+                <Can screen="workflowSubmission" action="C">
+                  <button
+                    type="button"
+                    onClick={handleSubmitForReview}
+                    disabled={!userId || isSubmitting || isSubmitted || markdown !== originalDocument}
+                  >
+                    {isSubmitting ? 'Submitting…' : isSubmitted ? 'Submitted for review' : 'Submit for review'}
+                  </button>
+                </Can>
               </div>
               {submitError && <p className="documentation-error" role="alert">{submitError}</p>}
               {submitNotice && <p className="documentation-notice" role="status">{submitNotice}</p>}
@@ -1443,13 +1471,15 @@ export default function DocumentationManagement({ userId, userRole }) {
       Restore original
     </button>
 
-    <button
-      type="button"
-      className="documentation-secondary-button"
-      onClick={handleExport}
-    >
-      Export Markdown
-    </button>
+    <Can screen="documentation" action="E">
+      <button
+        type="button"
+        className="documentation-secondary-button"
+        onClick={handleExport}
+      >
+        Export Markdown
+      </button>
+    </Can>
   </div>
 
   <p className="documentation-hint">
@@ -1561,19 +1591,21 @@ export default function DocumentationManagement({ userId, userRole }) {
 
                         <p>{selectedVersion.content.length} characters</p>
 
-                        <button
+                        <Can screen="documentRollback" action="U">
+                          <button
 
-                          type="button"
+                            type="button"
 
-                          className="documentation-secondary-button"
+                            className="documentation-secondary-button"
 
-                          onClick={handleRollback}
+                            onClick={handleRollback}
 
-                        >
+                          >
 
-                          Restore this version
+                            Restore this version
 
-                        </button>
+                          </button>
+                        </Can>
 
                       </div>
 
@@ -1632,71 +1664,15 @@ export default function DocumentationManagement({ userId, userRole }) {
                 </select>
 
                 {compareVersion ? (
-
-                  <div className="documentation-diff">
-
-                    <div className="documentation-diff-column">
-
-                      <h4>Saved version</h4>
-
-                      {comparisonLines.map((line, index) => {
-
-                        const changed = currentLines[index] !== line;
-
-                        return (
-
-                          <div
-
-                            key={`${index}-${line}`}
-
-                            className={`documentation-diff-line ${changed ? 'diff-removed' : ''}`}
-
-                          >
-
-                            <span>{changed ? '−' : ' '}</span>
-
-                            {line || ' '}
-
-                          </div>
-
-                        );
-
-                      })}
-
-                    </div>
-
-                    <div className="documentation-diff-column">
-
-                      <h4>Current document</h4>
-
-                      {currentLines.map((line, index) => {
-
-                        const changed = comparisonLines[index] !== line;
-
-                        return (
-
-                          <div
-
-                            key={`${index}-${line}`}
-
-                            className={`documentation-diff-line ${changed ? 'diff-added' : ''}`}
-
-                          >
-
-                            <span>{changed ? '+' : ' '}</span>
-
-                            {line || ' '}
-
-                          </div>
-
-                        );
-
-                      })}
-
-                    </div>
-
-                  </div>
-
+                  <>
+                    <DiffSummary diff={sessionDiff} />
+                    <DiffView
+                      key={compareVersion.id}
+                      diff={sessionDiff}
+                      oldLabel={compareVersion.label}
+                      newLabel="Current document"
+                    />
+                  </>
                 ) : (
 
                   <div className="documentation-empty">

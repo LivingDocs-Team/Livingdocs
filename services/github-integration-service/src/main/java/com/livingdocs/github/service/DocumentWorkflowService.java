@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -13,6 +14,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.livingdocs.github.dto.WorkflowDtos.AuditResponse;
+import com.livingdocs.github.dto.WorkflowDtos.ReviewCommentRequest;
+import com.livingdocs.github.dto.WorkflowDtos.SectionFeedback;
+import com.livingdocs.github.dto.WorkflowDtos.ChangeRequestResponse;
+import com.livingdocs.github.dto.WorkflowDtos.ReviewCommentResponse;
 import com.livingdocs.github.dto.WorkflowDtos.ContentResponse;
 import com.livingdocs.github.dto.WorkflowDtos.EditDocumentRequest;
 import com.livingdocs.github.dto.WorkflowDtos.PageResponse;
@@ -121,6 +126,38 @@ public class DocumentWorkflowService {
         return new ContentResponse(workflow.getDocumentId(), version,
                 documents.getDocumentContent(actor, workflow.getDocumentId(), version));
     }
+    /** LD-184: versions of the workflow's document, for anyone who can read the workflow. */
+    @Transactional(readOnly = true)
+    public JsonNode versions(String actor, Set<String> authorities, UUID workflowId) {
+        DocumentWorkflow workflow = find(workflowId);
+        requireReadable(workflow, actor, authorities);
+        JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
+        requireDocumentOwner(document, workflow.getOwnerUserId());
+        return documents.getDocumentVersions(actor, workflow.getDocumentId());
+    }
+
+    /**
+     * LD-183: compare any two versions of the workflow's document (UC-30, BR-44). Developer,
+     * Staff and Manager may compare whatever they are allowed to read in the workflow.
+     */
+    @Transactional(readOnly = true)
+    public JsonNode compareVersions(String actor, Set<String> authorities, UUID workflowId,
+            Integer from, Integer to) {
+        if ((from != null && from < 1) || (to != null && to < 1)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST,
+                    "DOCUMENT_COMPARISON_INVALID", "Version numbers start at 1.");
+        }
+        if (from != null && from.equals(to)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST,
+                    "DOCUMENT_COMPARISON_INVALID", "Select two different versions to compare.");
+        }
+        DocumentWorkflow workflow = find(workflowId);
+        requireReadable(workflow, actor, authorities);
+        JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
+        requireDocumentOwner(document, workflow.getOwnerUserId());
+        return documents.compareDocumentVersions(actor, workflow.getDocumentId(), from, to);
+    }
+
     @Transactional(readOnly = true)
     public JsonNode reviewEvidence(String actor, Set<String> authorities, UUID workflowId) {
         require(authorities, "DOCUMENT_REVIEW");
@@ -219,6 +256,11 @@ public class DocumentWorkflowService {
 
     @Transactional
     public WorkflowResponse submit(String actor, Set<String> authorities, UUID workflowId) {
+        return submit(actor, authorities, workflowId, null);
+    }
+
+    @Transactional
+    public WorkflowResponse submit(String actor, Set<String> authorities, UUID workflowId, Integer expectedVersion) {
         require(authorities, "DOCUMENT_SUBMIT");
         DocumentWorkflow workflow = lock(workflowId);
         requireOwner(workflow, actor);
@@ -229,6 +271,9 @@ public class DocumentWorkflowService {
         JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
         requireDocumentOwner(document, actor);
         int version = documentVersionForSubmit(workflow, document);
+        if (expectedVersion != null && expectedVersion != version) {
+            throw conflict("The document version changed. Reload before submitting.");
+        }
         workflow.submit(version);
         workflows.saveAndFlush(workflow);
         record(workflow, actor, "SUBMITTED", previous, workflow.getStatus(), null);
@@ -294,6 +339,72 @@ public class DocumentWorkflowService {
     }
 
     @Transactional
+    public ReviewCommentResponse addComment(String actor, Set<String> authorities, UUID workflowId,
+            ReviewCommentRequest request) {
+        require(authorities, "DOCUMENT_REVIEW");
+        requireRole(authorities, "STAFF");
+        DocumentWorkflow workflow = lock(workflowId);
+        if (workflow.getStatus() != DocumentWorkflowStatus.STAFF_REVIEWING
+                || !actor.equals(workflow.getReviewerUserId())) {
+            throw ApiException.forbidden("Only the assigned staff reviewer can comment.");
+        }
+        if (!request.documentVersion().equals(workflow.getSubmittedDocumentVersion())) {
+            throw conflict("The submitted document version changed. Reload before commenting.");
+        }
+        DocumentWorkflowAudit entry = new DocumentWorkflowAudit(workflowId, actor, "REVIEW_COMMENT",
+                workflow.getStatus().name(), workflow.getStatus().name(),
+                normalizeComment(request.comment()), null, null, "STAFF");
+        entry.setDocumentVersion(workflow.getSubmittedDocumentVersion());
+        if (request.section() != null) {
+            SectionFeedback section = request.section();
+            String content = documents.getDocumentContent(actor, workflow.getDocumentId(),
+                    workflow.getSubmittedDocumentVersion());
+            if (section.startOffset() < 0 || section.endOffset() <= section.startOffset()
+                    || section.endOffset() > content.length()
+                    || !content.substring(section.startOffset(), section.endOffset()).equals(section.quote())) {
+                throw ApiException.badRequest("The selected passage does not match the submitted document.");
+            }
+            entry.setSectionFeedback(section.startOffset(), section.endOffset(), section.quote());
+        }
+        return toCommentResponse(audit.saveAndFlush(entry));
+    }
+
+    @Transactional(readOnly = true)
+    public List<ReviewCommentResponse> comments(String actor, Set<String> authorities, UUID workflowId) {
+        DocumentWorkflow workflow = find(workflowId);
+        requireReadable(workflow, actor, authorities);
+        return audit.findByWorkflowIdOrderByCreatedAtAsc(workflowId).stream()
+                .filter(entry -> "REVIEW_COMMENT".equals(entry.getAction()))
+                .map(DocumentWorkflowService::toCommentResponse)
+                .toList();
+    }
+
+    private static ReviewCommentResponse toCommentResponse(DocumentWorkflowAudit entry) {
+        return new ReviewCommentResponse(entry.getId(), entry.getWorkflowId(), entry.getActorUserId(),
+                entry.getDocumentVersion(), entry.getComment(), entry.getCreatedAt(),
+                entry.getSectionQuote() == null ? null : new SectionFeedback(
+                        entry.getSectionStartOffset(), entry.getSectionEndOffset(), entry.getSectionQuote()));
+    }
+
+    @Transactional(readOnly = true)
+    public List<ChangeRequestResponse> changeRequests(String actor, Set<String> authorities, UUID workflowId) {
+        DocumentWorkflow workflow = find(workflowId);
+        requireReadable(workflow, actor, authorities);
+        List<DocumentWorkflowAudit> history = audit.findByWorkflowIdOrderByCreatedAtAsc(workflowId);
+        return history.stream()
+                .filter(entry -> "CHANGES_REQUESTED".equals(entry.getAction()))
+                .map(request -> new ChangeRequestResponse(request.getId(), request.getActorUserId(),
+                        request.getDocumentVersion(), request.getComment(), request.getCreatedAt(),
+                        history.stream()
+                                .filter(comment -> "REVIEW_COMMENT".equals(comment.getAction()))
+                                .filter(comment -> request.getDocumentVersion() != null
+                                        && request.getDocumentVersion().equals(comment.getDocumentVersion()))
+                                .filter(comment -> !comment.getCreatedAt().isAfter(request.getCreatedAt()))
+                                .map(DocumentWorkflowService::toCommentResponse).toList()))
+                .toList();
+    }
+
+    @Transactional
     public WorkflowResponse staffReview(String actor, Set<String> authorities, UUID workflowId,
             StaffReviewRequest request) {
         require(authorities, "DOCUMENT_REVIEW");
@@ -311,7 +422,8 @@ public class DocumentWorkflowService {
         DocumentWorkflowStatus previous = workflow.getStatus();
         workflow.review(result, normalizeComment(request.comment()));
         workflows.saveAndFlush(workflow);
-        record(workflow, actor, result.name(), previous, workflow.getStatus(), request.comment());
+        record(workflow, actor, result.name(), previous, workflow.getStatus(), request.comment(),
+                null, null, "STAFF");
         return toResponse(workflow);
     }
 
@@ -334,6 +446,9 @@ public class DocumentWorkflowService {
         }
         if (expectedVersion <= 0) {
             throw conflict("The document has no editable version.");
+        }
+        if (request.expectedVersion() != null && request.expectedVersion() != expectedVersion) {
+            throw conflict("The document version changed. Reload before saving.");
         }
         documents.editOwnedDocument(actor, workflow.getDocumentId(),
                 expectedVersion, request.content(), comment);
@@ -568,9 +683,11 @@ public class DocumentWorkflowService {
     private void record(DocumentWorkflow w, String actor, String action,
             DocumentWorkflowStatus previous, DocumentWorkflowStatus next, String comment,
             String previousReviewer, String newReviewer, String actorRole) {
-        audit.save(new DocumentWorkflowAudit(w.getId(), actor, action,
+        DocumentWorkflowAudit entry = new DocumentWorkflowAudit(w.getId(), actor, action,
                 previous == null ? null : previous.name(), next.name(), normalizeComment(comment),
-                previousReviewer, newReviewer, actorRole));
+                previousReviewer, newReviewer, actorRole);
+        entry.setDocumentVersion(w.getSubmittedDocumentVersion());
+        audit.save(entry);
     }
 
     private static String normalizeComment(String comment) {

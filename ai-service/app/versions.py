@@ -23,9 +23,11 @@ from typing import Dict, List, Optional
 from .generator import DocGenerator
 from .jobs import JobOutput
 from .models import JobReport, Scope, now
+from .doc_diff import diff_texts
 from .renderer import render_overview
-from .version_models import (Document, DocumentVersion, FileSection, HistoryAction, HistoryEvent,
-                             SectionAction, SectionChange, SkippedFile, VersionOrigin,
+from .version_models import (ComparedVersion, Document, DocumentDiff, DocumentVersion, FileSection,
+                             HistoryAction, HistoryEvent, SectionAction, SectionChange, SkippedFile,
+                             VersionOrigin,
                              VersionStatus, VersionSummary)
 
 log = logging.getLogger(__name__)
@@ -103,6 +105,11 @@ def repair_evidence(versions: List[DocumentVersion]) -> int:
             inherit_evidence(v, _evidence_source(versions, v))
             fixed += _has_evidence(v)
     return fixed
+
+
+def _side(v: DocumentVersion) -> ComparedVersion:
+    return ComparedVersion(number=v.number, status=v.status, origin=v.origin, created_at=v.created_at,
+                           created_by=v.created_by, note=v.note)
 
 
 # ---------- Store ----------
@@ -210,6 +217,29 @@ class DocumentStore:
             raise _not_found(f"Version {n}")
         return vs[n - 1]
 
+    def latest_number(self, doc_id: str) -> int:
+        """The version people see as "current": the proposal under review, else the accepted one."""
+        doc = self.get(doc_id)
+        return doc.pending_version or doc.current_version or len(self._versions[doc_id])
+
+    def compare(self, doc_id: str, from_number: Optional[int] = None,
+                to_number: Optional[int] = None) -> DocumentDiff:
+        """LD-183: difference between any two versions (BR-44). Without numbers the latest version
+        is compared with the one before it ("current vs previous")."""
+        with self._lock:
+            self.get(doc_id)
+            total = len(self._versions[doc_id])
+            if total < 2 and from_number is None and to_number is None:
+                raise VersionError(409, "Create a version first to enable comparison.")
+            to_n = to_number if to_number is not None else self.latest_number(doc_id)
+            from_n = from_number if from_number is not None else to_n - 1
+            if from_n == to_n:
+                raise VersionError(400, "Select two different versions to compare.")
+            older, newer = self.version(doc_id, from_n), self.version(doc_id, to_n)
+            result = diff_texts(older.content, newer.content)
+            return DocumentDiff(document_id=doc_id, from_version=_side(older), to_version=_side(newer),
+                                **result.model_dump())
+
     def history(self, doc_id: str) -> List[HistoryEvent]:
         """Audit trail, oldest first."""
         self.get(doc_id)
@@ -271,6 +301,7 @@ class DocumentStore:
                         raise VersionError(409, "This generation job is already linked to another owner")
             doc = Document(id=uuid.uuid4().hex, title=title or output.target, target=output.target,
                            scope=output.scope, template_id=output.template_id,
+                           template_version=getattr(output, "template_version", None),
                            output_language=output.output_language, source_job_id=job_id,
                            owner_user_id=owner_user_id,
                            current_version=0 if owner_user_id is not None else 1,

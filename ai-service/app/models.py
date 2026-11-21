@@ -123,6 +123,7 @@ class GenerateRequest(BaseModel):
     target: str = Field(min_length=1)          # file path, module name or repository name
     files: List[FileAnalysis] = Field(min_length=1)
     template_id: str = "default"
+    template_version: Optional[int] = Field(default=None, ge=1)  # LD-227: older version; None = current
     output_language: str = "vi"                # "vi" or "en"
     context: List[ContextDocument] = Field(default_factory=list)  # existing docs to ground on
     source_snapshot: Optional[SourceSnapshot] = None
@@ -192,8 +193,18 @@ class TemplateIn(BaseModel):
 class Template(TemplateIn):
     id: str
     built_in: bool = False
+    version: int = 1                  # LD-227: number of the current version (1 = as created)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+
+class TemplateVersion(TemplateIn):
+    """LD-227: one saved version of a template; versions are never changed or removed while the
+    template exists."""
+    template_id: str
+    version: int
+    created_at: Optional[datetime] = None
+    restored_from: Optional[int] = None   # set when this version restored an older one
 
 
 class TemplateSections(BaseModel):
@@ -272,6 +283,7 @@ class JobReport(BaseModel):
     job_id: str
     template_id: Optional[str] = None
     template_name: Optional[str] = None
+    template_version: Optional[int] = None   # LD-227
     # Snapshot of the template used when the document was generated.
     template_instructions: Optional[str] = None
     template_sections: List[str] = Field(default_factory=list)
@@ -290,6 +302,7 @@ class Job(BaseModel):
     target: str
     template_id: str
     template_name: Optional[str] = None
+    template_version: Optional[int] = None                       # LD-227
     template_sections: List[str] = Field(default_factory=list)  # snapshot used for this job
     status: JobStatus = JobStatus.pending
     progress: float = 0.0             # 0.0 -> 1.0

@@ -28,11 +28,11 @@ from app.jobs import jobs, run_job
 from app.models import (SECTION_KINDS, SECTION_NAMES, FileRetrieval, GenerateRequest, IndexSummary,
                         Job, JobReport, RetrievalHit, RetrievalPreview,
                         JobStatus, ReviewEvidenceResponse, Template, TemplateIn,
-                        TemplateSections)
+                        TemplateSections, TemplateVersion)
 from app.normalize import normalize
 from app.retrieval import build_index, retrieve
 from app.templates import TemplateNameTaken, templates
-from app.version_models import (Document, DocumentContentEdit, DocumentCreate, DocumentVersion,
+from app.version_models import (Document, DocumentContentEdit, DocumentDiff, DocumentCreate, DocumentVersion,
                                 HistoryEvent, InternalDocumentCreate, InternalVersionDecision,
                                 InternalRollbackRequest, VersionComparison,
                                 VersionSummary)
@@ -74,9 +74,10 @@ def system_analytics(start: AwareDatetime = Query(alias="from"),
 @app.post("/generate", response_model=Job, status_code=202)
 def generate(req: GenerateRequest, background: BackgroundTasks):
     """Start generating docs for a file, module or repository. Returns a job to poll."""
-    tpl = templates.get(req.template_id)
+    tpl = templates.at_version(req.template_id, req.template_version)
     if tpl is None:
-        raise HTTPException(404, f"Template '{req.template_id}' not found")
+        what = f"Template '{req.template_id}'" + (f" version {req.template_version}" if req.template_version else "")
+        raise HTTPException(404, f"{what} not found")
     job = jobs.create(req, tpl)
     # the job keeps the template as it was now: editing or deleting it later does not change this job
     background.add_task(run_job, job.id, req, None, tpl)
@@ -192,6 +193,36 @@ def update_template(template_id: str, data: TemplateIn):
         raise HTTPException(409, str(e))
 
 
+@app.get("/templates/{template_id}/versions", response_model=List[TemplateVersion])
+def list_template_versions(template_id: str):
+    """LD-227: every saved version of a template, newest first (built-in templates have one)."""
+    try:
+        return templates.versions(template_id)
+    except KeyError:
+        raise HTTPException(404, "Template not found")
+
+
+@app.get("/templates/{template_id}/versions/{number}", response_model=TemplateVersion)
+def get_template_version(template_id: str, number: int):
+    try:
+        return templates.version(template_id, number)
+    except KeyError:
+        raise HTTPException(404, "Template version not found")
+
+
+@app.post("/templates/{template_id}/versions/{number}/restore", response_model=Template)
+def restore_template_version(template_id: str, number: int):
+    """LD-227: make an older version current again; its content is saved as a new version."""
+    try:
+        return templates.restore(template_id, number)
+    except KeyError:
+        raise HTTPException(404, "Template or version not found")
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except TemplateNameTaken as e:
+        raise HTTPException(409, str(e))
+
+
 @app.delete("/templates/{template_id}", status_code=204)
 def delete_template(template_id: str):
     try:
@@ -262,6 +293,22 @@ def create_owned_document(data: InternalDocumentCreate,
          dependencies=[Depends(require_internal_service)])
 def get_owned_document(doc_id: str):
     return _call(documents.get, doc_id)
+
+
+@app.get("/internal/documents/{doc_id}/versions", response_model=List[VersionSummary],
+         dependencies=[Depends(require_internal_service)])
+def list_internal_document_versions(doc_id: str):
+    """LD-184: every version of a document, newest first (to choose two for a comparison)."""
+    return _call(documents.versions, doc_id)
+
+
+@app.get("/internal/documents/{doc_id}/compare", response_model=DocumentDiff,
+         dependencies=[Depends(require_internal_service)])
+def compare_internal_document_versions(doc_id: str, from_version: Optional[int] = Query(None, alias="from", ge=1),
+                                       to_version: Optional[int] = Query(None, alias="to", ge=1)):
+    """LD-183: added, removed and modified lines between any two versions (UC-30, BR-44);
+    without `from` / `to` the current version is compared with the previous one."""
+    return _call(documents.compare, doc_id, from_version, to_version)
 
 
 @app.get("/internal/documents/{doc_id}/content", response_class=PlainTextResponse,
@@ -395,6 +442,14 @@ def list_versions(doc_id: str):
 def get_version(doc_id: str, number: int):
     _call(documents.get_public, doc_id)
     return _call(documents.version, doc_id, number)
+
+
+@app.get("/documents/{doc_id}/compare", response_model=DocumentDiff)
+def compare_versions(doc_id: str, from_version: Optional[int] = Query(None, alias="from", ge=1),
+                     to_version: Optional[int] = Query(None, alias="to", ge=1)):
+    """LD-183: difference between two versions of a (legacy, ownerless) document."""
+    _call(documents.get_public, doc_id)
+    return _call(documents.compare, doc_id, from_version, to_version)
 
 
 @app.get("/documents/{doc_id}/history", response_model=List[HistoryEvent])

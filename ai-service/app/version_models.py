@@ -140,6 +140,7 @@ class Document(BaseModel):
     target: str
     scope: Scope
     template_id: str
+    template_version: Optional[int] = None  # LD-227: template version the document was generated with
     output_language: str
     source_job_id: Optional[str] = None
     # Absent on legacy documents; never backfilled from the untrusted historical actor field.
@@ -177,3 +178,30 @@ class VersionComparison(BaseModel):
     has_approved_version: bool = False
     diff: str = ""
     changes: List[SectionChange] = Field(default_factory=list)
+
+
+class ComparedVersion(BaseModel):
+    """LD-184: one side of a comparison."""
+    number: int
+    status: VersionStatus
+    origin: VersionOrigin
+    created_at: datetime
+    created_by: Optional[str] = None
+    note: Optional[str] = None
+
+
+class DocumentDiff(BaseModel):
+    """LD-183: the difference between any two versions of one document (UC-30, BR-44).
+    `from_version` is the older side (left), `to_version` the newer side (right)."""
+    document_id: str
+    from_version: ComparedVersion
+    to_version: ComparedVersion
+    identical: bool
+    stats: "DiffStats"
+    sections: List["SectionDiff"] = Field(default_factory=list)
+    rows: List["DiffRow"] = Field(default_factory=list)
+
+
+from .doc_diff import DiffRow, DiffStats, SectionDiff  # noqa: E402
+
+DocumentDiff.model_rebuild()

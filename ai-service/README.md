@@ -47,12 +47,16 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | POST | `/retrieval/preview` | Index summary and the related code (C) / docs (D) each file would get (LD-335) |
 | GET/POST | `/templates` | List (built-in first, then custom by name) / create templates |
 | GET | `/templates/sections` | Sections a template may contain |
-| GET/PUT/DELETE | `/templates/{id}` | Read / update / delete (built-ins are read-only) |
+| GET/PUT/DELETE | `/templates/{id}` | Read / update / delete (built-ins are read-only); every change saves a new version (LD-227) |
+| GET | `/templates/{id}/versions`, `/templates/{id}/versions/{n}` | Saved versions of a template, newest first / one version (LD-227) |
+| POST | `/templates/{id}/versions/{n}/restore` | Make an older version current again, saved as a new version (LD-227) |
 | POST | `/documents` | Save a completed job as version 1 of a document (LD-195) |
 | GET | `/documents`, `/documents/{id}` | List / read documents |
 | GET | `/documents/{id}/content?version=N` | Markdown of the current (or given) version |
 | GET | `/documents/{id}/versions`, `/versions/{n}` | Version history (newest first) / one version |
 | GET | `/documents/{id}/history` | Audit trail: created, proposed, accepted, edited, dismissed, ... |
+| GET | `/documents/{id}/compare?from=N&to=M` | Side-by-side diff of two versions: added / removed / modified lines (changed words marked), stats, changed sections. Default: the current version against the previous one (LD-183). Only documents without an owner |
+| GET | `/internal/documents/{id}/versions`, `/internal/documents/{id}/compare?from=&to=` | Internal (`INTERNAL_API_SECRET`). The same for GitHub Integration's `GET /document-workflows/{id}/versions` and `/comparison` (LD-183); 409 with fewer than two versions, 400 for the same version twice, 404 for an unknown version |
 | POST | `/drift/changes` | Changed code entities of a Pull Request (LD-146); nothing is stored |
 | POST | `/suggestions/updates` | Proposed edits (original → proposed text, reason, confidence) to the docs describing code changed by a PR (LD-353); kept for review |
 | POST | `/drift/reports/{id}/suggestions` | Concrete fixes for the findings of a drift report, same format as `/suggestions/updates`; send the repository Markdown again in `docs` (LD-354) |
