@@ -6,15 +6,9 @@ Các chức năng do Nguyễn Thị Phương Linh thực hiện, mỗi chức n�
 |---|---|---|
 | [FR-AI-01](FR1.md) | Tạo và theo dõi job sinh tài liệu | LD-90 (LD-91 – LD-95) |
 | [FR-AI-02](FR2.md) | Sinh tài liệu từ kết quả phân tích code | LD-340 |
-| [FR-AI-03](FR3.md) | Truy xuất mã liên quan và tài liệu có sẵn làm ngữ cảnh | LD-340, LD-335, LD-337, LD-338, LD-339 |
-| [LD-336](LD-336-Embedding-vs-TFIDF.md) | Báo cáo thử nghiệm: embedding retrieval so với TF-IDF | LD-336 |
-| [LD-337](LD-337-Cai-thien-Knowledge-Retrieval.md) | Cải thiện truy xuất: thay đổi và kết quả đo trước/sau | LD-337 |
-| [LD-338](LD-338-Context-Retrieval-Code-Changes.md) | Ngữ cảnh cho thay đổi code (`POST /drift/context`): cách làm, ví dụ, test | LD-338 |
-| [LD-339](LD-339-Kiem-thu-RAG.md) | Kiểm thử RAG và truy xuất tri thức: test case, kết quả, lỗi đã sửa | LD-339 |
-| [FR-AI-10](FR10.md) | Đề xuất cập nhật tài liệu (code thay đổi, drift) và duyệt, áp dụng đề xuất | LD-353, LD-354, LD-357 |
+| [FR-AI-03](FR3.md) | Truy xuất mã liên quan và tài liệu có sẵn làm ngữ cảnh | LD-340 |
 | [FR-AI-04](FR4.md) | Bằng chứng xác thực và điểm độ tin cậy | LD-340 |
 | [FR-AI-05](FR5.md) | Mẫu tài liệu (documentation templates) | LD-96 (LD-97 – LD-100) |
-| [FR-AI-06](FR6.md) | Quản lý phiên bản tài liệu (lưu tài liệu, phiên bản, lịch sử) | LD-195 |
 
 Mỗi file gồm: mô tả, danh sách yêu cầu (FR-AI-xx.y), API, dữ liệu, luồng chính, luồng lỗi, quy tắc nghiệp vụ, tiêu chí chấp nhận và test liên quan. Các con số (trọng số, giới hạn, ngưỡng) trong file là giá trị đang dùng trong code, để có thể dựng lại đúng hành vi.
 
@@ -23,7 +17,6 @@ Mỗi file gồm: mô tả, danh sách yêu cầu (FR-AI-xx.y), API, dữ liệu
     Đồng bộ repo (FR-GH-03) → dữ liệu cho phân tích (FR-GH-04) → Code Analyzer (LD-328)
       → FR-AI-01 tạo job → FR-AI-05 chọn mẫu → FR-AI-03 truy xuất ngữ cảnh
       → FR-AI-02 sinh tài liệu từng file → FR-AI-04 bằng chứng + độ tin cậy → kết quả Markdown + báo cáo
-      → FR-AI-06 lưu thành tài liệu, phiên bản 1
 
 ## Quy ước chung
 
@@ -31,7 +24,6 @@ Mỗi file gồm: mô tả, danh sách yêu cầu (FR-AI-xx.y), API, dữ liệu
 - Frontend không gọi trực tiếp: Backend (BFF) → GitHub Integration Service (`/api/repositories/{id}/documentation/generate`, `/api/documentation/...`) → AI Service. Xem `services/github-integration-service/docs/documentation-generation-contract.md`.
 - Định dạng dữ liệu nhận từ Code Analyzer: `ai-service/CONTRACT.md`.
 - Lỗi của AI Service theo FastAPI: `{"detail": "..."}` (404/403/409) hoặc `{"detail": [{"loc": [...], "msg": "..."}]}` (422).
-- Tài liệu và phiên bản lưu ở `DOCUMENTS_FILE` (mặc định `ai-service/data/documents.json`), giống cách lưu mẫu tài liệu (`TEMPLATES_FILE`).
 - Không có `ANTHROPIC_API_KEY` thì service chạy chế độ **offline**: vẫn sinh tài liệu từ dữ liệu phân tích, không gọi AI. Không bao giờ commit API key.
 
 ## Không thuộc yêu cầu chức năng
@@ -40,4 +32,3 @@ Kiểm thử và CI không phải chức năng của sản phẩm nên không c�
 
 - LD-390: kiểm thử tích hợp AI Service (`ai-service/tests/integration/`, job CI `ai-service-integration`), danh sách test case ở `ai-service/tests/integration/README.md`.
 - Job CI `ai-service-test` chạy toàn bộ `pytest` của `ai-service/`.
-- LD-355: kiểm thử và hoàn thiện grounding evidence của FR-AI-04 (`ai-service/tests/test_grounding_evidence.py`), báo cáo ở [LD-355-Grounding-Evidence.md](LD-355-Grounding-Evidence.md).
