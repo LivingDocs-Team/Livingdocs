@@ -13,7 +13,7 @@ const SPEC = [
   [1, 'authentication', 'R', '✓', '✓', '✓', '✓', '✓'],
   [2, 'profile', 'R-U', '✓', '✓', '✓', '✓', '✓'],
   [3, 'notifications', 'R', 'R', '-', '-', '-', '-'],
-  [5, 'githubConnection', 'C-R-D', 'C-R-D', '-', '-', '-', '-'],
+  [5, 'githubConnection', 'C-R-D', 'C-R-D', '-', 'C-R-D', '-', '-'],
   [6, 'repositories', 'C-R-U-D', 'C-R-U-D', '-', '-', '-', 'C-R-U-D'],
   [7, 'pullRequests', 'R', 'R', '-', '-', 'R', '-'], // decided
   [8, 'documentation', 'C-R-U-E', 'C-R-U-E', 'R-U', '-', 'R', '-'], // decided
