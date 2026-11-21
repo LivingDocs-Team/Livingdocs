@@ -118,6 +118,7 @@ class SourceChangeDetectionTest {
     @Autowired DocumentWorkflowService workflows;
     @Autowired DocumentWorkflowRepository workflowRows;
     @Autowired org.springframework.jdbc.core.JdbcTemplate revisionJdbc;
+    @Autowired com.livingdocs.github.repository.ConnectedRepositoryRepository revisionRepositories;
     @Autowired com.livingdocs.github.change.RevisionJobWorker revisionWorker;
 
     @MockitoBean(name = "aiServiceRestClient", answers = org.mockito.Answers.RETURNS_DEEP_STUBS)
@@ -127,6 +128,52 @@ class SourceChangeDetectionTest {
     @MockitoBean(name = "revisionAiRestClient", answers = org.mockito.Answers.RETURNS_DEEP_STUBS)
     RestClient revisionPreparation;
     @MockitoBean DocumentationGenerationService workflowDocuments;
+
+    @Test
+    void draftOperationsUseCommitEvidenceAndRejectWrongDependentBlob() throws Exception {
+        var repo = connectAndAddRepo("revision-operations-owner");
+        var request = commit(repo.id(), newSha());
+        String sha = request.commitSha();
+        String dependent = "src/Checkout.java";
+        String treeSha = newSha();
+        String dependentSha = newSha();
+        var exact = new GitHubCommit(sha, null,
+                new GitHubCommit.Detail(null, null, null, new GitHubCommit.TreeRef(treeSha)), null);
+        when(gitHubClient.getCommit(TOKEN, "acme", "docs", "main")).thenReturn(exact);
+        when(gitHubClient.getCommit(TOKEN, "acme", "docs", sha)).thenReturn(exact);
+        when(gitHubClient.getCommitFiles(TOKEN, "acme", "docs", sha)).thenReturn(List.of(invoiceFile(PATCH)));
+        mockInvoiceContentAndAnalyzer();
+        when(documentsClient.find(eq("acme/docs"), anyList())).thenReturn(List.of(
+                new AffectedDocumentsClient.Affected("checkout-doc", "Checkout", 4, dependent, dependent,
+                        "dependent", List.of("mentions Invoice"), List.of(
+                                new AffectedDocumentsClient.Match("Invoice", "name", 1, "uses Invoice")))));
+        sourceChangeService.detect(request);
+        var change = sourceChangeRepository.findByRepositoryIdAndTriggerTypeAndCommitSha(
+                request.repositoryId(), request.trigger(), sha).orElseThrow();
+
+        var tree = new com.livingdocs.github.client.GitHubTree(treeSha, false, List.of(
+                new com.livingdocs.github.client.GitHubTree.Entry(dependent, "100644", "blob", dependentSha, 24L)));
+        when(gitHubClient.getTree(TOKEN, "acme", "docs", treeSha)).thenReturn(tree);
+        when(gitHubClient.getCommitFiles(TOKEN, "acme", "docs", sha)).thenReturn(List.of(
+                new GitHubChangedFile("src/New.java", "added", null, BLOB, 1, 0, null),
+                new GitHubChangedFile("src/Old.java", "removed", null, null, 0, 1, null),
+                new GitHubChangedFile("src/Renamed.java", "renamed", PATH, BLOB, 0, 0, null)));
+        var connected = revisionRepositories.findById(request.repositoryId()).orElseThrow();
+        when(gitHubClient.getBlob(TOKEN, "acme", "docs", dependentSha)).thenReturn(blob(AFTER));
+        assertThatThrownBy(() -> sourceChangeService.draftSource(connected, request, change.getId()))
+                .hasMessageContaining("Cannot verify source blob");
+        when(gitHubClient.getBlob(TOKEN, "acme", "docs", dependentSha))
+                .thenReturn(new GitHubBlob(dependentSha, 24L, "utf-8", "class Checkout {}"));
+
+        var draft = sourceChangeService.draftSource(connected, request, change.getId());
+        assertThat(draft.operations()).extracting(SourceChangeService.DraftFile::action)
+                .containsExactly("added", "removed", "renamed", "dependent");
+        assertThat(draft.operations().get(2).previousPath()).isEqualTo(PATH);
+        assertThat(draft.operations().get(3)).isEqualTo(new SourceChangeService.DraftFile(
+                dependent, "dependent", null, dependentSha, "checkout-doc", 4));
+        assertThat(draft.files()).extracting(AnalysisInput.FileInput::path)
+                .containsExactly("src/New.java", "src/Renamed.java", dependent);
+    }
 
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
