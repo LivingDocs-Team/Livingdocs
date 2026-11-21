@@ -126,6 +126,62 @@ class GitHubIntegrationBffControllerTest {
     }
 
     @Test
+    void collectionOwnerAssignmentVerifiesRoleMembershipAndActiveTargetBeforeForwarding() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        UserRepository users = mock(UserRepository.class);
+        WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        WorkspaceMembershipRepository memberships = mock(WorkspaceMembershipRepository.class);
+        User actor = mock(User.class);
+        User target = mock(User.class);
+        when(users.findByEmail("lead@example.test")).thenReturn(Optional.of(actor));
+        when(users.findById(74L)).thenReturn(Optional.of(target));
+        when(actor.getId()).thenReturn(73L);
+        when(target.getId()).thenReturn(74L);
+        when(target.isActive()).thenReturn(true);
+        String workspace = "workspace-11111111-1111-1111-1111-111111111111";
+        String collection = "22222222-2222-2222-2222-222222222222";
+        String document = "33333333-3333-3333-3333-333333333333";
+        String path = "/api/workspaces/" + workspace + "/collections/" + collection
+                + "/documents/" + document + "/owner/74";
+        var controller = new GitHubIntegrationBffController(builder.build(), users,
+                "http://github.test:8082", "internal-test-credential");
+        controller.setWorkspaceRepository(workspaces);
+        controller.setWorkspaceMembershipRepository(memberships);
+        var incoming = new MockHttpServletRequest("PUT", path);
+        incoming.addHeader("X-Verified-Document-Owner-Id", "99");
+        incoming.addHeader("X-Verified-Workspace-Access", "OWNER");
+        Authentication auth = authenticatedEmail("lead@example.test");
+
+        when(actor.getRole()).thenReturn("DEVELOPER");
+        assertThatThrownBy(() -> controller.proxy(incoming, auth, null))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(403));
+        when(actor.getRole()).thenReturn("TECHNICAL_LEAD");
+        assertThatThrownBy(() -> controller.proxy(incoming, auth, null))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(404));
+        when(memberships.existsByWorkspace_IdAndUser_IdAndUser_ActiveTrue(workspace, 73L)).thenReturn(true);
+        assertThatThrownBy(() -> controller.proxy(incoming, auth, null))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(400));
+        when(memberships.existsByWorkspace_IdAndUser_IdAndUser_ActiveTrue(workspace, 74L)).thenReturn(true);
+        when(target.isActive()).thenReturn(false);
+        assertThatThrownBy(() -> controller.proxy(incoming, auth, null))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        exception -> assertThat(exception.getStatusCode().value()).isEqualTo(400));
+
+        when(target.isActive()).thenReturn(true);
+        server.expect(requestTo("http://github.test:8082" + path))
+                .andExpect(method(HttpMethod.PUT))
+                .andExpect(header("X-Verified-Workspace-Access", "MEMBER"))
+                .andExpect(header("X-Verified-Document-Owner-Id", "74"))
+                .andRespond(withSuccess());
+        assertThat(controller.proxy(incoming, auth, null).getStatusCode().value()).isEqualTo(200);
+        server.verify();
+    }
+
+    @Test
     void memberCannotUseWorkspaceRepositoryMutationRoutes() {
         RestClient.Builder builder = RestClient.builder();
         UserRepository users = mock(UserRepository.class);
@@ -483,6 +539,39 @@ class GitHubIntegrationBffControllerTest {
         assertThat(controller.proxy(request, authenticatedEmail("staff@example.test"),
                 body.getBytes(java.nio.charset.StandardCharsets.UTF_8)).getStatusCode().value()).isEqualTo(200);
         server.verify();
+    }
+
+    @Test
+    void versionComparisonRoutesAreForwardedWithTheChosenVersionsAndTheVerifiedIdentity() throws Exception {
+        // LD-183: the page reads /versions, then /comparison?from=&to=; both must pass the BFF (not 403).
+        String workflow = "/api/document-workflows/11111111-1111-4111-8111-111111111111";
+        for (String[] call : new String[][] {
+                {"DEVELOPER", workflow + "/versions", null},
+                {"DEVELOPER", workflow + "/comparison", "from=2&to=3"},
+                {"STAFF", workflow + "/comparison", "from=1&to=3"},
+                {"MANAGER", workflow + "/comparison", null}}) {
+            RestClient.Builder builder = RestClient.builder();
+            MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+            UserRepository users = mock(UserRepository.class);
+            User actor = mock(User.class);
+            when(actor.getId()).thenReturn(73L);
+            when(actor.getRole()).thenReturn(call[0]);
+            when(users.findByEmail("reader@example.test")).thenReturn(Optional.of(actor));
+            server.expect(requestTo("http://github.test:8082" + call[1] + (call[2] == null ? "" : "?" + call[2])))
+                    .andExpect(method(HttpMethod.GET))
+                    .andExpect(header("X-User-Id", "73"))
+                    .andRespond(withSuccess("{\"rows\":[]}", MediaType.APPLICATION_JSON));
+            var controller = new GitHubIntegrationBffController(builder.build(), users,
+                    "http://github.test:8082", "internal-test-credential");
+            MockHttpServletRequest incoming = new MockHttpServletRequest("GET", call[1]);
+            incoming.setQueryString(call[2]);
+            incoming.addHeader("X-User-Id", "forged-user");
+
+            var response = controller.proxy(incoming, authenticatedEmail("reader@example.test"), null);
+
+            assertThat(response.getStatusCode().value()).as(call[0] + " " + call[1]).isEqualTo(200);
+            server.verify();
+        }
     }
 
     @Test

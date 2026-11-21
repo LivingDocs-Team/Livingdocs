@@ -16,6 +16,9 @@ class ApiRoutePermissionsTest {
     private static final String ID = "11111111-1111-4111-8111-111111111111";
     private static final String WS = "ws-42";
 
+    private static final String COLLECTIONS = "/api/workspaces/" + WS + "/collections";
+    private static final String DOCUMENTS = COLLECTIONS + "/" + ID + "/documents";
+
     /** route -> roles that may use it, written from the matrix (not computed from the rules). */
     private static final Map<String, List<String>> ALLOWED = Map.ofEntries(
             // GitHub connection (#5) and repositories (#6)
@@ -50,11 +53,27 @@ class ApiRoutePermissionsTest {
             Map.entry("GET /api/documentation/" + ID, List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD")),
             Map.entry("GET /api/documentation/" + ID + "/code-entities", List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD")),
             Map.entry("PUT /api/documentation/" + ID + "/code-entities", List.of("DEVELOPER", "STAFF")),
+            // collections (#21)
+            Map.entry("GET " + COLLECTIONS, List.of("DEVELOPER", "TECHNICAL_LEAD")),
+            Map.entry("GET " + DOCUMENTS, List.of("DEVELOPER", "TECHNICAL_LEAD")),
+            Map.entry("GET " + COLLECTIONS + "/" + ID + "/document-candidates", List.of("TECHNICAL_LEAD")),
+            Map.entry("POST " + COLLECTIONS, List.of("TECHNICAL_LEAD")),
+            Map.entry("PUT " + COLLECTIONS + "/" + ID, List.of("TECHNICAL_LEAD")),
+            Map.entry("DELETE " + COLLECTIONS + "/" + ID, List.of("TECHNICAL_LEAD")),
+            Map.entry("PUT " + DOCUMENTS + "/" + ID, List.of("TECHNICAL_LEAD")),
+            Map.entry("DELETE " + DOCUMENTS + "/" + ID, List.of("TECHNICAL_LEAD")),
+            Map.entry("PUT " + DOCUMENTS + "/" + ID + "/owner/80", List.of("TECHNICAL_LEAD")),
+            Map.entry("DELETE " + DOCUMENTS + "/" + ID + "/owner", List.of("TECHNICAL_LEAD")),
             // templates (#22)
             Map.entry("GET /api/documentation/templates", List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD")),
             Map.entry("POST /api/documentation/templates", List.of("TECHNICAL_LEAD")),
             Map.entry("PUT /api/documentation/templates/abc", List.of("TECHNICAL_LEAD")),
             Map.entry("DELETE /api/documentation/templates/abc", List.of("TECHNICAL_LEAD")),
+            // template versions (LD-227): read with the templates screen, restore = update
+            Map.entry("GET /api/documentation/templates/abc/versions", List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD")),
+            Map.entry("GET /api/documentation/templates/abc/versions/2",
+                    List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD")),
+            Map.entry("POST /api/documentation/templates/abc/versions/1/restore", List.of("TECHNICAL_LEAD")),
             // drift: analysis was removed for every role, thresholds stay for Technical Lead
             Map.entry("GET /api/documentation/drift/severity-rules", List.of("TECHNICAL_LEAD")),
             Map.entry("POST /api/repositories/" + ID + "/drift/analyze", List.of()),
@@ -74,6 +93,11 @@ class ApiRoutePermissionsTest {
             Map.entry("GET /api/document-workflows/" + ID + "/comments",
                     List.of("DEVELOPER", "STAFF", "MANAGER", "TECHNICAL_LEAD", "ADMINISTRATOR")),
             Map.entry("GET /api/document-workflows/" + ID + "/change-requests",
+                    List.of("DEVELOPER", "STAFF", "MANAGER", "TECHNICAL_LEAD", "ADMINISTRATOR")),
+            // version comparison (LD-183): same readers as the workflow history
+            Map.entry("GET /api/document-workflows/" + ID + "/versions",
+                    List.of("DEVELOPER", "STAFF", "MANAGER", "TECHNICAL_LEAD", "ADMINISTRATOR")),
+            Map.entry("GET /api/document-workflows/" + ID + "/comparison",
                     List.of("DEVELOPER", "STAFF", "MANAGER", "TECHNICAL_LEAD", "ADMINISTRATOR")),
             Map.entry("POST /api/document-workflows/" + ID + "/comments", List.of("STAFF")),
             Map.entry("POST /api/document-workflows/" + ID + "/submit", List.of("DEVELOPER")),
@@ -122,6 +146,11 @@ class ApiRoutePermissionsTest {
         assertThat(decision.knownRoute()).isFalse();
         assertThat(ApiRoutePermissions.evaluate("PATCH", "/api/github/connection", "DEVELOPER").allowed()).isFalse();
         assertThat(ApiRoutePermissions.evaluate("DELETE", "/api/document-workflows/" + ID, "MANAGER").allowed()).isFalse();
+        // LD-183: only reading a comparison is a route; nothing else under it is
+        assertThat(ApiRoutePermissions.evaluate("POST", "/api/document-workflows/" + ID + "/comparison", "DEVELOPER")
+                .knownRoute()).isFalse();
+        assertThat(ApiRoutePermissions.evaluate("GET", "/api/document-workflows/" + ID + "/versions/2", "DEVELOPER")
+                .knownRoute()).isFalse();
     }
 
     @Test
