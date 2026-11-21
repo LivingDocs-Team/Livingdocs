@@ -302,6 +302,7 @@ class DocumentStore:
                         raise VersionError(409, "This generation job is already linked to another owner")
             doc = Document(id=uuid.uuid4().hex, title=title or output.target, target=output.target,
                            scope=output.scope, template_id=output.template_id,
+                           template_version=getattr(output, "template_version", None),
                            output_language=output.output_language, source_job_id=job_id,
                            owner_user_id=owner_user_id,
                            current_version=0 if owner_user_id is not None else 1,

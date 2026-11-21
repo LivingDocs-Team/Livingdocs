@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { githubApi } from './githubApi';
+import { usePermission } from './rbac/usePermission.js';
 
 function managerError(error, action) {
   if (error?.status === 401) return 'Your session expired. Sign in again to continue.';
@@ -49,7 +50,10 @@ function Evidence({ report }) {
   );
 }
 
-export default function ManagerApprovalQueue({ userId, userRole }) {
+export default function ManagerApprovalQueue({ userId }) {
+  // Matrix row #11: only roles that may approve/reject (A) load the Manager queue.
+  const { role: userRole, can } = usePermission();
+  const isApprover = can('managerApproval', 'A');
   const [isOpen, setIsOpen] = useState(false);
   const [refreshIndex, setRefreshIndex] = useState(0);
   const [queuePage, setQueuePage] = useState(0);
@@ -85,10 +89,10 @@ export default function ManagerApprovalQueue({ userId, userRole }) {
   const queueKey = `${userId || ''}:${userRole}:${isOpen}:${queuePage}:${refreshIndex}`;
   const historyKey = `${userId || ''}:${userRole}:${isOpen}:${historyPage}:${refreshIndex}`;
   const detailKey = `${userId || ''}:${userRole}:${isOpen}:${selectedWorkflowId}:${refreshIndex}`;
-  const queueLoading = isOpen && userRole === 'MANAGER' && loadedQueueKey !== queueKey;
-  const historyListLoading = isOpen && userRole === 'MANAGER' && loadedHistoryKey !== historyKey;
+  const queueLoading = isOpen && isApprover && loadedQueueKey !== queueKey;
+  const historyListLoading = isOpen && isApprover && loadedHistoryKey !== historyKey;
   const loading = queueLoading || historyListLoading;
-  const detailLoading = isOpen && userRole === 'MANAGER' && Boolean(selectedWorkflowId) && loadedDetailKey !== detailKey;
+  const detailLoading = isOpen && isApprover && Boolean(selectedWorkflowId) && loadedDetailKey !== detailKey;
   const queueError = queueErrorState?.key === queueKey ? queueErrorState.message : '';
   const historyListError = historyListErrorState?.key === historyKey ? historyListErrorState.message : '';
   const detailError = detailErrorState?.key === detailKey ? detailErrorState.message : '';
@@ -96,7 +100,7 @@ export default function ManagerApprovalQueue({ userId, userRole }) {
   const historyError = historyErrorState?.key === detailKey ? historyErrorState.message : '';
 
   useEffect(() => {
-    if (!isOpen || !userId || userRole !== 'MANAGER') return undefined;
+    if (!isOpen || !userId || !isApprover) return undefined;
     let cancelled = false;
     githubApi(`/api/document-workflows/manager/queue?page=${queuePage}&size=20`, { userId })
       .then((result) => {
@@ -127,10 +131,10 @@ export default function ManagerApprovalQueue({ userId, userRole }) {
       })
       .finally(() => { if (!cancelled) setLoadedQueueKey(queueKey); });
     return () => { cancelled = true; };
-  }, [isOpen, userId, userRole, queuePage, refreshIndex, queueKey]);
+  }, [isOpen, userId, isApprover, queuePage, refreshIndex, queueKey]);
 
   useEffect(() => {
-    if (!isOpen || !userId || userRole !== 'MANAGER') return undefined;
+    if (!isOpen || !userId || !isApprover) return undefined;
     let cancelled = false;
     githubApi(`/api/document-workflows/history-accessible?page=${historyPage}&size=20`, { userId })
       .then((result) => {
@@ -161,10 +165,10 @@ export default function ManagerApprovalQueue({ userId, userRole }) {
       })
       .finally(() => { if (!cancelled) setLoadedHistoryKey(historyKey); });
     return () => { cancelled = true; };
-  }, [isOpen, userId, userRole, historyPage, refreshIndex, historyKey]);
+  }, [isOpen, userId, isApprover, historyPage, refreshIndex, historyKey]);
 
   useEffect(() => {
-    if (!isOpen || !userId || userRole !== 'MANAGER' || !selectedWorkflowId) return undefined;
+    if (!isOpen || !userId || !isApprover || !selectedWorkflowId) return undefined;
     let cancelled = false;
     const base = `/api/document-workflows/${encodeURIComponent(selectedWorkflowId)}`;
     Promise.allSettled([
@@ -200,9 +204,9 @@ export default function ManagerApprovalQueue({ userId, userRole }) {
       }
     }).finally(() => { if (!cancelled) setLoadedDetailKey(detailKey); });
     return () => { cancelled = true; };
-  }, [isOpen, userId, userRole, selectedWorkflowId, refreshIndex, detailKey]);
+  }, [isOpen, userId, isApprover, selectedWorkflowId, refreshIndex, detailKey]);
 
-  if (!userId || userRole !== 'MANAGER') return null;
+  if (!userId || !isApprover) return null;
 
   const visibleDetail = detail?.workflow && String(detail.workflow.id) === selectedWorkflowId ? detail : null;
   const workflow = visibleDetail?.workflow;
@@ -459,7 +463,7 @@ export default function ManagerApprovalQueue({ userId, userRole }) {
                       )}
                     </section>
 
-                    {canDecide && userRole === 'MANAGER' && <section className="manager-approval-actions">
+                    {canDecide && isApprover && <section className="manager-approval-actions">
                       <h5>Final decision</h5>
                       <p className="documentation-hint">The Backend requires a rejection reason. Approval has no request body.</p>
                       <button type="button" className="documentation-primary-button" disabled={Boolean(action)}
@@ -483,7 +487,7 @@ export default function ManagerApprovalQueue({ userId, userRole }) {
                       </form>
                     </section>}
 
-                    {canRollback && userRole === 'MANAGER' && <form className="staff-review-form manager-rollback" onSubmit={submitRollback}>
+                    {canRollback && can('documentRollback', 'U') && <form className="staff-review-form manager-rollback" onSubmit={submitRollback}>
                       <h5>Rollback approved document</h5>
                       <p className="documentation-hint">Rollback creates a new version and returns the workflow to Staff review. The Backend validates version availability and current document state.</p>
                       <label htmlFor="rollback-source-version">Previous source version number</label>

@@ -94,6 +94,10 @@ jobs:
         working-directory: frontend
         run: npm run lint
 
+      - name: Run frontend unit tests (RBAC permissions, screen flows, route guard)
+        working-directory: frontend
+        run: npm test
+
       - name: Build frontend
         working-directory: frontend
         run: npm run build
@@ -145,8 +149,8 @@ jobs:
           done
           echo "Frontend did not start"; cat "$RUNNER_TEMP/frontend.log"; exit 1
 
-      - name: Run documentation preview, editing (LD-105) and template (LD-96) UI tests
-        run: python -m pytest -v tests/test_documentation_preview_editing.py tests/test_frontend_templates.py tests/test_repository_activity.py tests/test_profile_preferences.py
+      - name: Run documentation preview, editing (LD-105), template (LD-96) and RBAC screen-flow UI tests
+        run: python -m pytest -v tests/test_documentation_preview_editing.py tests/test_frontend_templates.py tests/test_repository_activity.py tests/test_profile_preferences.py tests/test_rbac_screen_flow.py
 
       - name: Upload test report
         if: always()
@@ -163,6 +167,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    # PostgreSQL thật cho các test Documentation Collections (cần khóa hàng FOR UPDATE, H2 không đủ).
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: collections_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d collections_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
@@ -177,6 +197,15 @@ jobs:
 
       - name: Build and test (H2 database, mocked GitHub)
         run: mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml verify
+
+      - name: Documentation Collections tests (PostgreSQL)
+        env:
+          COLLECTIONS_TEST_DB_URL: "jdbc:postgresql://localhost:5432/collections_test"
+          COLLECTIONS_TEST_DB_USER: "postgres"
+          COLLECTIONS_TEST_DB_PASSWORD: "postgres"
+        run: >-
+          mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml test
+          -Dtest='DocumentationCollections*PostgresTest'
 
       - name: Live test against real GitHub API
         env:
@@ -197,7 +226,8 @@ jobs:
 
   ai-service-test:
     name: AI Service Build and Test
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest is Ubuntu 26.04, which Playwright 1.56 cannot install Chromium on.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -226,7 +256,7 @@ jobs:
 
   ai-service-integration:
     name: AI Service Integration Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -285,7 +315,9 @@ jobs:
 
   docker-compose-validation:
     name: Docker Compose Validation
-    runs-on: ubuntu-latest
+    # Pinned like the other Docker/Playwright jobs: ubuntu-latest is Ubuntu 26.04, where the image builds
+    # could not download the Spring Boot parent POMs from Maven Central.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       TOKEN_ENCRYPTION_KEY: "ci-validation-placeholder-only"
