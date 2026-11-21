@@ -12,6 +12,15 @@ from pydantic import BaseModel, Field
 from .models import JobReport, Scope, SourceSnapshot, now
 
 
+class TriggerSource(str, Enum):
+    ai_generation = "AI_GENERATION"
+    manual_edit = "MANUAL_EDIT"
+    drift_suggestion = "DRIFT_SUGGESTION"
+    pr_webhook = "PR_WEBHOOK"
+    review_workflow = "REVIEW_WORKFLOW"
+    rollback = "ROLLBACK"
+
+
 class SourceChangeRef(BaseModel):
     id: str
     trigger: Optional[str] = None
@@ -30,6 +39,8 @@ class DocumentCreate(_Actor):
     """Save the result of a completed generation job as version 1 of a new document."""
     job_id: str = Field(min_length=1)
     title: Optional[str] = Field(default=None, max_length=200)
+    actor_role: Optional[str] = None
+    trigger_source: Optional[str] = None
 
 
 class InternalDocumentCreate(BaseModel):
@@ -37,21 +48,32 @@ class InternalDocumentCreate(BaseModel):
     job_id: str = Field(min_length=1)
     title: Optional[str] = Field(default=None, max_length=200)
     note: Optional[str] = Field(default=None, max_length=1000)
+    actor_role: Optional[str] = None
+    trigger_source: Optional[str] = None
 
 
 class DocumentContentEdit(BaseModel):
     content: str = Field(min_length=1, max_length=2_000_000)
     expected_version: int = Field(ge=1)
     note: Optional[str] = Field(default=None, max_length=1000)
+    actor_role: Optional[str] = None
+    trigger_source: Optional[str] = None
 
 
 class InternalVersionDecision(BaseModel):
     version: int = Field(ge=1)
     decision: str = Field(pattern="^(APPROVED|REJECTED)$")
     note: Optional[str] = Field(default=None, max_length=1000)
+    actor_role: Optional[str] = None
+    trigger_source: Optional[str] = None
+
+
 class InternalRollbackRequest(BaseModel):
     source_version: int = Field(ge=1)
     note: Optional[str] = Field(default=None, max_length=1000)
+    actor_role: Optional[str] = None
+    trigger_source: Optional[str] = None
+
 
 # ---------- Stored data ----------
 
@@ -133,7 +155,6 @@ class DocumentVersion(VersionSummary):
     source_snapshot: Optional[SourceSnapshot] = None
 
 
-
 class Document(BaseModel):
     id: str
     title: str
@@ -164,12 +185,21 @@ class HistoryAction(str, Enum):
 
 
 class HistoryEvent(BaseModel):
-    at: datetime = Field(default_factory=now)
     action: HistoryAction
     version: int
-    related_version: Optional[int] = None
     actor: Optional[str] = None
+    actor_role: Optional[str] = None            # LD-177: DEVELOPER | STAFF | MANAGER | ADMINISTRATOR | SYSTEM
+    trigger_source: Optional[str] = None        # LD-177: AI_GENERATION | MANUAL_EDIT | DRIFT_SUGGESTION | ...
+    status: Optional[str] = None                # LD-177: proposed | accepted | dismissed | superseded | ...
     note: Optional[str] = None
+    related_version: Optional[int] = None
+    at: datetime = Field(default_factory=now)
+
+    @property
+    def event(self) -> str:
+        return self.action.value
+
+
 class VersionComparison(BaseModel):
     """Compare a pending documentation version with the latest approved version."""
 

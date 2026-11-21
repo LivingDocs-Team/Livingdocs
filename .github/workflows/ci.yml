@@ -20,7 +20,7 @@ concurrency:
 jobs:
   backend-build-test:
     name: Backend Build and Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     services:
@@ -56,15 +56,12 @@ jobs:
           test -s backend/pom.xml
           test -s .github/workflows/ci.yml
 
-      - name: Make Maven Wrapper executable
-        run: chmod +x backend/mvnw
-
       - name: Build and test backend
         env:
           DB_URL: "jdbc:postgresql://localhost:5432/cnpm"
           DB_USERNAME: "postgres"
           DB_PASSWORD: "postgres"
-        run: ./backend/mvnw --batch-mode --no-transfer-progress -f backend/pom.xml clean verify
+        run: mvn --batch-mode --no-transfer-progress -f backend/pom.xml clean verify
 
       - name: Report CI result
         if: success()
@@ -72,7 +69,7 @@ jobs:
 
   frontend-build:
     name: Frontend Build and Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -334,4 +331,7 @@ jobs:
         run: docker compose -f compose.yaml config --quiet
 
       - name: Build application images
-        run: docker compose -f compose.yaml build backend ai-service code-analyzer github-integration frontend
+        run: |
+          docker compose -f compose.yaml build backend
+          docker compose -f compose.yaml build github-integration
+          docker compose -f compose.yaml build ai-service code-analyzer frontend

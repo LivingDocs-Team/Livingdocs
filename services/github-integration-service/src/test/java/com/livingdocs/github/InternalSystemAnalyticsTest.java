@@ -14,10 +14,13 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestClient;
+
+import com.livingdocs.github.service.DocumentAccessService;
 
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.queryParam;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServiceUnavailable;
@@ -36,6 +39,9 @@ class InternalSystemAnalyticsTest {
     private static final String FROM = "2099-01-01T07:00+07:00";
     private static final String TO = "2099-01-02T07:00+07:00";
     private static final String BEARER = "Bearer test-only-internal-credential";
+
+    @MockitoBean
+    DocumentAccessService documentAccessService;
 
     @Autowired MockMvc mvc;
     @Autowired JdbcTemplate jdbc;

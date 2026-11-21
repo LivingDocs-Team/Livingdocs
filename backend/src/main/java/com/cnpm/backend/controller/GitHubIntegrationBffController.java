@@ -28,6 +28,8 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
@@ -56,6 +58,9 @@ public class GitHubIntegrationBffController {
             Pattern.compile("^/api/workspaces/([^/]+)/collections/[^/]+/documents/[^/]+/owner/([^/]+)$");
     private static final Pattern REPOSITORY_ID_ROUTE =
             Pattern.compile("^/api/repositories/([0-9a-fA-F-]{36})(?:/.*)?$");
+    // LD-177 P1: route changelog cần kiểm tra quyền đọc tài liệu trước khi proxy
+    private static final Pattern DOCUMENTATION_CHANGE_LOG_ROUTE =
+            Pattern.compile("^/api/documentation/([^/]+)/change-log$");
     private static final List<String> FORWARDED_RESPONSE_HEADERS = List.of("Retry-After");
 
     private final RestClient integrationClient;
@@ -126,6 +131,7 @@ public class GitHubIntegrationBffController {
 
         User user = authenticatedUser(authentication);
         String path = incoming.getRequestURI().substring(incoming.getContextPath().length());
+        HttpMethod method = HttpMethod.valueOf(incoming.getMethod());
         // Screen Authorization matrix: the account's role must be allowed to use this route at all.
         ApiRoutePermissions.Decision permission =
                 ApiRoutePermissions.evaluate(incoming.getMethod(), path, user.getRole());
@@ -133,17 +139,20 @@ public class GitHubIntegrationBffController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, permission.reason());
         }
         Set<String> authorities = currentAuthorities(user, authentication);
-        WorkspaceAuthorization workspaceAuthorization = verifiedWorkspaceForRequest(
-                path, HttpMethod.valueOf(incoming.getMethod()), user, authorities);
-        final String verifiedStaffTarget = HttpMethod.POST.matches(incoming.getMethod())
+        
+        // Verify the specific request payload (target) first so that an invalid target yields
+        // 400 before we start checking the caller's workspace access (which would yield 404).
+        Matcher ownerRoute = DOCUMENT_OWNER_ROUTE.matcher(path);
+        final String verifiedDocumentOwner = HttpMethod.PUT.equals(method) && ownerRoute.matches()
+                ? verifyDocumentOwner(ownerRoute.group(1), ownerRoute.group(2)) : null;
+        final String verifiedStaffTarget = HttpMethod.POST.equals(method)
                 && path.matches("/api/document-workflows/[^/]+/reassign")
                         ? verifyReassignmentTarget(body, authorities) : null;
-        Matcher ownerRoute = DOCUMENT_OWNER_ROUTE.matcher(path);
-        final String verifiedDocumentOwner = HttpMethod.PUT.matches(incoming.getMethod()) && ownerRoute.matches()
-                ? verifyDocumentOwner(ownerRoute.group(1), ownerRoute.group(2)) : null;
+                        
+        WorkspaceAuthorization workspaceAuthorization = verifiedWorkspaceForRequest(
+                path, method, user, authorities);
         String query = incoming.getQueryString();
         URI target = URI.create(integrationBaseUrl + path + (query == null ? "" : "?" + query));
-        HttpMethod method = HttpMethod.valueOf(incoming.getMethod());
         var request = integrationClient.method(method).uri(target);
         request.headers(headers -> {
             headers.setBearerAuth(integrationSecret);
@@ -190,11 +199,15 @@ public class GitHubIntegrationBffController {
 
     private WorkspaceAuthorization verifiedWorkspaceForRequest(String path, HttpMethod method,
             User actor, Set<String> authorities) {
-        Matcher collectionRoute = WORKSPACE_COLLECTION_ROUTE.matcher(path);
-        if (collectionRoute.matches()) {
-            String workspaceId = collectionRoute.group(1);
-            return new WorkspaceAuthorization(workspaceId, null, verifiedWorkspaceAccess(workspaceId, actor));
+        // LD-177 P1: kiểm tra quyền đọc tài liệu trước khi proxy changelog
+        Matcher documentationRoute = DOCUMENTATION_CHANGE_LOG_ROUTE.matcher(path);
+        if (documentationRoute.matches() && HttpMethod.GET.equals(method)) {
+            String docId = documentationRoute.group(1);
+            String workspaceId = resolveDocumentWorkspace(docId, actor, authorities);
+            String accessLevel = verifiedWorkspaceAccess(workspaceId, actor);
+            return new WorkspaceAuthorization(workspaceId, null, accessLevel);
         }
+
         Matcher workspaceRoute = WORKSPACE_REPOSITORY_ROUTE.matcher(path);
         if (workspaceRoute.matches()) {
             String targetWorkspaceId = workspaceRoute.group(1);
@@ -209,6 +222,17 @@ public class GitHubIntegrationBffController {
                 requireWorkspaceOwner(verifiedWorkspaceAccess(sourceWorkspaceId, actor));
             }
             return new WorkspaceAuthorization(targetWorkspaceId, sourceWorkspaceId, accessLevel);
+        }
+
+        // Collection routes (e.g. document owner assignment): verify the caller's membership.
+        // Owner assignment itself is a mutation carried by the document owner route, which has
+        // already validated the target above; here we only need to confirm the caller can see
+        // the workspace and let the downstream service enforce finer permissions.
+        Matcher collectionRoute = WORKSPACE_COLLECTION_ROUTE.matcher(path);
+        if (collectionRoute.matches()) {
+            String workspaceId = collectionRoute.group(1);
+            String accessLevel = verifiedWorkspaceAccess(workspaceId, actor);
+            return new WorkspaceAuthorization(workspaceId, null, accessLevel);
         }
 
         Matcher repositoryRoute = REPOSITORY_ID_ROUTE.matcher(path);
@@ -277,6 +301,57 @@ public class GitHubIntegrationBffController {
             return UUID.fromString(rawUuid).toString().equalsIgnoreCase(rawUuid);
         } catch (IllegalArgumentException exception) {
             return false;
+        }
+    }
+
+    /**
+     * LD-177 P1: resolve workspace sở hữu tài liệu thông qua endpoint nội bộ.
+     * Trả về workspaceId để kiểm tra quyền đọc giống workflow.
+     */
+    private String resolveDocumentWorkspace(String documentId, User actor, Set<String> authorities) {
+        String encoded = URLEncoder.encode(documentId, StandardCharsets.UTF_8);
+        URI target = URI.create(integrationBaseUrl + "/api/internal/documents/" + encoded + "/workspace");
+        try {
+            return integrationClient.get().uri(target).headers(headers -> {
+                headers.setBearerAuth(integrationSecret);
+                headers.set("X-User-Id", actor.getId().toString());
+                headers.set("X-User-Authorities", String.join(",", authorities));
+            }).exchange((outgoing, response) -> {
+                int status = response.getStatusCode().value();
+                if (status == HttpStatus.NOT_FOUND.value()) {
+                    throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found");
+                }
+                if (status == HttpStatus.FORBIDDEN.value()) {
+                    throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Document access denied");
+                }
+                if (!response.getStatusCode().is2xxSuccessful()) {
+                    throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                            "Could not verify document workspace ownership.");
+                }
+                if (response.getBody() == null) {
+                    throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                            "Document response has no workspace identity.");
+                }
+                byte[] body = response.getBody().readAllBytes();
+                try {
+                    JsonNode json = objectMapper.readTree(body);
+                    JsonNode workspaceId = json == null ? null : json.get("workspaceId");
+                    if (workspaceId == null || !workspaceId.isTextual()
+                            || workspaceId.textValue().isBlank()) {
+                        throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                                "Document response has no workspace identity.");
+                    }
+                    return workspaceId.textValue();
+                } catch (tools.jackson.core.JacksonException exception) {
+                    throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                            "Document response is invalid.");
+                }
+            });
+        } catch (ResponseStatusException exception) {
+            throw exception;
+        } catch (org.springframework.web.client.RestClientException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "GitHub Integration is unavailable.");
         }
     }
 

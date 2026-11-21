@@ -8,7 +8,7 @@ spring:
   config:
     import: optional:file:.env[.properties]
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5433/github_integration}
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/cnpm}
     username: ${DB_USERNAME:livingdocs}
     password: ${DB_PASSWORD:livingdocs}
   jpa:

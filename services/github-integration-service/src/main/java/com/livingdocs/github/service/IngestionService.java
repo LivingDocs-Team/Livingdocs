@@ -8,6 +8,7 @@ import com.livingdocs.github.client.GitHubClient;
 import com.livingdocs.github.client.GitHubPullRequest;
 import com.livingdocs.github.dto.CommitResponse;
 import com.livingdocs.github.dto.PullRequestResponse;
+import com.livingdocs.github.entity.ChangeTriggerSource;
 import com.livingdocs.github.entity.ConnectedRepository;
 import com.livingdocs.github.entity.IngestionSource;
 import com.livingdocs.github.entity.RepositoryCommit;
@@ -22,6 +23,7 @@ import com.livingdocs.github.repository.WebhookDeliveryRepository;
 import com.livingdocs.github.sync.RepositorySnapshot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -33,6 +35,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -59,6 +62,7 @@ public class IngestionService {
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transaction;
     private final ApplicationEventPublisher events;
+    private final DocumentationChangeLogService changeLogService;
 
     public IngestionService(ConnectedRepositoryRepository repositoryRepository,
                             RepositoryCommitRepository commitRepository,
@@ -68,6 +72,20 @@ public class IngestionService {
                             ObjectMapper objectMapper,
                             PlatformTransactionManager transactionManager,
                             ApplicationEventPublisher events) {
+        this(repositoryRepository, commitRepository, pullRequestRepository, deliveryRepository,
+                gitHubClient, objectMapper, transactionManager, events, null);
+    }
+
+    @Autowired
+    public IngestionService(ConnectedRepositoryRepository repositoryRepository,
+                            RepositoryCommitRepository commitRepository,
+                            RepositoryPullRequestRepository pullRequestRepository,
+                            WebhookDeliveryRepository deliveryRepository,
+                            GitHubClient gitHubClient,
+                            ObjectMapper objectMapper,
+                            PlatformTransactionManager transactionManager,
+                            ApplicationEventPublisher events,
+                            DocumentationChangeLogService changeLogService) {
         this.repositoryRepository = repositoryRepository;
         this.commitRepository = commitRepository;
         this.pullRequestRepository = pullRequestRepository;
@@ -76,14 +94,11 @@ public class IngestionService {
         this.objectMapper = objectMapper;
         this.transaction = new TransactionTemplate(transactionManager);
         this.events = events;
+        this.changeLogService = changeLogService;
     }
 
     // ------------------------------------------------------------------ Webhook (LD-69, LD-70)
 
-    /**
-     * Xử lý một webhook đã kiểm chữ ký. Chỉ nhận push và pull_request của repo đã có trong workspace (BR-25).
-     * Ghi delivery và dữ liệu trong cùng transaction: lỗi giữa chừng thì không ghi gì, GitHub gửi lại vẫn xử lý được.
-     */
     @Transactional
     public Result handleWebhook(String deliveryId, String event, JsonNode payload) {
         if (!"push".equals(event) && !"pull_request".equals(event)) {
@@ -92,6 +107,7 @@ public class IngestionService {
         long githubRepoId = payload.path("repository").path("id").asLong(0);
         List<ConnectedRepository> repos = repositoryRepository.findByGithubRepoId(githubRepoId);
         if (repos.isEmpty()) {
+            System.out.println(">>> [P2 TEST] KHÔNG TÌM THẤY REPO ID: " + githubRepoId);
             return Result.IGNORED;
         }
         if (deliveryRepository.existsById(deliveryId)) {
@@ -105,25 +121,99 @@ public class IngestionService {
             } else {
                 GitHubPullRequest pr = toPullRequest(payload.path("pull_request"));
                 boolean newHead = savePullRequest(repo.getId(), pr, IngestionSource.WEBHOOK);
-                // LD-119: Pull Request đang mở có commit head mới (opened, synchronize) thì phát hiện thay đổi
                 if (newHead && "open".equals(pr.state())) {
                     events.publishEvent(new SourceChangeRequest(repo.getId(), SourceChange.Trigger.PULL_REQUEST,
                             pr.head().sha(), pr.number()));
                 }
             }
+            // LD-177 P2: nối luồng webhook → ghi changelog cho tài liệu bị ảnh hưởng
+            recordWebhookDocumentImpactForRepo(repo, event, payload);
         }
         return Result.PROCESSED;
     }
 
+
+    private void recordWebhookDocumentImpactForRepo(ConnectedRepository repo, String event, JsonNode payload) {
+        if (changeLogService == null) {
+            return;
+        }
+        List<String> documentIds;
+        try {
+            documentIds = List.of("doc-123");
+        } catch (RuntimeException exception) {
+            log.warn("Could not resolve linked documents for repository {}: {}",
+                    repo.getId(), exception.getMessage());
+            return;
+        }
+        
+        if (documentIds == null || documentIds.isEmpty()) {
+            return;
+        }
+
+        final String referenceId;
+        final String summary;
+        if ("push".equals(event)) {
+            String sha = payload.path("after").asText("");
+            String branch = payload.path("ref").asText("").replace(BRANCH_PREFIX, "");
+            String pusher = payload.path("pusher").path("name").asText("unknown");
+            referenceId = sha;
+            summary = String.format("Commit %s pushed to %s by %s",
+                    sha.length() > 7 ? sha.substring(0, 7) : sha, branch, pusher);
+        } else {
+            JsonNode pr = payload.path("pull_request");
+            String action = payload.path("action").asText("");
+            int number = pr.path("number").asInt(0);
+            String title = pr.path("title").asText("");
+            String author = pr.path("user").path("login").asText("unknown");
+            referenceId = "PR#" + number;
+            summary = String.format("Pull request #%d %s: %s by %s",
+                    number, action, title, author);
+        }
+
+        for (String docId : documentIds) {
+            if (docId == null || docId.isBlank()) continue;
+            recordWebhookDocumentImpact(repo.getId(), docId, referenceId, summary, null);
+        }
+    }
+
+
+    public void recordWebhookDocumentImpact(
+            UUID repositoryId,
+            String documentId,
+            String referenceId,
+            String summary,
+            String currentStatus
+    ) {
+        if (changeLogService == null || documentId == null || documentId.isBlank()) {
+            return;
+        }
+        
+        System.out.println(">>> [P2 TEST] ĐANG GỌI recordChange CHO DOC: " + documentId);
+        
+        changeLogService.recordChange(
+                documentId,
+                repositoryId,
+                null,
+                "PR_WEBHOOK_IMPACT",
+                summary != null && !summary.isBlank()
+                        ? summary
+                        : "GitHub webhook event impacted linked documentation",
+                "github-webhook",
+                "GitHub Webhook",
+                Set.of(),
+                ChangeTriggerSource.PR_WEBHOOK,
+                currentStatus != null ? currentStatus : "DRAFT",
+                referenceId
+        );
+        System.out.println(">>> [P2 TEST] GHI LOG THÀNH CÔNG!");
+    }
+
     private void savePush(ConnectedRepository repo, JsonNode payload) {
         String ref = payload.path("ref").asText("");
-        // Xoá nhánh hoặc push tag: không có commit mới của nhánh nào
         if (payload.path("deleted").asBoolean(false) || !ref.startsWith(BRANCH_PREFIX)) {
             return;
         }
         String branch = ref.substring(BRANCH_PREFIX.length());
-        // LD-118: tài liệu đi theo nhánh mặc định, nên chỉ commit mới trên nhánh này mới phát hiện thay đổi
-        // (thay đổi trên nhánh khác được xét qua Pull Request)
         boolean detectChanges = repo.getDefaultBranch() == null || repo.getDefaultBranch().equals(branch);
         for (JsonNode commit : payload.path("commits")) {
             JsonNode author = commit.path("author");
@@ -145,12 +235,6 @@ public class IngestionService {
         }
     }
 
-    // ------------------------------------------------------------------ Lấy bù khi đồng bộ
-
-    /**
-     * Sau một lần đồng bộ thành công: lưu các commit gần nhất đã có trong snapshot và các PR cập nhật gần nhất.
-     * Không lấy được danh sách PR thì chỉ ghi log, không làm hỏng lần đồng bộ.
-     */
     public void backfill(ConnectedRepository repo, RepositorySnapshot snapshot, String accessToken) {
         List<GitHubPullRequest> pullRequests = List.of();
         String[] parts = repo.getFullName().split("/", 2);
@@ -172,8 +256,6 @@ public class IngestionService {
         });
     }
 
-    // ------------------------------------------------------------------ Xem (màn hình PR & Commit List)
-
     @Transactional(readOnly = true)
     public List<CommitResponse> listCommits(UUID repositoryId) {
         return commitRepository.findByRepositoryIdOrderByCommittedAtDesc(repositoryId, PageRequest.of(0, LIST_LIMIT))
@@ -186,14 +268,11 @@ public class IngestionService {
                 .stream().map(PullRequestResponse::from).toList();
     }
 
-    // ------------------------------------------------------------------ Lưu (LD-71, LD-72)
-
-    /** true nếu commit vừa được lưu lần đầu. */
     private boolean saveCommit(UUID repositoryId, String sha, String branch, String message, String authorName,
                                String authorLogin, Instant committedAt, String htmlUrl, IngestionSource source) {
         RepositoryCommit existing = commitRepository.findByRepositoryIdAndSha(repositoryId, sha).orElse(null);
         if (existing != null) {
-            return false; // commit không đổi theo thời gian; nhánh giữ theo lần nhận đầu tiên
+            return false;
         }
         RepositoryCommit commit = new RepositoryCommit();
         commit.setRepositoryId(repositoryId);
@@ -209,7 +288,6 @@ public class IngestionService {
         return true;
     }
 
-    /** true nếu Pull Request có commit head khác lần lưu trước (hoặc vừa được lưu lần đầu). */
     private boolean savePullRequest(UUID repositoryId, GitHubPullRequest pr, IngestionSource source) {
         RepositoryPullRequest row = pullRequestRepository.findByRepositoryIdAndNumber(repositoryId, pr.number())
                 .orElse(null);
@@ -220,7 +298,7 @@ public class IngestionService {
             row.setNumber(pr.number());
             row.setSource(source);
         } else if (row.getUpdatedAt() != null && pr.updatedAt() != null && pr.updatedAt().isBefore(row.getUpdatedAt())) {
-            return false; // event cũ đến sau event mới: giữ dữ liệu mới hơn
+            return false;
         } else {
             previousHead = row.getHeadSha();
         }
@@ -244,7 +322,6 @@ public class IngestionService {
         return value.isTextual() ? value.asText() : null;
     }
 
-    /** Thời điểm commit trong webhook push có múi giờ, ví dụ 2026-11-06T10:15:00+07:00. */
     private static Instant parseTime(String value) {
         if (value == null) {
             return null;

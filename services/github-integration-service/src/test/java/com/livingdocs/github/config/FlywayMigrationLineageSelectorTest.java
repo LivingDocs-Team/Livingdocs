@@ -49,7 +49,7 @@ class FlywayMigrationLineageSelectorTest {
                     .locations(selector.select(dataSource).location(), "classpath:db/migration-common").load();
             upgraded.migrate();
             upgraded.validate();
-            assertThat(upgraded.info().current().getVersion().getVersion()).isEqualTo("12");
+            assertThat(upgraded.info().current().getVersion().getVersion()).isEqualTo("14");
             assertThat(tableNames(dataSource)).contains("documentation_collections",
                     "documentation_collection_documents", "documentation_owner_assignments");
             try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement();
