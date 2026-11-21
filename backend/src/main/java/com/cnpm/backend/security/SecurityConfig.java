@@ -125,6 +125,7 @@ public class SecurityConfig {
                     HttpMethod.GET,
                     "/actuator/health"
                 ).permitAll()
+                .requestMatchers("/api/github/webhook").permitAll()
                 .requestMatchers(
                     HttpMethod.OPTIONS,
                     "/api/**"
