@@ -8,6 +8,7 @@ on:
   pull_request:
     branches:
       - main
+      - "codex/p0-*"
   workflow_dispatch:
 
 permissions:
@@ -227,6 +228,13 @@ jobs:
         run: >-
           mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml test
           -Dtest=GitHubRepositoryFetcherLiveTest -Dsurefire.failIfNoSpecifiedTests=false
+
+      - name: Revision workflow through FastAPI and PostgreSQL
+        run: docker compose -f tests/revision-e2e/compose.yaml up --build --abort-on-container-exit --exit-code-from test
+
+      - name: Stop revision workflow fixtures
+        if: always()
+        run: docker compose -f tests/revision-e2e/compose.yaml down --volumes
 
       - name: Upload test reports
         if: always()

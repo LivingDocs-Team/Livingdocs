@@ -652,3 +652,273 @@ def test_rollback_retry_returns_existing_matching_proposal():
     assert retry.number == first.number
     assert store.get(doc.id).versions_total == 2
     assert len(store.history(doc.id)) == 3
+def test_revision_draft_is_grounded_idempotent_and_only_exact_version_can_publish(monkeypatch):
+    from app.generator import FileDocResult
+    from datetime import timedelta
+    from app.models import SourceSnapshot, now
+    monkeypatch.setenv("INTERNAL_API_SECRET", "workflow-internal-secret")
+    store, doc = create_approved_owned_document()
+    base = store.version(doc.id)
+    base.source_snapshot = SourceSnapshot(
+        repository_id="repo-1", repository_full_name="org/repo",
+        branch="main", commit_sha="a" * 40,
+    )
+    monkeypatch.setattr("main.documents", store)
+    calls = []
+
+    class Generator:
+        def document_file(self, file, template, language, retrieved):
+            calls.append(file.path)
+            return FileDocResult(
+                "# Updated documentation\n", FileResultStatus.generated,
+                report=FileReport(path=file.path, status=FileResultStatus.generated, confidence=0.9),
+            )
+
+    monkeypatch.setattr("main.get_generator", Generator)
+    headers = {"Authorization": "Bearer workflow-internal-secret", "X-User-Id": "73"}
+    url = f"/internal/documents/{doc.id}/revision-drafts"
+    prepare, commit = url + "/prepare", url + "/commit"
+    data = {
+        "source_change_id": "change-1",
+        "trigger": "COMMIT",
+        "source_snapshot": base.source_snapshot.model_dump(mode="json") | {"commit_sha": "b" * 40},
+        "base_version": 1,
+        "files": [{"path": "a.py", "language": "python"}],
+    }
+    assert client.post(prepare, json=data).status_code in (401, 403)
+    assert client.post(prepare, headers=headers | {"X-User-Id": "someone-else"}, json=data).status_code == 404
+    assert client.post(prepare, headers=headers, json=data | {
+        "source_snapshot": data["source_snapshot"] | {"repository_id": "repo-2"},
+    }).status_code == 409
+
+    response = client.post(prepare, headers=headers, json=data)
+    assert response.status_code == 200, response.text
+    assert store.get(doc.id).pending_version is None
+    commit_data = data | {"prepared": response.json(), "lease_expires_at": now().isoformat()}
+    assert client.post(commit, headers=headers, json=commit_data).status_code == 409
+    assert store.get(doc.id).versions_total == 1
+    assert store.get(doc.id).pending_version is None
+    commit_data["lease_expires_at"] = (now() + timedelta(minutes=15)).isoformat()
+    response = client.post(commit, headers=headers, json=commit_data)
+    assert response.status_code == 200, response.text
+    draft = response.json()
+    assert draft["number"] == 2
+    assert draft["base_version"] == 1
+    assert draft["source_snapshot"]["commit_sha"] == "b" * 40
+    assert draft["evidence_report"]["files"][0]["path"] == "a.py"
+    assert store.version(doc.id).content == "# Original document\n"
+    retry = client.post(prepare, headers=headers, json=data)
+    assert retry.status_code == 200
+    assert client.post(commit, headers=headers, json=commit_data | {"prepared": retry.json()}).json()["number"] == 2
+    assert calls == ["a.py"]
+    assert client.post(prepare, headers=headers, json=data | {"source_change_id": "other"}).status_code == 409
+
+    with pytest.raises(VersionError, match="pending document version has changed"):
+        store.resolve_workflow_version(doc.id, "73", 1, "APPROVED", "manager")
+    store.resolve_workflow_version(doc.id, "73", 2, "APPROVED", "manager")
+    assert store.version(doc.id).number == 2
+    assert [event.actor for event in store.history(doc.id)][-2:] == ["AI", "manager"]
+
+    compare_url = f"/internal/documents/{doc.id}/compare"
+    comparison = client.get(compare_url, headers=headers, params={"from": 1, "to": 2})
+    assert comparison.status_code == 200, comparison.text
+    comparison_body = comparison.json()
+    assert comparison_body["from_version"]["number"] == 1
+    assert comparison_body["to_version"]["number"] == 2
+    assert comparison_body["identical"] is False
+    assert client.get(compare_url).status_code == 401
+
+def test_revision_operations_preserve_evidence_and_require_exact_generated_sections():
+    from app.models import SourceSnapshot
+    from app.version_models import FileSection, RevisionDraftRequest
+
+    store = DocumentStore()
+    snapshot = SourceSnapshot(repository_id="repo", repository_full_name="org/repo",
+                              branch="main", commit_sha="a" * 40)
+    doc = store.create_from_job(
+        "seed", JobOutput(
+            scope=Scope.repository, target="org/repo", template_id="default",
+            template_name="Standard", output_language="en",
+            sections=[(path, f"# {path}", "generated", 0.8)
+                      for path in ("old.py", "deleted.py", "consumer.py", "unchanged.py")],
+            source_snapshot=snapshot,
+        ), owner_user_id="owner",
+    )
+    store.resolve_workflow_version(doc.id, "owner", 1, "APPROVED", "manager")
+    blob = "c" * 40
+    request = RevisionDraftRequest(
+        source_change_id="change", trigger="COMMIT", base_version=1,
+        source_snapshot=snapshot.model_copy(update={"commit_sha": "b" * 40}),
+        files=[{"path": path} for path in ("new.py", "renamed.py", "consumer.py")],
+        file_changes=[
+            {"path": "new.py", "action": "added", "blob_sha": blob},
+            {"path": "deleted.py", "action": "removed"},
+            {"path": "renamed.py", "action": "renamed", "previous_path": "old.py", "blob_sha": blob},
+            {"path": "consumer.py", "action": "dependent", "blob_sha": blob},
+        ],
+    )
+
+    def generate(document, files):
+        assert {file.path for file in files} == {"new.py", "renamed.py", "consumer.py"}
+        return {file.path: FileSection(path=file.path, markdown=f"# New {file.path}", status="generated")
+                for file in files}, REVIEW_REPORT
+
+    prepared = store.prepare_revision(doc.id, "owner", request, generate)
+    invalid = prepared.model_copy(update={"replacements": {"new.py": prepared.replacements["new.py"]}})
+    with pytest.raises(VersionError, match="Prepared sections do not match"):
+        store.commit_revision(doc.id, "owner", request, invalid)
+    assert store.get(doc.id).pending_version is None
+
+    version = store.commit_revision(doc.id, "owner", request, prepared)
+    assert [section.path for section in version.sections] == [
+        "renamed.py", "consumer.py", "unchanged.py", "new.py",
+    ]
+    assert [(change.path, change.action.value, change.previous_path) for change in version.changes] == [
+        ("new.py", "added", None), ("deleted.py", "removed", None),
+        ("renamed.py", "renamed", "old.py"), ("consumer.py", "updated", None),
+    ]
+    assert version.revision_files[-1].action == "dependent"
+    assert version.revision_files[-1].blob_sha == blob
+    assert version.source_snapshot.commit_sha == "b" * 40
+    assert store.version(doc.id).number == 1
+
+
+def test_revision_delete_only_never_calls_generator(monkeypatch):
+    from datetime import timedelta
+    from app.models import SourceSnapshot, now
+
+    monkeypatch.setenv("INTERNAL_API_SECRET", "workflow-internal-secret")
+    store, doc = create_approved_owned_document()
+    source = SourceSnapshot(repository_id="repo", repository_full_name="org/repo",
+                            branch="main", commit_sha="a" * 40)
+    store.version(doc.id).source_snapshot = source
+    monkeypatch.setattr("main.documents", store)
+    monkeypatch.setattr("main.get_generator", lambda: pytest.fail("Delete-only draft called AI"))
+    headers = {"Authorization": "Bearer workflow-internal-secret", "X-User-Id": "73"}
+    url = f"/internal/documents/{doc.id}/revision-drafts"
+    body = {
+        "source_change_id": "delete", "trigger": "COMMIT", "base_version": 1,
+        "source_snapshot": source.model_dump(mode="json") | {"commit_sha": "b" * 40},
+        "files": [], "file_changes": [{"path": "a.py", "action": "removed"}],
+    }
+    response = client.post(f"{url}/prepare", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    assert store.version(doc.id).sections[0].path == "a.py"
+    body.update(prepared=response.json(), lease_expires_at=(now() + timedelta(minutes=15)).isoformat())
+    response = client.post(f"{url}/commit", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    assert response.json()["sections"] == []
+    assert response.json()["changes"] == [{"path": "a.py", "action": "removed",
+                                            "previous_path": None, "entities": []}]
+
+    evidence = client.get(f"/internal/documents/{doc.id}/review-evidence?version=2", headers=headers)
+    assert evidence.status_code == 200
+    assert evidence.json()["source_snapshot"]["commit_sha"] == "b" * 40
+    assert evidence.json()["revision_files"][0]["action"] == "removed"
+
+
+def test_concurrent_revision_drafts_persist_one_version_and_rollback_requires_review(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from app.models import SourceSnapshot
+    from app.version_models import FileSection, RevisionDraftRequest
+
+    path = tmp_path / "documents.json"
+    store = DocumentStore(str(path))
+    source = SourceSnapshot(repository_id="repo-1", repository_full_name="org/repo",
+                            branch="main", commit_sha="a" * 40)
+    doc = store.create_from_job(
+        "seed", JobOutput(scope=Scope.file, target="a.py", template_id="default",
+                          template_name="Standard", output_language="en",
+                          sections=[("a.py", "# Original", "generated", 0.8)], source_snapshot=source),
+        owner_user_id="owner",
+    )
+    store.resolve_workflow_version(doc.id, "owner", 1, "APPROVED", "manager")
+    request = RevisionDraftRequest(
+        source_change_id="change-1", trigger="COMMIT", base_version=1,
+        source_snapshot=source.model_copy(update={"commit_sha": "b" * 40}),
+        files=[{"path": "a.py"}],
+    )
+    simultaneous = Barrier(2, timeout=5)
+
+    def generate(document, files):
+        simultaneous.wait()
+        return {"a.py": FileSection(path="a.py", markdown="# New", status="generated")}, REVIEW_REPORT
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(store.propose_revision, doc.id, "owner", request, generate)
+        second = pool.submit(store.propose_revision, doc.id, "owner", request, generate)
+        assert first.result(timeout=6).number == second.result(timeout=6).number == 2
+
+    restored = DocumentStore(str(path))
+    assert [version.number for version in restored.versions(doc.id)] == [2, 1]
+    assert restored.get(doc.id).pending_revision.commit_sha == "b" * 40
+    restored.resolve_workflow_version(doc.id, "owner", 2, "APPROVED", "manager")
+    rollback = restored.rollback_owned(doc.id, "owner", 1, "manager")
+    assert rollback.number == 3
+    assert restored.version(doc.id).content == "# New"
+    assert restored.get(doc.id).pending_revision is None
+    restored.resolve_workflow_version(doc.id, "owner", 3, "APPROVED", "manager")
+    assert restored.version(doc.id).content == "# Original"
+
+@pytest.mark.parametrize("decision", ["accept", "edit", "dismiss"])
+def test_drift_decisions_create_at_most_one_grounded_draft(monkeypatch, decision):
+    from app.drift import DriftReportStore
+    from app.drift_models import DriftReport
+    from app.models import SourceSnapshot
+
+    monkeypatch.setenv("INTERNAL_API_SECRET", "fixture-secret")
+    store, doc = create_approved_owned_document()
+    store.version(doc.id).source_snapshot = SourceSnapshot(
+        repository_id="repo", repository_full_name="org/repo", branch="main", commit_sha="a" * 40,
+    )
+    pr = {"number": 7, "head_branch": "feature", "head_sha": "b" * 40}
+    report = DriftReport.model_validate({
+        "id": "drift-1", "repository": "org/repo", "status": "drift_detected",
+        "pull_request": pr, "summary": {}, "analysis": {"pull_request": pr},
+        "findings": [{"id": "F1", "type": "signature", "severity": "high", "confidence": 0.9,
+                      "confidence_level": "high", "change": "parameter_renamed", "file": "a.py",
+                      "document": {"source": "document", "path": "a.py",
+                                   "document_id": doc.id, "version": 1},
+                      "message": "Parameter was renamed", "suggestion": "Use quantity.",
+                      "evidence": [{"id": "X1", "kind": "code_diff", "path": "a.py",
+                                    "excerpt": "+def total(quantity):"}]}],
+    })
+    reports = DriftReportStore()
+    reports.add(report)
+    monkeypatch.setattr("main.documents", store)
+    monkeypatch.setattr("main.drift_reports", reports)
+    headers = {"Authorization": "Bearer fixture-secret", "X-User-Id": "73"}
+    url = "/internal/repositories/repo/drift/reports/drift-1/findings/F1/resolution"
+    body = {"decision": decision, "status": "dismissed" if decision == "dismiss" else "acknowledged",
+            "proposed": "Pass quantity as an integer.", "note": "Developer review"}
+    assert client.put(url, json=body).status_code in (401, 403)
+    if decision != "dismiss":
+        assert client.put(url, headers=headers | {"X-User-Id": "other"}, json=body).status_code == 404
+        assert client.put(url.replace("/repo/", "/other/"), headers=headers, json=body).status_code == 409
+    result = client.put(url, headers=headers, json=body)
+    assert result.status_code == 200, result.text
+    assert client.put(url, headers=headers, json=body).json() == result.json()
+    resolution = result.json()["resolution"]
+    assert len(resolution["history"]) == 1
+    assert resolution["actor"] == "73"
+    if decision == "dismiss":
+        assert resolution["draft_version"] is None
+        assert doc.versions_total == 1
+        return
+    assert resolution["draft_version"] == 2
+    draft = store.version(doc.id, 2)
+    assert draft.content == ("Use quantity." if decision == "accept" else body["proposed"])
+    assert draft.source_snapshot.commit_sha == pr["head_sha"]
+    assert draft.review_report.files[0].context_used[0].excerpt == "+def total(quantity):"
+    assert draft.drift_finding["finding_id"] == "F1"
+    assert doc.current_version == 1
+    assert doc.pending_version == 2
+    assert client.put(url, headers=headers, json={"status": "dismissed", "decision": "dismiss",
+                                                  "note": "changed"}).status_code == 409
+    with pytest.raises(VersionError, match="pending document version has changed"):
+        store.resolve_workflow_version(doc.id, "73", 1, "APPROVED", "manager")
+    store.resolve_workflow_version(doc.id, "73", 2, "APPROVED", "manager")
+    assert doc.current_version == 2
+    assert client.put(url, headers=headers, json=body).json() == result.json()

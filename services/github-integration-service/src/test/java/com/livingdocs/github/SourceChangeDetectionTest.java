@@ -1,6 +1,17 @@
 package com.livingdocs.github;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Set;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.web.client.RestClient;
+import com.livingdocs.github.service.DocumentWorkflowService;
+import com.livingdocs.github.service.DocumentationGenerationService;
+import com.livingdocs.github.repository.DocumentWorkflowRepository;
+import com.livingdocs.github.entity.StaffReviewResult;
+import com.livingdocs.github.entity.ManagerDecision;
+import com.livingdocs.github.dto.WorkflowDtos.StaffReviewRequest;
+import com.livingdocs.github.client.GitHubCommit;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.livingdocs.github.change.AffectedDocumentsClient;
 import com.livingdocs.github.change.CodeAnalyzerClient;
 import com.livingdocs.github.change.CodeEntity;
@@ -47,12 +58,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.contains;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.after;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -65,7 +78,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * LD-121: phát hiện thay đổi mã nguồn (LD-116) với database H2, GitHub và Code Analyzer giả.
- * Mỗi test dùng user và workspace riêng vì database được dùng chung giữa các class test.
+ * Mỗi test dùng user và workspace riêng để tách kết quả trong cùng database.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -101,6 +114,176 @@ class SourceChangeDetectionTest {
     @MockitoBean GitHubClient gitHubClient;
     @MockitoBean CodeAnalyzerClient analyzerClient;
     @MockitoBean AffectedDocumentsClient documentsClient;  // trả danh sách rỗng nếu test không cấu hình
+
+    @Autowired DocumentWorkflowService workflows;
+    @Autowired DocumentWorkflowRepository workflowRows;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate revisionJdbc;
+    @Autowired com.livingdocs.github.repository.ConnectedRepositoryRepository revisionRepositories;
+    @Autowired com.livingdocs.github.change.RevisionJobWorker revisionWorker;
+
+    @MockitoBean(name = "aiServiceRestClient", answers = org.mockito.Answers.RETURNS_DEEP_STUBS)
+    RestClient revisionAi;
+    @MockitoBean(name = "codeAnalyzerRestClient", answers = org.mockito.Answers.RETURNS_DEEP_STUBS)
+    RestClient revisionAnalyzer;
+    @MockitoBean(name = "revisionAiRestClient", answers = org.mockito.Answers.RETURNS_DEEP_STUBS)
+    RestClient revisionPreparation;
+    @MockitoBean DocumentationGenerationService workflowDocuments;
+
+    @Test
+    void draftOperationsUseCommitEvidenceAndRejectWrongDependentBlob() throws Exception {
+        var repo = connectAndAddRepo("revision-operations-owner");
+        var request = commit(repo.id(), newSha());
+        String sha = request.commitSha();
+        String dependent = "src/Checkout.java";
+        String treeSha = newSha();
+        String dependentSha = newSha();
+        var exact = new GitHubCommit(sha, null,
+                new GitHubCommit.Detail(null, null, null, new GitHubCommit.TreeRef(treeSha)), null);
+        when(gitHubClient.getCommit(TOKEN, "acme", "docs", "main")).thenReturn(exact);
+        when(gitHubClient.getCommit(TOKEN, "acme", "docs", sha)).thenReturn(exact);
+        when(gitHubClient.getCommitFiles(TOKEN, "acme", "docs", sha)).thenReturn(List.of(invoiceFile(PATCH)));
+        mockInvoiceContentAndAnalyzer();
+        when(documentsClient.find(eq("acme/docs"), anyList())).thenReturn(List.of(
+                new AffectedDocumentsClient.Affected("checkout-doc", "Checkout", 4, dependent, dependent,
+                        "dependent", List.of("mentions Invoice"), List.of(
+                                new AffectedDocumentsClient.Match("Invoice", "name", 1, "uses Invoice")))));
+        sourceChangeService.detect(request);
+        var change = sourceChangeRepository.findByRepositoryIdAndTriggerTypeAndCommitSha(
+                request.repositoryId(), request.trigger(), sha).orElseThrow();
+
+        var tree = new com.livingdocs.github.client.GitHubTree(treeSha, false, List.of(
+                new com.livingdocs.github.client.GitHubTree.Entry(dependent, "100644", "blob", dependentSha, 24L)));
+        when(gitHubClient.getTree(TOKEN, "acme", "docs", treeSha)).thenReturn(tree);
+        when(gitHubClient.getCommitFiles(TOKEN, "acme", "docs", sha)).thenReturn(List.of(
+                new GitHubChangedFile("src/New.java", "added", null, BLOB, 1, 0, null),
+                new GitHubChangedFile("src/Old.java", "removed", null, null, 0, 1, null),
+                new GitHubChangedFile("src/Renamed.java", "renamed", PATH, BLOB, 0, 0, null)));
+        var connected = revisionRepositories.findById(request.repositoryId()).orElseThrow();
+        when(gitHubClient.getBlob(TOKEN, "acme", "docs", dependentSha)).thenReturn(blob(AFTER));
+        assertThatThrownBy(() -> sourceChangeService.draftSource(connected, request, change.getId()))
+                .hasMessageContaining("Cannot verify source blob");
+        when(gitHubClient.getBlob(TOKEN, "acme", "docs", dependentSha))
+                .thenReturn(new GitHubBlob(dependentSha, 24L, "utf-8", "class Checkout {}"));
+
+        var draft = sourceChangeService.draftSource(connected, request, change.getId());
+        assertThat(draft.operations()).extracting(SourceChangeService.DraftFile::action)
+                .containsExactly("added", "removed", "renamed", "dependent");
+        assertThat(draft.operations().get(2).previousPath()).isEqualTo(PATH);
+        assertThat(draft.operations().get(3)).isEqualTo(new SourceChangeService.DraftFile(
+                dependent, "dependent", null, dependentSha, "checkout-doc", 4));
+        assertThat(draft.files()).extracting(AnalysisInput.FileInput::path)
+                .containsExactly("src/New.java", "src/Renamed.java", dependent);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void signedWebhookDraftNeedsStaffAndExactCurrentManagerApproval(boolean replaceWorker) throws Exception {
+        String owner = "revision-owner-" + replaceWorker;
+        String manager = "revision-manager";
+        String staff = "revision-staff";
+        String document = "revision-e2e-" + replaceWorker;
+        var repo = connectAndAddRepo(owner);
+        UUID repositoryId = UUID.fromString(repo.id());
+        String sha = newSha();
+        var commit = new GitHubCommit(sha, null, null, null);
+        when(gitHubClient.getCommit(TOKEN, "acme", "docs", "main")).thenReturn(commit);
+        when(gitHubClient.getCommitFiles(TOKEN, "acme", "docs", sha)).thenReturn(List.of(invoiceFile(PATCH)));
+        mockInvoiceContentAndAnalyzer();
+        when(revisionAi.get().uri("/internal/revision-draft-candidates/{id}", repositoryId)
+                .retrieve().body(JsonNode.class)).thenReturn(
+                        json.createArrayNode().add(json.createObjectNode().put("id", document)
+                                .put("owner_user_id", owner).put("current_version", 1)));
+        var analysis = json.createObjectNode();
+        analysis.putArray("files").addObject().put("path", PATH);
+        when(revisionAnalyzer.post().uri("/api/v1/analyze-repo")
+                .body(org.mockito.ArgumentMatchers.any(AnalysisInput.class)).retrieve()
+                .body(JsonNode.class)).thenReturn(analysis);
+        var preparationRequest = mock(RestClient.RequestBodySpec.class, org.mockito.Answers.RETURNS_SELF);
+        var preparationResponse = mock(RestClient.ResponseSpec.class);
+        when(revisionPreparation.post().uri("/internal/documents/{id}/revision-drafts/prepare", document))
+                .thenReturn(preparationRequest);
+        when(preparationRequest.retrieve()).thenReturn(preparationResponse);
+        var preparing = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var preparations = new java.util.concurrent.atomic.AtomicInteger();
+        when(preparationResponse.body(JsonNode.class)).thenAnswer(invocation -> {
+            if (preparations.incrementAndGet() == 1 && replaceWorker) {
+                preparing.countDown();
+                assertThat(release.await(20, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                return json.createObjectNode().put("worker", "expired");
+            }
+            return json.createObjectNode().put("worker", "current");
+        });
+        var draftRequest = mock(RestClient.RequestBodySpec.class, org.mockito.Answers.RETURNS_SELF);
+        var draftResponse = mock(RestClient.ResponseSpec.class);
+        when(revisionAi.post().uri("/internal/documents/{id}/revision-drafts/commit", document)).thenReturn(draftRequest);
+        when(draftRequest.body(org.mockito.ArgumentMatchers.any(Object.class))).thenAnswer(invocation -> {
+            JsonNode body = invocation.getArgument(0);
+            assertThat(body.path("prepared").path("worker").asText()).isEqualTo("current");
+            return draftRequest;
+        });
+        when(draftRequest.retrieve()).thenReturn(draftResponse);
+        when(draftResponse.body(JsonNode.class)).thenReturn(
+                json.createObjectNode().put("status", "proposed").put("number", 2));
+
+        sendWebhook("push", pushPayload(repo.githubId(), "refs/heads/main", sha)).andExpect(status().isAccepted());
+        if (replaceWorker) {
+            try {
+                assertThat(preparing.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                assertThat(workflowRows.findByOwnerUserIdOrderByCreatedAtDesc(owner, PageRequest.of(0, 10)))
+                        .isEmpty();
+                assertThat(revisionJdbc.update("UPDATE revision_jobs SET available_at = ? WHERE repository_id = ?",
+                        java.time.OffsetDateTime.now().minusSeconds(1), repositoryId)).isEqualTo(1);
+                revisionWorker.poll();
+                assertThat(preparations.get()).isEqualTo(2);
+            } finally {
+                release.countDown();
+            }
+        }
+        var page = PageRequest.of(0, 10);
+        UUID workflowId = null;
+        for (int attempt = 0; attempt < 100 && workflowId == null; attempt++) {
+            workflowId = workflowRows.findByOwnerUserIdOrderByCreatedAtDesc(owner, page).stream()
+                    .findFirst().map(row -> row.getId()).orElse(null);
+            if (workflowId == null) {
+                Thread.sleep(50);
+            }
+        }
+        assertThat(workflowId).as("webhook revision job entered Staff queue").isNotNull();
+        verify(draftRequest, times(1)).retrieve();
+        UUID id = workflowId;
+        var draft = json.createObjectNode().put("owner_user_id", owner)
+                .put("pending_version", 2).put("current_version", 1);
+        draft.putObject("pending_revision").put("repository_id", repo.id()).put("commit_sha", sha);
+        when(workflowDocuments.getDocument(staff, document)).thenReturn(draft);
+        when(workflowDocuments.getDocument(manager, document)).thenReturn(draft);
+
+        var staffPermissions = Set.of("ROLE_STAFF", "DOCUMENT_CLAIM", "DOCUMENT_REVIEW");
+        var managerPermissions = Set.of("ROLE_MANAGER", "DOCUMENT_APPROVE");
+        var approved = ManagerDecision.APPROVED;
+        assertThatThrownBy(
+                () -> workflows.decide(manager, managerPermissions, id, approved, null, 2))
+                .hasMessageContaining("successful staff review");
+        workflows.claim(staff, staffPermissions, id);
+        workflows.staffReview(staff, staffPermissions, id, new StaffReviewRequest(
+                StaffReviewResult.PASSED, "Verified against source"));
+
+        assertThatThrownBy(
+                () -> workflows.decide(manager, managerPermissions, id, approved, null, 1))
+                .hasMessageContaining("Reload the submitted document version");
+        when(gitHubClient.getCommit(TOKEN, "acme", "docs", "main")).thenReturn(
+                new GitHubCommit(newSha(), null, null, null));
+        assertThatThrownBy(
+                () -> workflows.decide(manager, managerPermissions, id, approved, null, 2))
+                .hasMessageContaining("could not be verified as current");
+        verify(workflowDocuments, never()).resolveDocumentVersion(manager, owner, document, 2, "APPROVED", null);
+        when(gitHubClient.getCommit(TOKEN, "acme", "docs", "main")).thenReturn(commit);
+        assertThat(workflows.decide(manager, managerPermissions, id, approved, null, 2).submittedDocumentVersion())
+                .isEqualTo(2);
+        verify(workflowDocuments).resolveDocumentVersion(manager, owner, document, 2, "APPROVED", null);
+        sendWebhook("push", pushPayload(repo.githubId(), "refs/heads/main", sha)).andExpect(status().isAccepted());
+        assertThat(workflowRows.findByOwnerUserIdOrderByCreatedAtDesc(owner, page)).hasSize(1);
+    }
 
     // ------------------------------------------------------------------ LD-118: commit trên nhánh mặc định
 

@@ -10,6 +10,7 @@ import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -26,6 +27,12 @@ import static org.springframework.http.HttpMethod.POST;
 import static org.springframework.http.HttpMethod.PUT;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.embedded.EmbeddedDatabase;
+import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseBuilder;
+import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType;
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.test.web.client.MockRestServiceServer;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
@@ -50,6 +57,7 @@ import com.livingdocs.github.entity.GitHubConnection;
 import com.livingdocs.github.exception.ApiException;
 import com.livingdocs.github.exception.GitHubApiException;
 import com.livingdocs.github.service.DriftAnalysisService;
+import com.livingdocs.github.service.DocumentWorkflowService;
 import com.livingdocs.github.service.GitHubConnectionService;
 import com.livingdocs.github.service.RepositorySyncService;
 
@@ -87,8 +95,8 @@ class DriftAnalysisServiceTest {
              {"name":"currency","type":"str"}],"return_type":"float"}]}]}
             """;
     private static final String DOCUMENTS = """
-            [{"id":"doc-shop","title":"Shop","target":"acme/shop"},
-             {"id":"doc-other","title":"Other","target":"other/repo"}]
+            [{"id":"doc-shop","title":"Shop","target":"acme/shop","owner_user_id":"drift-user"},
+             {"id":"doc-other","title":"Private document","target":"acme/shop","owner_user_id":"other-user"}]
             """;
     private static final String REPORT = """
             {"id":"report-1","status":"drift_detected","repository":"acme/shop",
@@ -107,6 +115,9 @@ class DriftAnalysisServiceTest {
     private MockRestServiceServer analyzerServer;
     private MockRestServiceServer aiServiceServer;
     private DriftAnalysisService driftService;
+    private EmbeddedDatabase database;
+    private RestClient analyzerClient;
+    private RestClient aiClient;
     private GitHubConnection connection;
 
     @BeforeEach
@@ -115,8 +126,15 @@ class DriftAnalysisServiceTest {
         analyzerServer = MockRestServiceServer.bindTo(analyzerBuilder).build();
         RestClient.Builder aiBuilder = RestClient.builder();
         aiServiceServer = MockRestServiceServer.bindTo(aiBuilder).build();
-        driftService = new DriftAnalysisService(repositorySyncService, connectionService, gitHubClient,
-                analyzerBuilder.baseUrl("http://analyzer.test").build(), aiBuilder.baseUrl("http://ai.test").build());
+        analyzerClient = analyzerBuilder.baseUrl("http://analyzer.test").build();
+        aiClient = aiBuilder.baseUrl("http://ai.test").build();
+        database = new EmbeddedDatabaseBuilder().setType(EmbeddedDatabaseType.H2).generateUniqueName(true).build();
+        var jdbc = new JdbcTemplate(database);
+        jdbc.execute("CREATE TABLE repositories (id UUID PRIMARY KEY)");
+        jdbc.update("INSERT INTO repositories (id) VALUES (?)", REPOSITORY_ID);
+        new ResourceDatabasePopulator(new ClassPathResource("db/migration-common/V15__drift_report_owners.sql"))
+                .execute(database);
+        driftService = newService();
 
         ConnectedRepository repository = new ConnectedRepository();
         repository.setFullName("acme/shop");
@@ -124,6 +142,16 @@ class DriftAnalysisServiceTest {
         connection.setAccessToken(TOKEN);
         lenient().when(repositorySyncService.requireOwned(USER_ID, REPOSITORY_ID)).thenReturn(repository);
         lenient().when(connectionService.getActiveConnection(USER_ID)).thenReturn(connection);
+    }
+
+    private DriftAnalysisService newService() {
+        return new DriftAnalysisService(repositorySyncService, connectionService, gitHubClient,
+                analyzerClient, aiClient, new JdbcTemplate(database), org.mockito.Mockito.mock(DocumentWorkflowService.class));
+    }
+
+    @AfterEach
+    void stopDatabase() {
+        if (database != null) database.shutdown();
     }
 
     @Test
@@ -270,6 +298,7 @@ class DriftAnalysisServiceTest {
                 .andRespond(withSuccess(REPORT, MediaType.APPLICATION_JSON));
 
         driftService.analyzePullRequest(USER_ID, REPOSITORY_ID, new DriftAnalysisRequest(7, null, false));
+        driftService = newService();
         JsonNode rows = driftService.listReports(USER_ID, REPOSITORY_ID, 7);
         JsonNode report = driftService.getReport(USER_ID, "report-1");
         ApiException other = assertThrows(ApiException.class,
@@ -458,7 +487,7 @@ class DriftAnalysisServiceTest {
     }
 
     private void expectDocuments() {
-        aiServiceServer.expect(requestTo("http://ai.test/documents"))
+        aiServiceServer.expect(requestTo("http://ai.test/internal/revision-draft-candidates/" + REPOSITORY_ID))
                 .andExpect(method(GET))
                 .andRespond(withSuccess(DOCUMENTS, MediaType.APPLICATION_JSON));
     }

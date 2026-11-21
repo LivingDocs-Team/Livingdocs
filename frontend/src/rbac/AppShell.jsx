@@ -3,6 +3,7 @@
 import DocumentationCollections from '../DocumentationCollections';
 import DocumentationManagement from '../DocumentationManagement';
 import DocumentationSearch from '../DocumentationSearch';
+import DeveloperDriftAlerts from '../DeveloperDriftAlerts';
 import GitHubConnection from '../GitHubConnection';
 import ManagerApprovalQueue from '../ManagerApprovalQueue';
 import NotificationPreferences from '../NotificationPreferences';
@@ -53,6 +54,7 @@ const SCREENS = {
   DocumentationCollections: { Component: DocumentationCollections },
   DocumentationManagement: { Component: DocumentationManagement },
   DocumentationSearch: { Component: DocumentationSearch },
+  DeveloperDriftAlerts: { Component: DeveloperDriftAlerts },
   TemplateLibrary: { Component: TemplateLibrary },
   StaffReviewQueue: { Component: StaffReviewQueue, framed: true },
   ManagerApprovalQueue: { Component: ManagerApprovalQueue, framed: true },

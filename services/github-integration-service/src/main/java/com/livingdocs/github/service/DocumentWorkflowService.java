@@ -3,16 +3,25 @@ package com.livingdocs.github.service;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.Objects;
+import java.time.Instant;
+import java.util.function.Supplier;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.livingdocs.github.change.SourceChangeRequest;
+import com.livingdocs.github.entity.SourceChange;
+import com.livingdocs.github.repository.ConnectedRepositoryRepository;
 import com.livingdocs.github.dto.WorkflowDtos.AuditResponse;
 import com.livingdocs.github.dto.WorkflowDtos.ReviewCommentRequest;
 import com.livingdocs.github.dto.WorkflowDtos.SectionFeedback;
@@ -39,11 +48,78 @@ public class DocumentWorkflowService {
     private final DocumentWorkflowAuditRepository audit;
     private final DocumentationGenerationService documents;
 
+    private final SourceChangeService sourceChanges;
+    private final ConnectedRepositoryRepository repositories;
+
     public DocumentWorkflowService(DocumentWorkflowRepository workflows,
             DocumentWorkflowAuditRepository audit, DocumentationGenerationService documents) {
+        this(workflows, audit, documents, null, null);
+    }
+
+    @Autowired
+    public DocumentWorkflowService(DocumentWorkflowRepository workflows,
+            DocumentWorkflowAuditRepository audit, DocumentationGenerationService documents,
+            SourceChangeService sourceChanges, ConnectedRepositoryRepository repositories) {
+        this.sourceChanges = sourceChanges;
+        this.repositories = repositories;
         this.workflows = workflows;
         this.audit = audit;
         this.documents = documents;
+    }
+
+    public boolean acceptsRevisionDraft(String documentId) {
+        return acceptsRevisionDraft(workflows.findByDocumentId(documentId).orElse(null));
+    }
+
+    private static boolean acceptsRevisionDraft(DocumentWorkflow workflow) {
+        return workflow == null || workflow.getStatus() == DocumentWorkflowStatus.APPROVED
+                || workflow.getStatus() == DocumentWorkflowStatus.REJECTED;
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void submitRevisionDraft(JsonNode candidate, SourceChangeRequest revision,
+            Supplier<JsonNode> generate) {
+        submitRevisionDraft(candidate, generate, "AI", "REVISION_DRAFT_SUBMITTED",
+                "Source " + revision.repositoryId() + " at " + revision.commitSha(), "AI");
+    }
+
+    @Transactional
+    public void submitDriftDraft(String actor, String documentId, int version) {
+        JsonNode document = documents.getDocument(actor, documentId);
+        requireDocumentOwner(document, actor);
+        if (document.path("pending_version").asInt() != version) {
+            return;
+        }
+        submitRevisionDraft(document, () -> documents.getExactDocumentVersion(actor, documentId, version),
+                actor, "DRIFT_DRAFT_SUBMITTED", "Version " + version + " from a drift finding", null);
+    }
+
+    private void submitRevisionDraft(JsonNode candidate, Supplier<JsonNode> generate,
+            String actor, String action, String comment, String actorRole) {
+        String id = candidate.path("id").asText();
+        String owner = candidate.path("owner_user_id").asText();
+        DocumentWorkflow workflow = workflows.lockByDocumentId(id).orElse(null);
+        if (workflow != null) {
+            requireOwner(workflow, owner);
+        }
+        if (!acceptsRevisionDraft(workflow)) {
+            return;
+        }
+
+        JsonNode draft = generate.get();
+        int version = draft == null ? 0 : draft.path("number").asInt();
+        if (version < 1 || !"proposed".equals(draft.path("status").asText())
+                || (workflow != null && workflow.getSubmittedDocumentVersion() != null
+                    && version <= workflow.getSubmittedDocumentVersion())) {
+            return;
+        }
+        if (workflow == null) {
+            workflow = new DocumentWorkflow(id, candidate.path("title").asText("Untitled"), owner);
+        }
+        DocumentWorkflowStatus previous = workflow.getStatus();
+        workflow.submit(version);
+        workflows.saveAndFlush(workflow);
+        record(workflow, actor, action, previous, workflow.getStatus(), comment, null, null, actorRole);
     }
 
     @Transactional
@@ -183,6 +259,24 @@ public class DocumentWorkflowService {
         JsonNode evidence = documents.getDocumentReviewEvidence(
                 actor, workflow.getDocumentId(), submittedVersion);
 
+        if (document.path("pending_revision").isObject()) {
+            ObjectNode result = evidence.deepCopy();
+            ObjectNode verification = result.putObject("source_verification");
+            JsonNode snapshot = document.path("pending_revision");
+            verification.put("checked_at", Instant.now().toString());
+            verification.put("expected_commit_sha", snapshot.path("commit_sha").asText());
+            try {
+                requireCurrentDraftRevision(snapshot, false);
+                verification.put("status", "MATCH");
+                verification.put("current_commit_sha", snapshot.path("commit_sha").asText());
+                verification.put("message", "The draft source revision is current.");
+            } catch (ApiException exception) {
+                verification.put("status", "UNVERIFIABLE");
+                verification.putNull("current_commit_sha");
+                verification.put("message", exception.getMessage());
+            }
+            return result;
+        }
         return documents.verifySourceSnapshot(workflow.getOwnerUserId(), evidence);
     }
 
@@ -250,7 +344,8 @@ public class DocumentWorkflowService {
         return audit.findByWorkflowIdOrderByCreatedAtAsc(workflowId).stream()
                 .map(e -> new AuditResponse(e.getId(), e.getWorkflowId(), e.getActorUserId(), e.getActorRole(), e.getAction(),
                         e.getPreviousStatus(), e.getNewStatus(), e.getPreviousReviewerUserId(),
-                        e.getNewReviewerUserId(), e.getComment(), e.getCreatedAt()))
+                        e.getNewReviewerUserId(), e.getComment(), e.getCreatedAt(),
+                        workflow.getDocumentId(), e.getDocumentVersion()))
                 .toList();
     }
 
@@ -420,6 +515,20 @@ public class DocumentWorkflowService {
             throw ApiException.badRequest("A comment is required when requesting changes.");
         }
         DocumentWorkflowStatus previous = workflow.getStatus();
+        EditDocumentRequest edit = request.edit();
+        if (edit != null) {
+            String reason = normalizeComment(edit.note());
+            if (reason == null || edit.expectedVersion() == null) {
+                throw ApiException.badRequest("A version and reason are required for a Staff edit.");
+            }
+            if (!edit.expectedVersion().equals(workflow.getSubmittedDocumentVersion())) {
+                throw conflict("The submitted document version changed. Reload before editing.");
+            }
+            int version = documents.editStaffDraft(actor, workflow.getOwnerUserId(), workflow.getDocumentId(),
+                    edit.expectedVersion(), edit.content(), reason);
+            workflow.updateReviewedVersion(version);
+            record(workflow, actor, "STAFF_DRAFT_EDITED", previous, previous, reason, null, null, "STAFF");
+        }
         workflow.review(result, normalizeComment(request.comment()));
         workflows.saveAndFlush(workflow);
         record(workflow, actor, result.name(), previous, workflow.getStatus(), request.comment(),
@@ -459,6 +568,12 @@ public class DocumentWorkflowService {
     @Transactional
     public WorkflowResponse decide(String actor, Set<String> authorities, UUID workflowId,
             ManagerDecision decision, String comment) {
+        return decide(actor, authorities, workflowId, decision, comment, null);
+    }
+
+    @Transactional
+    public WorkflowResponse decide(String actor, Set<String> authorities, UUID workflowId,
+            ManagerDecision decision, String comment, Integer expectedVersion) {
         require(authorities, decision == ManagerDecision.APPROVED ? "DOCUMENT_APPROVE" : "DOCUMENT_REJECT");
         String actorRole = requireRole(authorities, "MANAGER");
         DocumentWorkflow workflow = lock(workflowId);
@@ -475,8 +590,15 @@ public class DocumentWorkflowService {
         DocumentWorkflowStatus previous = workflow.getStatus();
         JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
         requireDocumentOwner(document, workflow.getOwnerUserId());
+        if ((expectedVersion != null && !expectedVersion.equals(workflow.getSubmittedDocumentVersion()))
+                || (expectedVersion == null && document.path("pending_revision").isObject())) {
+            throw conflict("Reload the submitted document version before deciding.");
+        }
         int pendingVersion = document.path("pending_version").asInt(0);
         if (pendingVersion == workflow.getSubmittedDocumentVersion()) {
+            if (decision == ManagerDecision.APPROVED && document.path("pending_revision").isObject()) {
+                requireCurrentDraftRevision(document.path("pending_revision"), true);
+            }
             documents.resolveDocumentVersion(actor, workflow.getOwnerUserId(), workflow.getDocumentId(),
                     pendingVersion, decision.name(), normalizeComment(comment));
         } else if (pendingVersion == 0) {
@@ -501,6 +623,26 @@ public class DocumentWorkflowService {
                 null, null, actorRole);
         return toResponse(workflow);
     }
+    private void requireCurrentDraftRevision(JsonNode snapshot, boolean lockRepository) {
+        UUID repositoryId = UUID.fromString(snapshot.path("repository_id").asText());
+        var repository = (lockRepository ? repositories.lockById(repositoryId) : repositories.findById(repositoryId))
+                .orElseThrow(() -> conflict("The draft repository has been disconnected."));
+        Integer pullRequest = snapshot.path("pull_request_number").isIntegralNumber()
+                ? snapshot.path("pull_request_number").intValue() : null;
+        SourceChange.Trigger trigger = pullRequest == null
+                ? SourceChange.Trigger.COMMIT : SourceChange.Trigger.PULL_REQUEST;
+        String actualBase;
+        try {
+            actualBase = sourceChanges.requireCurrentRevision(repository, new SourceChangeRequest(
+                    repositoryId, trigger, snapshot.path("commit_sha").asText(), pullRequest));
+        } catch (RuntimeException exception) {
+            throw conflict("The draft source revision could not be verified as current.");
+        }
+        if (!Objects.equals(actualBase, snapshot.path("pull_request_base_sha").asText(null))) {
+            throw conflict("The draft pull request base has changed.");
+        }
+    }
+
     @Transactional
     public WorkflowResponse rollback(
         String actor,
