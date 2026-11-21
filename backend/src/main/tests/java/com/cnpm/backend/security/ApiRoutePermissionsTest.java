@@ -94,6 +94,11 @@ class ApiRoutePermissionsTest {
                     List.of("DEVELOPER", "STAFF", "MANAGER", "TECHNICAL_LEAD", "ADMINISTRATOR")),
             Map.entry("GET /api/document-workflows/" + ID + "/change-requests",
                     List.of("DEVELOPER", "STAFF", "MANAGER", "TECHNICAL_LEAD", "ADMINISTRATOR")),
+            // version comparison (LD-183): same readers as the workflow history
+            Map.entry("GET /api/document-workflows/" + ID + "/versions",
+                    List.of("DEVELOPER", "STAFF", "MANAGER", "TECHNICAL_LEAD", "ADMINISTRATOR")),
+            Map.entry("GET /api/document-workflows/" + ID + "/comparison",
+                    List.of("DEVELOPER", "STAFF", "MANAGER", "TECHNICAL_LEAD", "ADMINISTRATOR")),
             Map.entry("POST /api/document-workflows/" + ID + "/comments", List.of("STAFF")),
             Map.entry("POST /api/document-workflows/" + ID + "/submit", List.of("DEVELOPER")),
             Map.entry("POST /api/document-workflows/" + ID + "/claim", List.of("STAFF")),
@@ -141,6 +146,11 @@ class ApiRoutePermissionsTest {
         assertThat(decision.knownRoute()).isFalse();
         assertThat(ApiRoutePermissions.evaluate("PATCH", "/api/github/connection", "DEVELOPER").allowed()).isFalse();
         assertThat(ApiRoutePermissions.evaluate("DELETE", "/api/document-workflows/" + ID, "MANAGER").allowed()).isFalse();
+        // LD-183: only reading a comparison is a route; nothing else under it is
+        assertThat(ApiRoutePermissions.evaluate("POST", "/api/document-workflows/" + ID + "/comparison", "DEVELOPER")
+                .knownRoute()).isFalse();
+        assertThat(ApiRoutePermissions.evaluate("GET", "/api/document-workflows/" + ID + "/versions/2", "DEVELOPER")
+                .knownRoute()).isFalse();
     }
 
     @Test

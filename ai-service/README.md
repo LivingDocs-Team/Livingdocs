@@ -55,6 +55,8 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | GET | `/documents/{id}/content?version=N` | Markdown of the current (or given) version |
 | GET | `/documents/{id}/versions`, `/versions/{n}` | Version history (newest first) / one version |
 | GET | `/documents/{id}/history` | Audit trail: created, proposed, accepted, edited, dismissed, ... |
+| GET | `/documents/{id}/compare?from=N&to=M` | Side-by-side diff of two versions: added / removed / modified lines (changed words marked), stats, changed sections. Default: the current version against the previous one (LD-183). Only documents without an owner |
+| GET | `/internal/documents/{id}/versions`, `/internal/documents/{id}/compare?from=&to=` | Internal (`INTERNAL_API_SECRET`). The same for GitHub Integration's `GET /document-workflows/{id}/versions` and `/comparison` (LD-183); 409 with fewer than two versions, 400 for the same version twice, 404 for an unknown version |
 | POST | `/drift/changes` | Changed code entities of a Pull Request (LD-146); nothing is stored |
 | POST | `/suggestions/updates` | Proposed edits (original → proposed text, reason, confidence) to the docs describing code changed by a PR (LD-353); kept for review |
 | POST | `/drift/reports/{id}/suggestions` | Concrete fixes for the findings of a drift report, same format as `/suggestions/updates`; send the repository Markdown again in `docs` (LD-354) |

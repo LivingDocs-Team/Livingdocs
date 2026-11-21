@@ -32,7 +32,7 @@ from app.models import (SECTION_KINDS, SECTION_NAMES, FileRetrieval, GenerateReq
 from app.normalize import normalize
 from app.retrieval import build_index, retrieve
 from app.templates import TemplateNameTaken, templates
-from app.version_models import (Document, DocumentContentEdit, DocumentCreate, DocumentVersion,
+from app.version_models import (Document, DocumentContentEdit, DocumentDiff, DocumentCreate, DocumentVersion,
                                 HistoryEvent, InternalDocumentCreate, InternalVersionDecision,
                                 InternalRollbackRequest, VersionComparison,
                                 VersionSummary)
@@ -295,6 +295,22 @@ def get_owned_document(doc_id: str):
     return _call(documents.get, doc_id)
 
 
+@app.get("/internal/documents/{doc_id}/versions", response_model=List[VersionSummary],
+         dependencies=[Depends(require_internal_service)])
+def list_internal_document_versions(doc_id: str):
+    """LD-184: every version of a document, newest first (to choose two for a comparison)."""
+    return _call(documents.versions, doc_id)
+
+
+@app.get("/internal/documents/{doc_id}/compare", response_model=DocumentDiff,
+         dependencies=[Depends(require_internal_service)])
+def compare_internal_document_versions(doc_id: str, from_version: Optional[int] = Query(None, alias="from", ge=1),
+                                       to_version: Optional[int] = Query(None, alias="to", ge=1)):
+    """LD-183: added, removed and modified lines between any two versions (UC-30, BR-44);
+    without `from` / `to` the current version is compared with the previous one."""
+    return _call(documents.compare, doc_id, from_version, to_version)
+
+
 @app.get("/internal/documents/{doc_id}/content", response_class=PlainTextResponse,
          dependencies=[Depends(require_internal_service)])
 def get_internal_document_content(doc_id: str, version: Optional[int] = Query(None, ge=1)):
@@ -426,6 +442,14 @@ def list_versions(doc_id: str):
 def get_version(doc_id: str, number: int):
     _call(documents.get_public, doc_id)
     return _call(documents.version, doc_id, number)
+
+
+@app.get("/documents/{doc_id}/compare", response_model=DocumentDiff)
+def compare_versions(doc_id: str, from_version: Optional[int] = Query(None, alias="from", ge=1),
+                     to_version: Optional[int] = Query(None, alias="to", ge=1)):
+    """LD-183: difference between two versions of a (legacy, ownerless) document."""
+    _call(documents.get_public, doc_id)
+    return _call(documents.compare, doc_id, from_version, to_version)
 
 
 @app.get("/documents/{doc_id}/history", response_model=List[HistoryEvent])

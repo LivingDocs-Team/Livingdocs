@@ -381,6 +381,60 @@ class DocumentationGenerationServiceTest {
 
         return evidence;
     }
+    @Test
+    void comparesTwoDocumentVersionsThroughTheAiService() {
+        // LD-183: GET /internal/documents/{id}/compare?from=&to=
+        aiServiceServer.expect(requestTo("http://ai.test/internal/documents/doc-1/compare?from=1&to=3"))
+                .andExpect(method(GET))
+                .andRespond(withSuccess("""
+                        {"document_id":"doc-1","from_version":{"number":1},"to_version":{"number":3},
+                         "identical":false,"stats":{"added":1,"removed":0,"modified":1,"unchanged":2},
+                         "sections":[],"rows":[]}
+                        """, MediaType.APPLICATION_JSON));
+        aiServiceServer.expect(requestTo("http://ai.test/internal/documents/doc-1/compare"))
+                .andRespond(withSuccess("""
+                        {"document_id":"doc-1","from_version":{"number":2},"to_version":{"number":3},"rows":[]}
+                        """, MediaType.APPLICATION_JSON));
+        aiServiceServer.expect(requestTo("http://ai.test/internal/documents/doc-1/versions"))
+                .andRespond(withSuccess("[{\"number\":3},{\"number\":2},{\"number\":1}]",
+                        MediaType.APPLICATION_JSON));
+
+        JsonNode diff = generationService.compareDocumentVersions(USER_ID, "doc-1", 1, 3);
+        JsonNode latest = generationService.compareDocumentVersions(USER_ID, "doc-1", null, null);
+        JsonNode versions = generationService.getDocumentVersions(USER_ID, "doc-1");
+
+        assertEquals(1, diff.path("stats").path("added").asInt());
+        assertEquals(2, latest.path("from_version").path("number").asInt());
+        assertEquals(3, versions.size());
+        aiServiceServer.verify();
+    }
+
+    @Test
+    void comparisonErrorsOfTheAiServiceKeepTheirMeaning() {
+        aiServiceServer.expect(requestTo("http://ai.test/internal/documents/doc-1/compare"))
+                .andRespond(withStatus(HttpStatus.CONFLICT).contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"detail\":\"Create a version first to enable comparison.\"}"));
+        aiServiceServer.expect(requestTo("http://ai.test/internal/documents/doc-1/compare?from=1&to=9"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"detail\":\"Version 9 not found\"}"));
+        aiServiceServer.expect(requestTo("http://ai.test/internal/documents/doc-1/compare?from=2&to=1"))
+                .andRespond(withServerError());
+
+        ApiException none = assertThrows(ApiException.class,
+                () -> generationService.compareDocumentVersions(USER_ID, "doc-1", null, null));
+        ApiException missing = assertThrows(ApiException.class,
+                () -> generationService.compareDocumentVersions(USER_ID, "doc-1", 1, 9));
+        ApiException down = assertThrows(ApiException.class,
+                () -> generationService.compareDocumentVersions(USER_ID, "doc-1", 2, 1));
+
+        assertEquals(409, none.getStatus().value());
+        assertEquals("DOCUMENT_COMPARISON_UNAVAILABLE", none.getCode());
+        assertEquals("Create a version first to enable comparison.", none.getMessage());
+        assertEquals(404, missing.getStatus().value());
+        assertEquals("AI_SERVICE_FAILED", down.getCode());
+        aiServiceServer.verify();
+    }
+
     private static RepositorySnapshot snapshot() {
         return new RepositorySnapshot(
                 new RepositorySnapshot.RepositoryInfo(42L, "acme/shop", "acme", "shop", null,

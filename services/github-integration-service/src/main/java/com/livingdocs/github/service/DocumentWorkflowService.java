@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -125,6 +126,38 @@ public class DocumentWorkflowService {
         return new ContentResponse(workflow.getDocumentId(), version,
                 documents.getDocumentContent(actor, workflow.getDocumentId(), version));
     }
+    /** LD-184: versions of the workflow's document, for anyone who can read the workflow. */
+    @Transactional(readOnly = true)
+    public JsonNode versions(String actor, Set<String> authorities, UUID workflowId) {
+        DocumentWorkflow workflow = find(workflowId);
+        requireReadable(workflow, actor, authorities);
+        JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
+        requireDocumentOwner(document, workflow.getOwnerUserId());
+        return documents.getDocumentVersions(actor, workflow.getDocumentId());
+    }
+
+    /**
+     * LD-183: compare any two versions of the workflow's document (UC-30, BR-44). Developer,
+     * Staff and Manager may compare whatever they are allowed to read in the workflow.
+     */
+    @Transactional(readOnly = true)
+    public JsonNode compareVersions(String actor, Set<String> authorities, UUID workflowId,
+            Integer from, Integer to) {
+        if ((from != null && from < 1) || (to != null && to < 1)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST,
+                    "DOCUMENT_COMPARISON_INVALID", "Version numbers start at 1.");
+        }
+        if (from != null && from.equals(to)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST,
+                    "DOCUMENT_COMPARISON_INVALID", "Select two different versions to compare.");
+        }
+        DocumentWorkflow workflow = find(workflowId);
+        requireReadable(workflow, actor, authorities);
+        JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
+        requireDocumentOwner(document, workflow.getOwnerUserId());
+        return documents.compareDocumentVersions(actor, workflow.getDocumentId(), from, to);
+    }
+
     @Transactional(readOnly = true)
     public JsonNode reviewEvidence(String actor, Set<String> authorities, UUID workflowId) {
         require(authorities, "DOCUMENT_REVIEW");
