@@ -131,6 +131,7 @@ public class GitHubIntegrationBffController {
 
         User user = authenticatedUser(authentication);
         String path = incoming.getRequestURI().substring(incoming.getContextPath().length());
+        HttpMethod method = HttpMethod.valueOf(incoming.getMethod());
         // Screen Authorization matrix: the account's role must be allowed to use this route at all.
         ApiRoutePermissions.Decision permission =
                 ApiRoutePermissions.evaluate(incoming.getMethod(), path, user.getRole());
@@ -138,17 +139,20 @@ public class GitHubIntegrationBffController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, permission.reason());
         }
         Set<String> authorities = currentAuthorities(user, authentication);
-        WorkspaceAuthorization workspaceAuthorization = verifiedWorkspaceForRequest(
-                path, HttpMethod.valueOf(incoming.getMethod()), user, authorities);
-        final String verifiedStaffTarget = HttpMethod.POST.matches(incoming.getMethod())
+        
+        // Verify the specific request payload (target) first so that an invalid target yields
+        // 400 before we start checking the caller's workspace access (which would yield 404).
+        Matcher ownerRoute = DOCUMENT_OWNER_ROUTE.matcher(path);
+        final String verifiedDocumentOwner = HttpMethod.PUT.equals(method) && ownerRoute.matches()
+                ? verifyDocumentOwner(ownerRoute.group(1), ownerRoute.group(2)) : null;
+        final String verifiedStaffTarget = HttpMethod.POST.equals(method)
                 && path.matches("/api/document-workflows/[^/]+/reassign")
                         ? verifyReassignmentTarget(body, authorities) : null;
-        Matcher ownerRoute = DOCUMENT_OWNER_ROUTE.matcher(path);
-        final String verifiedDocumentOwner = HttpMethod.PUT.matches(incoming.getMethod()) && ownerRoute.matches()
-                ? verifyDocumentOwner(ownerRoute.group(1), ownerRoute.group(2)) : null;
+                        
+        WorkspaceAuthorization workspaceAuthorization = verifiedWorkspaceForRequest(
+                path, method, user, authorities);
         String query = incoming.getQueryString();
         URI target = URI.create(integrationBaseUrl + path + (query == null ? "" : "?" + query));
-        HttpMethod method = HttpMethod.valueOf(incoming.getMethod());
         var request = integrationClient.method(method).uri(target);
         request.headers(headers -> {
             headers.setBearerAuth(integrationSecret);
@@ -218,6 +222,17 @@ public class GitHubIntegrationBffController {
                 requireWorkspaceOwner(verifiedWorkspaceAccess(sourceWorkspaceId, actor));
             }
             return new WorkspaceAuthorization(targetWorkspaceId, sourceWorkspaceId, accessLevel);
+        }
+
+        // Collection routes (e.g. document owner assignment): verify the caller's membership.
+        // Owner assignment itself is a mutation carried by the document owner route, which has
+        // already validated the target above; here we only need to confirm the caller can see
+        // the workspace and let the downstream service enforce finer permissions.
+        Matcher collectionRoute = WORKSPACE_COLLECTION_ROUTE.matcher(path);
+        if (collectionRoute.matches()) {
+            String workspaceId = collectionRoute.group(1);
+            String accessLevel = verifiedWorkspaceAccess(workspaceId, actor);
+            return new WorkspaceAuthorization(workspaceId, null, accessLevel);
         }
 
         Matcher repositoryRoute = REPOSITORY_ID_ROUTE.matcher(path);
