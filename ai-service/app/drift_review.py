@@ -276,11 +276,26 @@ def resolve(report: DriftReport, finding_id: str, update: ResolutionUpdate) -> D
     note = (update.note or "").strip() or None
     if update.status == ResolutionStatus.dismissed and not note:
         raise ResolutionError(422, "A reason (note) is required to dismiss a finding")
+    proposed = None
+    if update.decision in ("accept", "edit"):
+        if update.status != ResolutionStatus.acknowledged:
+            raise ResolutionError(422, "Accepting or editing requires acknowledged status")
+        if update.decision == "accept":
+            suggested = f.ai_review.suggested_update if f.ai_review else None
+            proposed = (suggested or f.suggestion).strip()
+        else:
+            proposed = (update.proposed or "").strip()
+        if not proposed or len(proposed) > 20000:
+            raise ResolutionError(422, "Provide proposed text of 1 to 20000 characters")
+    elif update.decision == "dismiss" and update.status != ResolutionStatus.dismissed:
+        raise ResolutionError(422, "Dismissing requires dismissed status")
     r: FindingResolution = f.resolution
-    if r.status == update.status and r.note == note:
+    if (r.status, r.note, r.decision, r.proposed) == (update.status, note, update.decision, proposed):
         return f                                   # no change: no new history entry
     at = now()
-    r.history.append(ResolutionEvent(status=update.status, actor=update.actor, note=note, at=at))
+    r.history.append(ResolutionEvent(status=update.status, actor=update.actor, note=note, at=at,
+                                     decision=update.decision, proposed=proposed))
     r.status, r.actor, r.note, r.updated_at = update.status, update.actor, note, at
+    r.decision, r.proposed = update.decision, proposed
     refresh_progress(report)
     return f

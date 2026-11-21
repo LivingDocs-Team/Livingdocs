@@ -41,6 +41,7 @@ public final class ScreenPermissions {
         row(11, "managerApproval",          "",     "",     "RUA",  "R",    "");
         row(12, "approvalPolicies",         "",     "",     "CRU",  "",     "");
         row(13, "approvalAudit",            "",     "R",    "R",    "R",    "R");
+        row(16, "driftAlerts",              "CRU",  "",     "",     "",     "");
         row(17, "driftPolicies",            "",     "",     "",     "CRU",  "");
         row(18, "versionHistory",           "R",    "R",    "",     "R",    "");
         row(19, "documentRollback",         "U",    "",     "U",    "U",    "");

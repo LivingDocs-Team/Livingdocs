@@ -17,7 +17,7 @@ MENUS = {
     "DEVELOPER": {
         "modules": ["Account Management", "GitHub Integration", "Documentation Generation",
                     "Versions & Change Log", "Knowledge Base"],
-        "screens": ["Profile & Settings", "Notifications", "GitHub Connection", "Repository List", "PR & Commit List",
+        "screens": ["Profile & Settings", "Notifications", "GitHub Connection", "Repository List", "PR & Commit List", "Drift Alerts",
                     "Coverage Gaps", "Generated Documents", "Version History", "Change Log",
                     "Documentation Collections", "Knowledge Search", "Template Library"],
         "landing": "#/github/connection",
@@ -171,15 +171,56 @@ def test_login_redirects_to_the_role_landing_page_and_logout_returns_home(page: 
 
 # ---------- screen 2: menus per role ----------
 
-# Rows #4, #14, #15 and #16 were removed from the web: their former URLs are unknown pages now.
+# Rows #4, #14 and #15 remain outside the web app.
 @pytest.mark.parametrize("role", list(MENUS))
 @pytest.mark.parametrize("path", ["#/dashboard", "#/auto-update/settings", "#/auto-update/documents",
-                                  "#/drift/alerts", "#/drift/analysis", "#/drift/history"])
+                                  "#/drift/analysis", "#/drift/history"])
 def test_removed_functions_are_not_reachable_by_any_role(page: Page, role, path):
     start(page, Api(role), f"{FRONTEND}/{path}")
     expect(page).to_have_url(ends_with(MENUS[role]["landing"]))
     expect(page.get_by_role("heading", name="Access denied")).to_have_count(0)
     expect(page.get_by_role("heading", name="Documentation Drift")).to_have_count(0)
+
+
+def test_developer_reviews_drift_alert(page: Page):
+    base = f"/api/repositories/{REPOSITORY_ID}/drift"
+    finding = {"id": "F1", "message": "Outdated parameter", "file": "shop/cart.py",
+               "severity": "high", "suggestion": "Use qty.", "resolution": {"status": "open"}}
+    report = {"id": "report-1", "pull_request": {"number": 7}, "findings": [finding]}
+
+    class DriftApi(Api):
+        def handle(self, route):
+            request = route.request
+            if request.method == "POST" and request.url.endswith(f"{base}/analyze"):
+                assert request.post_data_json == {"pullRequestNumber": 7}
+                return route.fulfill(status=201, json=report)
+            if request.method == "PUT" and request.url.endswith(f"{base}/reports/report-1/findings/F1/resolution"):
+                body = request.post_data_json
+                self.requests.append((request.method, request.url, body))
+                proposed = finding["suggestion"] if body["decision"] == "accept" else body.get("proposed")
+                return route.fulfill(status=200, json={**finding, "resolution": {**body, "proposed": proposed}})
+            return super().handle(route)
+
+    api = DriftApi("DEVELOPER", {
+        **SAVED_DOCUMENT_ROUTES,
+        f"{base}/reports": [{"id": "report-1", "pull_request_number": 7, "pull_request_title": "Update cart"}],
+    })
+    start(page, api, f"{FRONTEND}/#/drift/alerts")
+    expect(page.get_by_role("heading", name="Drift Alerts")).to_be_visible()
+    page.get_by_label("Pull request number").fill("7")
+    page.get_by_role("button", name="Check for drift").click()
+    expect(page.get_by_role("heading", name="Outdated parameter")).to_be_visible()
+    page.get_by_role("button", name="Accept", exact=True).click()
+    expect(page.get_by_role("status").filter(has_text="Accepted")).to_be_visible()
+    page.get_by_role("button", name="Edit", exact=True).click()
+    page.get_by_label("Proposed text").fill("Pass qty as an integer.")
+    page.get_by_role("button", name="Save edit").click()
+    expect(page.get_by_role("status").filter(has_text="Pass qty as an integer.")).to_be_visible()
+    page.get_by_role("button", name="Dismiss", exact=True).click()
+    page.get_by_label("Dismissal reason").fill("Already handled elsewhere.")
+    page.get_by_role("button", name="Confirm dismissal").click()
+    expect(page.get_by_role("status").filter(has_text="Dismissed")).to_be_visible()
+    assert [body["decision"] for method, _, body in api.requests if method == "PUT"] == ["accept", "edit", "dismiss"]
 
 
 @pytest.mark.parametrize("role", ["DEVELOPER", "TECHNICAL_LEAD"])
@@ -246,6 +287,7 @@ def test_account_without_a_known_role_gets_no_menu(page: Page):
     ("DEVELOPER", "#/admin/users"),
     ("STAFF", "#/github/connection"),
     ("STAFF", "#/documentation/documents"),
+    ("STAFF", "#/drift/alerts"),
     ("MANAGER", "#/review/queue"),
     ("TECHNICAL_LEAD", "#/github/connection"),
     ("ADMINISTRATOR", "#/approval/queue"),

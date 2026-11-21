@@ -6,5 +6,8 @@ package com.livingdocs.github.dto;
  * @param status open | acknowledged | resolved | dismissed
  * @param note   ghi chú; bắt buộc khi dismissed (lý do không phải lệch tài liệu)
  */
-public record DriftResolutionRequest(String status, String note) {
+public record DriftResolutionRequest(String status, String note, String decision, String proposed) {
+    public DriftResolutionRequest(String status, String note) {
+        this(status, note, null, null);
+    }
 }

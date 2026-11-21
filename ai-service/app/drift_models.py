@@ -11,7 +11,7 @@
 """
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -326,6 +326,8 @@ class ResolutionEvent(BaseModel):
     status: ResolutionStatus
     actor: Optional[str] = None
     note: Optional[str] = None
+    decision: Optional[Literal["accept", "edit", "dismiss"]] = None
+    proposed: Optional[str] = None
     at: datetime = Field(default_factory=now)
 
 
@@ -334,6 +336,8 @@ class FindingResolution(BaseModel):
     status: ResolutionStatus = ResolutionStatus.open
     actor: Optional[str] = None
     note: Optional[str] = None
+    decision: Optional[Literal["accept", "edit", "dismiss"]] = None
+    proposed: Optional[str] = None
     updated_at: Optional[datetime] = None
     history: List[ResolutionEvent] = Field(default_factory=list)
 
@@ -342,6 +346,8 @@ class ResolutionUpdate(BaseModel):
     status: ResolutionStatus
     actor: Optional[str] = Field(default=None, max_length=200)
     note: Optional[str] = Field(default=None, max_length=2000)
+    decision: Optional[Literal["accept", "edit", "dismiss"]] = None
+    proposed: Optional[str] = Field(default=None, max_length=20000)
 
 
 class ReviewStatus(str, Enum):
