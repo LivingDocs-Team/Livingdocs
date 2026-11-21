@@ -852,3 +852,64 @@ def test_concurrent_revision_drafts_persist_one_version_and_rollback_requires_re
     assert restored.get(doc.id).pending_revision is None
     restored.resolve_workflow_version(doc.id, "owner", 3, "APPROVED", "manager")
     assert restored.version(doc.id).content == "# Original"
+
+@pytest.mark.parametrize("decision", ["accept", "edit", "dismiss"])
+def test_drift_decisions_create_at_most_one_grounded_draft(monkeypatch, decision):
+    from app.drift import DriftReportStore
+    from app.drift_models import DriftReport
+    from app.models import SourceSnapshot
+
+    monkeypatch.setenv("INTERNAL_API_SECRET", "fixture-secret")
+    store, doc = create_approved_owned_document()
+    store.version(doc.id).source_snapshot = SourceSnapshot(
+        repository_id="repo", repository_full_name="org/repo", branch="main", commit_sha="a" * 40,
+    )
+    pr = {"number": 7, "head_branch": "feature", "head_sha": "b" * 40}
+    report = DriftReport.model_validate({
+        "id": "drift-1", "repository": "org/repo", "status": "drift_detected",
+        "pull_request": pr, "summary": {}, "analysis": {"pull_request": pr},
+        "findings": [{"id": "F1", "type": "signature", "severity": "high", "confidence": 0.9,
+                      "confidence_level": "high", "change": "parameter_renamed", "file": "a.py",
+                      "document": {"source": "document", "path": "a.py",
+                                   "document_id": doc.id, "version": 1},
+                      "message": "Parameter was renamed", "suggestion": "Use quantity.",
+                      "evidence": [{"id": "X1", "kind": "code_diff", "path": "a.py",
+                                    "excerpt": "+def total(quantity):"}]}],
+    })
+    reports = DriftReportStore()
+    reports.add(report)
+    monkeypatch.setattr("main.documents", store)
+    monkeypatch.setattr("main.drift_reports", reports)
+    headers = {"Authorization": "Bearer fixture-secret", "X-User-Id": "73"}
+    url = "/internal/repositories/repo/drift/reports/drift-1/findings/F1/resolution"
+    body = {"decision": decision, "status": "dismissed" if decision == "dismiss" else "acknowledged",
+            "proposed": "Pass quantity as an integer.", "note": "Developer review"}
+    assert client.put(url, json=body).status_code in (401, 403)
+    if decision != "dismiss":
+        assert client.put(url, headers=headers | {"X-User-Id": "other"}, json=body).status_code == 404
+        assert client.put(url.replace("/repo/", "/other/"), headers=headers, json=body).status_code == 409
+    result = client.put(url, headers=headers, json=body)
+    assert result.status_code == 200, result.text
+    assert client.put(url, headers=headers, json=body).json() == result.json()
+    resolution = result.json()["resolution"]
+    assert len(resolution["history"]) == 1
+    assert resolution["actor"] == "73"
+    if decision == "dismiss":
+        assert resolution["draft_version"] is None
+        assert doc.versions_total == 1
+        return
+    assert resolution["draft_version"] == 2
+    draft = store.version(doc.id, 2)
+    assert draft.content == ("Use quantity." if decision == "accept" else body["proposed"])
+    assert draft.source_snapshot.commit_sha == pr["head_sha"]
+    assert draft.review_report.files[0].context_used[0].excerpt == "+def total(quantity):"
+    assert draft.drift_finding["finding_id"] == "F1"
+    assert doc.current_version == 1
+    assert doc.pending_version == 2
+    assert client.put(url, headers=headers, json={"status": "dismissed", "decision": "dismiss",
+                                                  "note": "changed"}).status_code == 409
+    with pytest.raises(VersionError, match="pending document version has changed"):
+        store.resolve_workflow_version(doc.id, "73", 1, "APPROVED", "manager")
+    store.resolve_workflow_version(doc.id, "73", 2, "APPROVED", "manager")
+    assert doc.current_version == 2
+    assert client.put(url, headers=headers, json=body).json() == result.json()

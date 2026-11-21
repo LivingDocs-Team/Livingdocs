@@ -78,6 +78,23 @@ public class DocumentWorkflowService {
     @Transactional(propagation = Propagation.MANDATORY)
     public void submitRevisionDraft(JsonNode candidate, SourceChangeRequest revision,
             Supplier<JsonNode> generate) {
+        submitRevisionDraft(candidate, generate, "AI", "REVISION_DRAFT_SUBMITTED",
+                "Source " + revision.repositoryId() + " at " + revision.commitSha(), "AI");
+    }
+
+    @Transactional
+    public void submitDriftDraft(String actor, String documentId, int version) {
+        JsonNode document = documents.getDocument(actor, documentId);
+        requireDocumentOwner(document, actor);
+        if (document.path("pending_version").asInt() != version) {
+            return;
+        }
+        submitRevisionDraft(document, () -> documents.getExactDocumentVersion(actor, documentId, version),
+                actor, "DRIFT_DRAFT_SUBMITTED", "Version " + version + " from a drift finding", null);
+    }
+
+    private void submitRevisionDraft(JsonNode candidate, Supplier<JsonNode> generate,
+            String actor, String action, String comment, String actorRole) {
         String id = candidate.path("id").asText();
         String owner = candidate.path("owner_user_id").asText();
         DocumentWorkflow workflow = workflows.lockByDocumentId(id).orElse(null);
@@ -101,9 +118,7 @@ public class DocumentWorkflowService {
         DocumentWorkflowStatus previous = workflow.getStatus();
         workflow.submit(version);
         workflows.saveAndFlush(workflow);
-        record(workflow, "AI", "REVISION_DRAFT_SUBMITTED", previous, workflow.getStatus(),
-                "Version " + version + " from " + revision.repositoryId() + " at " + revision.commitSha(),
-                null, null, "AI");
+        record(workflow, actor, action, previous, workflow.getStatus(), comment, null, null, actorRole);
     }
 
     @Transactional

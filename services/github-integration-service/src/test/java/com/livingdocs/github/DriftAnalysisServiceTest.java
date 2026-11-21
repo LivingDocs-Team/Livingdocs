@@ -57,6 +57,7 @@ import com.livingdocs.github.entity.GitHubConnection;
 import com.livingdocs.github.exception.ApiException;
 import com.livingdocs.github.exception.GitHubApiException;
 import com.livingdocs.github.service.DriftAnalysisService;
+import com.livingdocs.github.service.DocumentWorkflowService;
 import com.livingdocs.github.service.GitHubConnectionService;
 import com.livingdocs.github.service.RepositorySyncService;
 
@@ -145,7 +146,7 @@ class DriftAnalysisServiceTest {
 
     private DriftAnalysisService newService() {
         return new DriftAnalysisService(repositorySyncService, connectionService, gitHubClient,
-                analyzerClient, aiClient, new JdbcTemplate(database));
+                analyzerClient, aiClient, new JdbcTemplate(database), org.mockito.Mockito.mock(DocumentWorkflowService.class));
     }
 
     @AfterEach
