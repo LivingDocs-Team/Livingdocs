@@ -1,256 +1,186 @@
-# LivingDocs — Đặc tả tái tạo chức năng LD-273: System Configuration
+# FR-LD-177 Ghi nhận và hiển thị lịch sử thay đổi tài liệu
 
-## 1. Mục tiêu
+| Mục | Nội dung |
+|---|---|
+| **Story Jira** | LD-177 – Implement Documentation Change Log |
+| **Task liên quan** | Record Documentation Changes; Record Change Timestamp and Trigger; Record Change User and Role; Display Documentation Change Timeline; Test Documentation Change Log |
+| **Thành phần** | AI Service (`app/versions.py`, `app/version_models.py`, `main.py`); GitHub Integration Service (migration `V10__documentation_change_log.sql`); Frontend (`change-log-timeline/ChangeLogTimeline.tsx`) |
+| **Tác nhân** | Người dùng tạo/chỉnh sửa/xét duyệt tài liệu; hệ thống sinh tài liệu và các luồng tự động liên quan |
+| **Phạm vi** | Ghi nhận sự kiện thay đổi của tài liệu, lưu thông tin người thực hiện, vai trò, nguồn kích hoạt, trạng thái và thời điểm; cung cấp lịch sử để hiển thị theo dòng thời gian. |
 
-Triển khai chức năng cấu hình hệ thống LivingDocs để quản trị viên có thể xem, cập nhật và khôi phục các nhóm thiết lập liên quan đến GitHub, GitHub Actions/Webhooks, ngôn ngữ mã nguồn, sinh tài liệu, cập nhật tài liệu tự động, thời hạn lưu log, AI và truy xuất tài liệu.
+## 1. Mô tả
 
-Các nhóm chức năng theo yêu cầu:
-1. Cấu hình GitHub App và OAuth.
-2. Cấu hình GitHub Actions và Webhooks.
-3. Chọn các ngôn ngữ source code được hỗ trợ.
-4. Cấu hình sinh tài liệu.
-5. Cấu hình trigger và chính sách cập nhật tài liệu tự động.
-6. Cấu hình thời hạn lưu Change Log và Audit Log.
-7. Cấu hình AI model, embedding model, confidence threshold và token budget.
-8. Cấu hình indexing và retrieval.
+LD-177 bổ sung khả năng theo dõi lịch sử thay đổi của tài liệu trong LivingDocs. Mỗi sự kiện phát sinh trong vòng đời tài liệu được ghi nhận cùng phiên bản liên quan, hành động, người thực hiện, vai trò, nguồn kích hoạt, trạng thái, ghi chú và thời điểm xảy ra.
 
-## 2. Thành phần và vị trí mã nguồn
+Lịch sử được cung cấp qua API để giao diện Documentation hiển thị theo dạng timeline. Người xem có thể nhận biết ai đã thực hiện thay đổi, thay đổi thuộc loại nào, được kích hoạt từ đâu, trạng thái tài liệu tại thời điểm đó và thời gian xảy ra.
 
-### Backend
+Trong phần triển khai hiện có:
+- AI Service quản lý audit trail theo từng document và cung cấp API đọc lịch sử.
+- `HistoryEvent` là cấu trúc dữ liệu của một sự kiện lịch sử.
+- Frontend có component `ChangeLogTimeline` gọi API `/api/documentation/{documentId}/change-log` và hiển thị các entry theo thứ tự API trả về.
+- GitHub Integration Service có migration tạo bảng `documentation_change_logs` với các trường phục vụ lưu change log.
 
-- `backend/src/main/java/com/cnpm/backend/controller/AdminSystemConfigurationController.java`: REST API xem danh sách nhóm cấu hình, xem một nhóm, cập nhật và reset nhóm.
-- `backend/src/main/java/com/cnpm/backend/service/SystemConfigurationService.java`: catalog cấu hình, giá trị mặc định, kiểu dữ liệu, validation, chuyển đổi giá trị và lưu override.
-- `backend/src/main/java/com/cnpm/backend/entity/SystemSetting.java`: entity lưu override của từng setting.
-- `backend/src/main/java/com/cnpm/backend/repository/SystemSettingRepository.java`: truy vấn dữ liệu cấu hình.
-- `backend/src/main/java/com/cnpm/backend/security/SystemAdminAccess.java`: kiểm tra quyền quản trị hệ thống.
-- `backend/src/main/java/com/cnpm/backend/security/SecurityConfig.java`: cấu hình bảo vệ endpoint và authority.
-- `backend/src/main/resources/application.properties`: cấu hình runtime, database và thời hạn lưu admin-user audit.
-- `backend/src/main/tests/java/com/cnpm/backend/AdminSystemConfigurationControllerTest.java`: kiểm thử controller.
-- `backend/src/main/tests/java/com/cnpm/backend/SystemConfigurationServiceTest.java`: kiểm thử service và validation.
+## 2. Yêu cầu chức năng
 
-### Các service liên quan
+| ID | Yêu cầu |
+|---|---|
+| **FR-LD-177.1** | **Ghi nhận thay đổi tài liệu:** Khi tài liệu phát sinh sự kiện trong vòng đời quản lý phiên bản, hệ thống ghi một sự kiện lịch sử gắn với `document_id` và số phiên bản liên quan. Các action được mô hình hóa gồm `created`, `proposed`, `accepted`, `edited`, `dismissed`, `regenerated`, `superseded` và `rolled_back`. |
+| **FR-LD-177.2** | **Ghi nhận người thực hiện:** Sự kiện lưu `actor` để nhận diện người hoặc tác nhân thực hiện thay đổi. Giá trị có thể là user ID/tên người dùng; với thao tác hệ thống có thể ghi nhận tác nhân hệ thống. |
+| **FR-LD-177.3** | **Ghi nhận vai trò:** Sự kiện lưu `actor_role`. Các vai trò được chú thích trong mô hình gồm `DEVELOPER`, `STAFF`, `MANAGER`, `ADMINISTRATOR`, `SYSTEM`. |
+| **FR-LD-177.4** | **Ghi nhận thời điểm:** Mỗi sự kiện có trường `at` kiểu datetime, mặc định lấy thời điểm hiện tại qua hàm `now()`. Migration change log cũng định nghĩa `created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP`. |
+| **FR-LD-177.5** | **Ghi nhận nguồn kích hoạt:** Sự kiện lưu `trigger_source`. Các giá trị nguồn được định nghĩa gồm `AI_GENERATION`, `MANUAL_EDIT`, `DRIFT_SUGGESTION`, `PR_WEBHOOK`, `REVIEW_WORKFLOW` và `ROLLBACK`. |
+| **FR-LD-177.6** | **Theo dõi trạng thái:** Sự kiện lưu `status` để phản ánh trạng thái phiên bản/tài liệu tại thời điểm ghi nhận. Các trạng thái phiên bản được mô hình hóa gồm `proposed`, `accepted`, `dismissed`, `superseded`. |
+| **FR-LD-177.7** | **Lưu thông tin bổ sung:** Sự kiện có thể lưu `note` và `related_version` để giải thích thay đổi hoặc liên kết với phiên bản liên quan. |
+| **FR-LD-177.8** | **Truy xuất lịch sử:** Cung cấp API lấy danh sách sự kiện lịch sử theo document. Phần triển khai AI Service có endpoint public và endpoint internal dành cho service tích hợp. |
+| **FR-LD-177.9** | **Hiển thị timeline:** Giao diện hiển thị tiêu đề “Lịch sử thay đổi tài liệu”; mỗi entry thể hiện người thực hiện, thời gian, nội dung tóm tắt và loại sự kiện. Khi chưa có sự kiện, hiển thị thông báo chưa có thay đổi. |
+| **FR-LD-177.10** | **Xử lý trạng thái tải và lỗi:** Giao diện thể hiện trạng thái đang tải; nếu bị từ chối quyền truy cập hoặc tài liệu không tồn tại thì hiển thị thông báo không có quyền xem lịch sử; các lỗi tải khác hiển thị thông báo không tải được lịch sử. |
 
-- `services/github-integration-service/src/main/resources/application.yml`: cấu hình GitHub App/OAuth, webhook secret, token encryption, URL dịch vụ.
-- `ai-service/`: AI generator, confidence và retrieval; catalog LD-273 mô tả các tham số cấu hình liên quan đến các thành phần này.
+## 3. Dữ liệu và mô hình
 
-### Frontend
+### 3.1. HistoryEvent
 
-Snapshot có `frontend/src/App.jsx` và các màn hình chức năng hiện có, nhưng không có component quản trị cấu hình tương ứng với `/api/admin/system-configuration`. Vì vậy API quản trị được triển khai ở Backend; không mô tả một giao diện chỉnh sửa cấu hình như thể nó đã tồn tại.
+Mô hình `HistoryEvent` trong AI Service có cấu trúc:
 
-## 3. Kiến trúc và nguyên tắc lưu cấu hình
-
-`SystemConfigurationService` khai báo catalog tập trung. Mỗi định nghĩa setting chứa:
-- Nhóm cấu hình và key.
-- Kiểu dữ liệu: `STRING`, `INT`, `DECIMAL`, `BOOLEAN`, `CHOICE`, `LIST`.
-- Giá trị mặc định.
-- Mô tả.
-- Giới hạn min/max, danh sách giá trị được phép, regex hoặc số lượng item tối thiểu khi áp dụng.
-
-Giá trị mặc định được thiết kế để phản ánh các giá trị mà service đang sử dụng. Database chỉ lưu các giá trị administrator override; khi không có override, hệ thống trả về default. Catalog được kiểm tra ngay khi khởi tạo để bảo đảm default tự thỏa validation.
-
-Các secret như GitHub client secret, webhook secret, token-encryption key và API keys không nằm trong catalog. Chúng tiếp tục được lấy từ environment variables. API từ chối key không được khai báo trong catalog.
-
-## 4. Nhóm cấu hình và giá trị mặc định
-
-### 4.1 GitHub App & OAuth (`github`)
-
-| Key | Default | Ý nghĩa |
+| Trường | Kiểu / Giá trị | Ý nghĩa |
 |---|---|---|
-| `github.appSlug` | `livingdocs-dev-hai` | GitHub App slug dùng trong installation URL |
-| `github.clientId` | rỗng | OAuth client ID công khai |
-| `github.redirectUri` | `http://localhost:8082/api/github/callback` | OAuth redirect URI |
-| `github.oauthScopes` | `read:user,user:email` | OAuth scopes |
-| `github.oauthBaseUrl` | `https://github.com` | GitHub OAuth base URL |
-| `github.apiBaseUrl` | `https://api.github.com` | GitHub REST API base URL |
+| `action` | `HistoryAction` | Hành động đã xảy ra. |
+| `version` | integer | Số phiên bản liên quan đến sự kiện. |
+| `actor` | string hoặc null | Người/tác nhân thực hiện. |
+| `actor_role` | string hoặc null | Vai trò của người/tác nhân. |
+| `trigger_source` | string hoặc null | Nguồn kích hoạt thay đổi. |
+| `status` | string hoặc null | Trạng thái phiên bản tại thời điểm ghi nhận. |
+| `note` | string hoặc null | Ghi chú hoặc lý do bổ sung. |
+| `related_version` | integer hoặc null | Phiên bản liên quan, nếu có. |
+| `at` | datetime | Thời điểm phát sinh; mặc định là `now()`. |
 
-Client secret không được lưu trong bảng system settings; phải cấu hình bằng environment.
+`HistoryEvent.event` là thuộc tính trả về giá trị chuỗi của `action`.
 
-### 4.2 GitHub Actions & Webhooks (`actions-webhooks`)
+### 3.2. Danh sách action
 
-| Key | Default | Ý nghĩa |
+| Action | Ý nghĩa |
+|---|---|
+| `created` | Tạo tài liệu/phiên bản đầu tiên. |
+| `proposed` | Đề xuất phiên bản mới để chờ xét duyệt. |
+| `accepted` | Phiên bản được chấp thuận. |
+| `edited` | Tài liệu được chỉnh sửa. |
+| `dismissed` | Phiên bản bị từ chối/loại bỏ. |
+| `regenerated` | Phiên bản được sinh lại. |
+| `superseded` | Phiên bản đề xuất bị thay thế bởi phiên bản mới hơn. |
+| `rolled_back` | Thực hiện khôi phục phiên bản. |
+
+### 3.3. Danh sách trigger source
+
+| Trigger source | Ý nghĩa |
+|---|---|
+| `AI_GENERATION` | Thay đổi được tạo từ luồng AI sinh tài liệu. |
+| `MANUAL_EDIT` | Người dùng chỉnh sửa tài liệu thủ công. |
+| `DRIFT_SUGGESTION` | Thay đổi xuất phát từ đề xuất xử lý documentation drift. |
+| `PR_WEBHOOK` | Thay đổi được kích hoạt từ webhook Pull Request. |
+| `REVIEW_WORKFLOW` | Thay đổi phát sinh trong quy trình review. |
+| `ROLLBACK` | Thay đổi được kích hoạt bởi thao tác rollback. |
+
+### 3.4. Bảng lưu trữ change log
+
+Migration `V10__documentation_change_log.sql` tạo bảng `documentation_change_logs`:
+
+| Cột | Kiểu dữ liệu | Ý nghĩa |
 |---|---|---|
-| `actions.workflowFile` | `.github/workflows/ci.yml` | Đường dẫn workflow CI |
-| `actions.requiredChecks` | Backend, Frontend, GitHub Integration, AI Service checks | Các CI jobs bắt buộc phải pass |
-| `webhooks.enabled` | `true` | Cho phép nhận webhook deliveries |
-| `webhooks.events` | `push,pull_request` | Các event được xử lý |
-| `webhooks.payloadUrl` | rỗng | Public URL của `POST /api/github/webhook` |
+| `id` | `VARCHAR(64)` – Primary Key | Định danh bản ghi. |
+| `document_id` | `VARCHAR(64)` – NOT NULL | Tài liệu được thay đổi. |
+| `repository_id` | `UUID` | Repository liên quan, nếu có. |
+| `version_number` | `INTEGER` | Số phiên bản liên quan. |
+| `action` | `VARCHAR(64)` – NOT NULL | Hành động thay đổi. |
+| `summary` | `VARCHAR(500)` – NOT NULL | Nội dung tóm tắt thay đổi. |
+| `actor_id` | `VARCHAR(128)` | ID người thực hiện. |
+| `actor_name` | `VARCHAR(255)` | Tên người thực hiện. |
+| `actor_role` | `VARCHAR(64)` – NOT NULL | Vai trò người thực hiện. |
+| `trigger_source` | `VARCHAR(64)` – NOT NULL | Nguồn kích hoạt. |
+| `status` | `VARCHAR(64)` – NOT NULL | Trạng thái thay đổi. |
+| `reference_id` | `VARCHAR(128)` | Mã tham chiếu liên quan, nếu có. |
+| `created_at` | `TIMESTAMP WITH TIME ZONE` – NOT NULL | Thời điểm tạo bản ghi, mặc định `CURRENT_TIMESTAMP`. |
 
-Các event ngoài danh sách được cấu hình không nằm trong phạm vi xử lý theo catalog. Webhook secret không phải system setting.
+Các index được tạo:
+- `idx_doc_changelog_doc_created` trên `(document_id, created_at DESC)` để hỗ trợ truy vấn lịch sử theo tài liệu và thời gian.
+- `idx_doc_changelog_repo_created` trên `(repository_id, created_at DESC)` để hỗ trợ truy vấn theo repository và thời gian.
 
-### 4.3 Supported Source-Code Languages (`languages`)
+## 4. API
 
-- Key: `languages.enabled`
-- Default: `java,python`
-- Danh sách cho phép: `java`, `python`, `javascript`, `typescript`, `kotlin`, `go`, `ruby`, `php`, `csharp`, `c`, `cpp`, `rust`, `swift`, `scala`, `sql`.
-- Mô tả trong code lưu ý Code Analyzer hiện parse Java và Python; bật ngôn ngữ khác không đồng nghĩa analyzer đã hỗ trợ parse ngôn ngữ đó.
+### 4.1. AI Service
 
-### 4.4 Documentation Generation (`generation`)
+| Method | Endpoint | Kết quả | Mục đích |
+|---|---|---|---|
+| **GET** | `/documents/{doc_id}/history` | `200 OK` + `List[HistoryEvent]` | Lấy audit trail của tài liệu. |
+| **GET** | `/internal/documents/{doc_id}/history` | `200 OK` + `List[HistoryEvent]` | Endpoint nội bộ để service tích hợp lấy lịch sử tài liệu. |
 
-| Key | Default | Validation / ý nghĩa |
-|---|---|---|
-| `generation.outputLanguage` | `vi` | Choice `vi` hoặc `en` |
-| `generation.templateId` | `default` | Template mặc định |
-| `generation.sections` | `Overview,Classes,Functions,API Endpoints` | Các section trong tài liệu |
-| `generation.maxAttempts` | `3` | Số lần AI thử cho mỗi file; từ 1 đến 10 |
+Endpoint public gọi `documents.history(doc_id)`. Hàm `history` kiểm tra document tồn tại và trả về danh sách sự kiện theo thứ tự cũ trước, mới sau. Endpoint internal cũng gọi cùng hàm lấy lịch sử và được bảo vệ bằng cơ chế xác thực internal service.
 
-### 4.5 Automatic Update Policies (`auto-update`)
+### 4.2. Frontend
 
-| Key | Default | Ý nghĩa |
-|---|---|---|
-| `autoUpdate.enabled` | `false` | Bật/tắt tự động cập nhật tài liệu khi code thay đổi |
-| `autoUpdate.triggers` | `push,pull_request` | GitHub events kích hoạt update |
-| `autoUpdate.branches` | `main` | Branch được áp dụng; hỗ trợ wildcard `*` ở cuối |
-| `autoUpdate.minDriftSeverity` | `medium` | Severity thấp nhất kích hoạt update: `low`, `medium`, `high`, `critical` |
-| `autoUpdate.requireReview` | `true` | Tài liệu cập nhật vẫn phải qua staff review và manager approval |
+| Method | Endpoint | Kết quả | Mục đích |
+|---|---|---|---|
+| **GET** | `/api/documentation/{documentId}/change-log` | JSON array các entry change log | Lấy dữ liệu để hiển thị timeline của tài liệu. |
 
-### 4.6 Change-Log & Audit-Log Retention (`retention`)
+Component frontend sử dụng các trường dữ liệu:
+- `id`: định danh entry, dùng làm key khi render.
+- `documentId`: ID tài liệu.
+- `eventType`: loại sự kiện.
+- `actorName`: tên người thực hiện.
+- `summary`: nội dung tóm tắt.
+- `occurredAt`: thời điểm xảy ra.
 
-| Key | Default | Giới hạn |
-|---|---:|---:|
-| `retention.changeLogDays` | 365 ngày | 30–3650 |
-| `retention.auditLogDays` | 730 ngày | 30–3650 |
+**Lưu ý về hợp đồng API:** Trong mã nguồn được cung cấp, AI Service khai báo route `/documents/{doc_id}/history` và `/internal/documents/{doc_id}/history`, trong khi component frontend gọi đường dẫn BFF `/api/documentation/{documentId}/change-log` với cấu trúc entry đã nêu. Chi tiết mapping giữa BFF, AI Service và bảng `documentation_change_logs` không thể hiện đầy đủ trong các phần mã nguồn đã kiểm tra.
 
-Ngoài catalog này, `application.properties` có `app.admin-user-audit.retention-days`, mặc định `0`; comment trong file nêu giá trị dương mới bật expiry cho admin user audit records. Không đồng nhất setting runtime này với hai key retention trong catalog.
+## 5. Luồng chính
 
-### 4.7 AI Model & Confidence (`ai`)
+1. Một thao tác làm thay đổi vòng đời tài liệu được thực hiện, ví dụ tạo tài liệu từ job sinh tài liệu, đề xuất phiên bản, chỉnh sửa, xét duyệt, từ chối, sinh lại hoặc rollback.
+2. Module quản lý phiên bản xác định action, số phiên bản và các thông tin ngữ cảnh của sự kiện.
+3. Hệ thống ghi sự kiện vào lịch sử của document với `actor`, `actor_role`, `trigger_source`, `status`, `note`, `related_version` và thời điểm `at` khi các thông tin tương ứng được cung cấp.
+4. Khi tạo tài liệu từ job, hệ thống ghi event `created`; vai trò và trigger source được lấy từ tham số truyền vào hoặc dùng giá trị mặc định theo luồng tạo tài liệu.
+5. Khi người dùng mở khu vực lịch sử thay đổi, frontend gọi `GET /api/documentation/{documentId}/change-log`.
+6. Frontend nhận danh sách entry và hiển thị theo dạng timeline. Mỗi entry hiển thị tên người thực hiện, thời gian, summary và event type.
+7. Nếu danh sách rỗng, giao diện hiển thị “Chưa có thay đổi nào.”
 
-| Key | Default | Validation / ý nghĩa |
-|---|---|---|
-| `ai.model` | `claude-sonnet-5-5` | Model sinh tài liệu |
-| `ai.embeddingModel` | `tfidf` | Embedding/retrieval model; `tfidf` là built-in TF-IDF ranking |
-| `ai.confidenceThreshold` | `0.5` | Confidence thấp hơn ngưỡng sẽ được đánh dấu review; 0–1 |
-| `ai.tokenBudget` | `4096` | Token tối đa cho một AI response; 256–64000 |
+## 6. Luồng lỗi
 
-### 4.8 Indexing & Retrieval (`retrieval`)
+| Trường hợp | Xử lý / Kết quả |
+|---|---|
+| Document không tồn tại khi gọi API lịch sử AI Service | Trả lỗi `404` theo cơ chế `_not_found` của module quản lý phiên bản. |
+| Người dùng không được phép xem lịch sử hoặc API trả `403` | Frontend hiển thị “Bạn không có quyền xem lịch sử thay đổi của tài liệu này.” |
+| Document không tồn tại ở endpoint BFF hoặc API trả `404` | Frontend hiển thị cùng thông báo không có quyền xem lịch sử. |
+| API trả lỗi khác `403`/`404` | Frontend hiển thị “Không tải được lịch sử thay đổi.” |
+| Đang chờ API phản hồi | Frontend hiển thị “Đang tải…” và bật trạng thái loading. |
+| Không có entry lịch sử | Hiển thị “Chưa có thay đổi nào.” |
 
-| Key | Default | Giới hạn / ý nghĩa |
-|---|---:|---|
-| `indexing.reindexOnChange` | `true` | Rebuild index khi code hoặc tài liệu thay đổi |
-| `retrieval.codeResults` | 4 | Số code items liên quan đưa cho AI; 0–20 |
-| `retrieval.docResults` | 3 | Số đoạn tài liệu đưa cho AI; 0–20 |
-| `retrieval.minScore` | 0.05 | Similarity tối thiểu; 0–1 |
-| `retrieval.chunkChars` | 1200 | Số ký tự tối đa của một documentation chunk; 200–10000 |
-| `retrieval.excerptChars` | 600 | Số ký tự tối đa của evidence excerpt; 100–5000 |
+## 7. Quy tắc nghiệp vụ
 
-## 5. API contract
+- Lịch sử được quản lý theo từng `document_id`; mỗi event liên kết với một `version`.
+- Các sự kiện trong audit trail của AI Service được trả về theo thứ tự thời gian tăng dần (oldest first).
+- `actor_role` và `trigger_source` có thể được truyền vào từ luồng gọi; một số luồng có giá trị mặc định. Ví dụ tạo tài liệu từ job dùng trigger mặc định `AI_GENERATION`; vai trò mặc định phụ thuộc việc tài liệu có owner hay không và actor có được cung cấp hay không.
+- Thời điểm của event được khởi tạo tự động nếu caller không chỉ định.
+- Ghi chú và phiên bản liên quan là thông tin tùy chọn.
+- Frontend định dạng thời gian bằng `toLocaleString()` theo locale của trình duyệt.
+- Migration change log có index theo document/time và repository/time để phục vụ truy vấn lịch sử.
+- Phần mã nguồn hiện có thể hiện cả mô hình audit trail trong AI Service và schema bảng change log trong GitHub Integration Service. Không suy diễn rằng hai cơ chế đã được đồng bộ hoàn toàn khi chưa có phần triển khai mapping tương ứng.
 
-Base path: `/api/admin/system-configuration`.
+## 8. Tiêu chí chấp nhận
 
-### 5.1 Lấy tất cả nhóm cấu hình
+- **AC-LD-177.1:** Khi tài liệu được tạo từ job sinh tài liệu, lịch sử có event `created` gắn với document và version đầu tiên.
+- **AC-LD-177.2:** Event lưu được actor và actor role khi các thông tin này được cung cấp; giá trị mặc định của luồng tạo tài liệu được áp dụng khi thiếu thông tin.
+- **AC-LD-177.3:** Event ghi nhận thời điểm xảy ra và trigger source tương ứng với thao tác (ví dụ `AI_GENERATION`, `MANUAL_EDIT`, `DRIFT_SUGGESTION`, `PR_WEBHOOK`, `REVIEW_WORKFLOW`, `ROLLBACK`).
+- **AC-LD-177.4:** Event có thể lưu action, status, note và related version để mô tả đầy đủ sự kiện.
+- **AC-LD-177.5:** Gọi API lấy lịch sử của document tồn tại trả về danh sách `HistoryEvent` theo thứ tự cũ trước, mới sau.
+- **AC-LD-177.6:** Gọi API lịch sử với document không tồn tại trả về `404`.
+- **AC-LD-177.7:** Frontend hiển thị timeline gồm actor, timestamp, summary và event type.
+- **AC-LD-177.8:** Frontend hiển thị đúng trạng thái loading, danh sách rỗng, lỗi quyền truy cập và lỗi tải dữ liệu.
+- **AC-LD-177.9:** Migration tạo bảng `documentation_change_logs` với các trường bắt buộc và hai index theo document/time và repository/time.
 
-`GET /api/admin/system-configuration`
+## 9. Kiểm thử
 
-- Yêu cầu authority `SYSTEM_CONFIG_VIEW`.
-- Trả về danh sách `GroupView`.
-- Mỗi group có `id`, `title`, `settings`.
-- Mỗi setting trả `key`, `type`, `value`, `defaultValue`, `description`, giới hạn/allowed values, `overridden`, `updatedAt`, `updatedBy`.
+Các hạng mục kiểm thử được nêu trong yêu cầu Jira:
+- Test Documentation Change Log.
+- Record Change Timestamp and Trigger.
+- Record Change User and Role.
+- Display Documentation Change Timeline.
+- Record Documentation Changes.
 
-### 5.2 Lấy một nhóm
-
-`GET /api/admin/system-configuration/{group}`
-
-- Yêu cầu `SYSTEM_CONFIG_VIEW`.
-- Trả về một `GroupView` của group được yêu cầu.
-
-### 5.3 Cập nhật nhóm
-
-`PATCH /api/admin/system-configuration/{group}`
-
-- Yêu cầu `SYSTEM_CONFIG_UPDATE`.
-- Request body có field `settings`, là map key/value.
-- Nếu body hoặc `settings` null, trả HTTP 400 với thông báo `settings is required`.
-- Service kiểm tra key có thuộc catalog và ép kiểu/validate theo định nghĩa trước khi lưu.
-- Giá trị override được gắn với người thực hiện cập nhật (`authentication.getName()`).
-- Response trả về group sau cập nhật.
-
-Ví dụ cấu trúc request:
-
-```json
-{
-  "settings": {
-    "ai.confidenceThreshold": 0.7,
-    "ai.tokenBudget": 8192
-  }
-}
-```
-
-### 5.4 Reset nhóm
-
-`DELETE /api/admin/system-configuration/{group}`
-
-- Yêu cầu `SYSTEM_CONFIG_UPDATE`.
-- Xóa override của group để các setting quay về default.
-- Response trả về `GroupView` sau reset.
-
-## 6. Quy tắc bảo mật và validation
-
-- Chỉ principal có authority tương ứng mới được đọc hoặc thay đổi cấu hình.
-- Chỉ các key đã đăng ký trong catalog được chấp nhận.
-- Kiểu dữ liệu và giới hạn được xác định theo từng Definition.
-- `STRING` có giới hạn độ dài và regex theo setting; `CHOICE` chỉ nhận lựa chọn được khai báo; `LIST` kiểm tra item hợp lệ và số lượng; số nguyên/số thập phân được kiểm tra min/max.
-- Secret không được expose như setting có thể đọc/ghi qua API.
-- Không đưa credential thật vào Markdown, source control hoặc request mẫu.
-
-## 7. Luồng xử lý
-
-### Đọc cấu hình
-
-1. Administrator gọi GET endpoint.
-2. Controller kiểm tra authority `SYSTEM_CONFIG_VIEW`.
-3. Service duyệt catalog theo group.
-4. Với mỗi key, service lấy override trong `system_settings` nếu có; nếu không dùng default.
-5. API trả group và metadata của từng setting, gồm trạng thái overridden và thông tin cập nhật.
-
-### Cập nhật cấu hình
-
-1. Administrator gửi PATCH với group và map settings.
-2. Controller kiểm tra request body.
-3. Service xác định group/key trong catalog.
-4. Service chuyển đổi kiểu và validate từng giá trị.
-5. Giá trị hợp lệ được lưu thành override, kèm người cập nhật/thời điểm cập nhật.
-6. API trả về cấu hình nhóm mới.
-
-### Reset cấu hình
-
-1. Administrator gọi DELETE theo group.
-2. Controller yêu cầu `SYSTEM_CONFIG_UPDATE`.
-3. Service xóa các override thuộc group.
-4. Giá trị hiệu lực trở về default của catalog.
-
-## 8. Kiểm thử và tiêu chí chấp nhận
-
-Các test source có sẵn:
-- `AdminSystemConfigurationControllerTest.java`
-- `SystemConfigurationServiceTest.java`
-
-Tiêu chí chức năng cần xác minh:
-1. GET tất cả groups trả các nhóm catalog.
-2. GET một group trả đúng group và metadata.
-3. PATCH cập nhật các key hợp lệ và trả giá trị mới.
-4. Thiếu `settings` trả HTTP 400.
-5. Key không nằm trong catalog bị từ chối.
-6. Giá trị sai kiểu, ngoài min/max, không đúng regex hoặc không thuộc choices bị từ chối.
-7. DELETE group xóa override và trả default.
-8. Người không có `SYSTEM_CONFIG_VIEW` không đọc được cấu hình.
-9. Người không có `SYSTEM_CONFIG_UPDATE` không thể PATCH/DELETE.
-10. Secret không xuất hiện trong catalog/API.
-11. Giá trị mặc định luôn tự thỏa validation khi service khởi tạo.
-
-## 9. Phạm vi và giới hạn của snapshot
-
-- Backend có REST API và catalog cho các nhóm cấu hình nêu trên.
-- Không thấy màn hình quản trị cấu hình tương ứng trong frontend snapshot LD-273; tài liệu này không khẳng định có UI để administrator thao tác trực tiếp trên trình duyệt.
-- Catalog cho phép cấu hình danh sách ngôn ngữ rộng hơn khả năng parse hiện được ghi chú của Code Analyzer (Java/Python).
-- Các secret và API keys tiếp tục được quản lý qua environment variables, không phải qua system settings.
-- Các yêu cầu trong LD-273 được mô tả theo catalog và API hiện diện; không suy diễn rằng thay đổi mọi setting tự động cập nhật runtime của mọi service nếu source không thể hiện cơ chế áp dụng tương ứng.
-
-## 10. Hướng dẫn cho AI tái tạo code
-
-- Giữ catalog cấu hình tập trung trong `SystemConfigurationService`; không phân tán default/validation ở controller.
-- Giữ phân biệt default và administrator override trong `system_settings`.
-- Bảo đảm GET trả cả metadata phục vụ giao diện cấu hình: type, default, description, constraints, overridden, updatedAt, updatedBy.
-- PATCH chỉ nhận các key được catalog khai báo và validate trước khi lưu.
-- DELETE group phải xóa override để quay về default, không hard-code lại từng giá trị.
-- Giữ authority `SYSTEM_CONFIG_VIEW` và `SYSTEM_CONFIG_UPDATE`.
-- Không lưu GitHub secret, webhook secret, token encryption key hoặc API key trong bảng system settings.
-- Không tự tuyên bố frontend configuration UI đã tồn tại trong snapshot LD-273.
+**Ghi chú:** Trong nội dung yêu cầu LD-177 và các phần mã nguồn đã kiểm tra, chưa xác định được tên cụ thể của các test case/file test chuyên biệt cho change log. Vì vậy tài liệu không tự gán tên file kiểm thử chưa được xác minh.
