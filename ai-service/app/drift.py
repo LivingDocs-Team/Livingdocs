@@ -59,7 +59,7 @@ from .drift_evidence import build_evidence
 from .drift_models import (DRIFT_KINDS, SEVERITY_ORDER, AffectedDocument, DriftAnalyzeRequest,
                            DriftFinding, DriftReport, DriftReportSummary, DriftStatus, DriftSummary,
                            DriftEvidence, DriftType, EntityChangeType, PullRequestAnalysis)
-from .drift_review import DriftReviewer, get_reviewer, refresh_progress, resolve
+from .drift_review import DriftReviewer, ResolutionError, get_reviewer, refresh_progress, resolve
 from .drift_models import ResolutionEvent, ResolutionStatus, ResolutionUpdate
 from .drift_rules import Classified
 
@@ -252,7 +252,15 @@ class DriftReportStore:
     def _read_file(path: pathlib.Path):
         raw = json.loads(path.read_text(encoding="utf-8"))
         rows = raw if isinstance(raw, list) else raw["reports"]
-        return raw, [DriftReport.model_validate(row) for row in rows]
+        if not isinstance(rows, list):
+            raise ValueError("Persisted drift reports must be an array")
+        reports: dict[str, DriftReport] = {}
+        for row in rows:
+            report = DriftReport.model_validate(row)
+            if report.id in reports and reports[report.id] != report:
+                raise ValueError(f"Conflicting persisted drift report {report.id}")
+            reports[report.id] = report
+        return raw, list(reports.values())
 
     def _import_legacy_file(self) -> None:
         if self.path is None or self.path.name != "drift-reports.json":
@@ -262,20 +270,19 @@ class DriftReportStore:
             return
         # A failed upgrade must leave both source files available for recovery.
         raw, current = self._read_file(self.path) if self.path.exists() else ({}, [])
-        if isinstance(raw, dict) and raw.get("legacy_imported") is True:
-            self._legacy_imported = True
-            return
+        already_imported = isinstance(raw, dict) and raw.get("legacy_imported") is True
         _, previous = self._read_file(legacy)
-        by_id: dict[str, DriftReport] = {}
-        for report in [*previous, *current]:
-            if report.id in by_id and by_id[report.id] != report:
+        by_id = {report.id: report for report in previous}
+        for report in current:
+            if not already_imported and report.id in by_id and by_id[report.id] != report:
                 raise ValueError(f"Conflicting persisted drift report {report.id}")
             by_id[report.id] = report
         reports = OrderedDict(
             (report.id, report) for report in sorted(by_id.values(), key=lambda report: report.created_at)
         )
         self._legacy_imported = True
-        self._persist(reports)
+        if not already_imported or len(by_id) != len(current):
+            self._persist(reports)
 
     def _load(self) -> None:
         if self.path is None or not self.path.exists():
@@ -283,6 +290,8 @@ class DriftReportStore:
         try:
             raw, reports = self._read_file(self.path)
         except Exception as exc:  # corrupt file: keep it for inspection, start clean
+            if self.path.name == "drift-reports.json":
+                raise
             stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
             backup = self.path.with_suffix(f".corrupt-{stamp}.json")
             self.path.rename(backup)
@@ -290,8 +299,7 @@ class DriftReportStore:
             return
         if isinstance(raw, dict) and raw.get("legacy_imported") is True:
             self._legacy_imported = True
-            self.limit = max(self.limit, len(reports))
-        for r in reports[-self.limit:]:
+        for r in reports if self._legacy_imported else reports[-self.limit:]:
             self._reports[r.id] = r
 
     def _persist(self, reports: "OrderedDict[str, DriftReport]") -> None:
@@ -307,7 +315,19 @@ class DriftReportStore:
                 if self._legacy_imported:
                     data["legacy_imported"] = True
                 json.dump(data, output, ensure_ascii=False)
+                output.flush()
+                os.fsync(output.fileno())
             os.replace(temporary, self.path)
+            if os.name == "posix":
+                try:
+                    parent = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)
+                    try:
+                        os.fsync(parent)
+                    finally:
+                        os.close(parent)
+                except OSError:
+                    # The replacement is already visible. Keep memory aligned with the file.
+                    log.exception("Could not sync the drift report directory after replacement")
         finally:
             temporary.unlink(missing_ok=True)
 
@@ -315,7 +335,7 @@ class DriftReportStore:
         with self._lock:
             reports = self._reports.copy()
             reports[report.id] = report
-            while len(reports) > self.limit:
+            while not self._legacy_imported and len(reports) > self.limit:
                 reports.popitem(last=False)
             self._persist(reports)
             self._reports = reports
@@ -347,14 +367,21 @@ class DriftReportStore:
         with self._lock:
             report = self._reports.get(report_id)
             if report is None:
-                return
+                raise ResolutionError(404, "Drift report not found")
             candidate = report.model_copy(deep=True)
             finding = next((item for item in candidate.findings if item.id == finding_id), None)
             if finding is None or finding.document.document_id != document_id:
-                return
+                raise ResolutionError(409, "The decision does not match the finding document")
             resolution = finding.resolution
+            decisions = [event for event in resolution.history
+                         if event.draft_version == version and event.workflow_decision is not None]
+            if decisions:
+                if len(decisions) == 1 and (decisions[0].workflow_decision, decisions[0].actor,
+                                            decisions[0].note) == (decision, actor, note):
+                    return
+                raise ResolutionError(409, "The finding already has a different decision for this version")
             if resolution.status != ResolutionStatus.acknowledged or resolution.draft_version != version:
-                return
+                raise ResolutionError(409, "The decision does not match the finding draft version")
             if resolution.history and resolution.history[-1].status == ResolutionStatus.acknowledged:
                 resolution.history[-1].draft_version = version
             approved = decision == "APPROVED"

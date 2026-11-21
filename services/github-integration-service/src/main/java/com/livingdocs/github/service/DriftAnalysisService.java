@@ -112,8 +112,13 @@ public class DriftAnalysisService {
     // ------------------------------------------------------------------ analyze one Pull Request
 
     public JsonNode analyzePullRequest(String userId, UUID repositoryId, DriftAnalysisRequest request) {
+        return analyzePullRequest(userId, repositoryId, request, null, null);
+    }
+
+    public JsonNode analyzePullRequest(String userId, UUID repositoryId, DriftAnalysisRequest request,
+            String workspace, String access) {
         int number = requireNumber(request);
-        ConnectedRepository repository = repositorySyncService.requireOwned(userId, repositoryId);
+        ConnectedRepository repository = requireRepository(userId, repositoryId, workspace, access);
         GitHubConnection connection = connectionService.getActiveConnection(userId);
         Context ctx = new Context(repository.getFullName(), connection);
 
@@ -159,7 +164,12 @@ public class DriftAnalysisService {
 
     /** Báo cáo của một repo (mới nhất trước), chỉ những báo cáo người dùng này tạo. */
     public JsonNode listReports(String userId, UUID repositoryId, Integer pullRequestNumber) {
-        ConnectedRepository repository = repositorySyncService.requireOwned(userId, repositoryId);
+        return listReports(userId, repositoryId, pullRequestNumber, null, null);
+    }
+
+    public JsonNode listReports(String userId, UUID repositoryId, Integer pullRequestNumber,
+            String workspace, String access) {
+        ConnectedRepository repository = requireRepository(userId, repositoryId, workspace, access);
         if (pullRequestNumber != null && pullRequestNumber < 1) {
             throw ApiException.badRequest("pullRequest must be a positive number.");
         }
@@ -177,8 +187,15 @@ public class DriftAnalysisService {
                 """, String.class, repositoryId, userId));
         for (JsonNode row : rows) {
             String reportId = row.path("id").asText();
-            if (ownIds.contains(reportId) || (repository.getFullName().equalsIgnoreCase(row.path("repository").asText())
-                    && isAttested(userId, repositoryId, reportId) && restoreOwner(userId, repositoryId, reportId))) {
+            if (repository.getFullName().equalsIgnoreCase(row.path("repository").asText())
+                    && (ownIds.contains(reportId)
+                    || (isAttested(userId, repositoryId, reportId) && restoreOwner(userId, repositoryId, reportId)))) {
+                if (row.path("review").path("acknowledged").asInt() > 0) {
+                    JsonNode report = fetchReport(reportId, null, repository.getFullName());
+                    if (reconcileWorkflowDecisions(userId, reportId, report)) {
+                        ((ObjectNode) row).set("review", fetchReport(reportId, null, repository.getFullName()).path("review"));
+                    }
+                }
                 own.add(row);
             }
         }
@@ -194,10 +211,16 @@ public class DriftAnalysisService {
      * {@code minSeverity} (low | medium | high | critical) keeps only findings at that level or above.
      */
     public JsonNode getReport(String userId, UUID repositoryId, String reportId, String minSeverity) {
-        String repository = requireReport(userId, repositoryId, reportId);
+        return getReport(userId, repositoryId, reportId, minSeverity, null, null);
+    }
+
+    public JsonNode getReport(String userId, UUID repositoryId, String reportId, String minSeverity,
+            String workspace, String access) {
+        String repository = requireReport(userId, repositoryId, reportId, workspace, access);
         String level = severity(minSeverity);
-        JsonNode report = fetchReport(reportId, level, repository);
-        return reconcileWorkflowDecisions(userId, reportId, report)
+        JsonNode report = fetchReport(reportId, null, repository);
+        boolean reconciled = reconcileWorkflowDecisions(userId, reportId, report);
+        return reconciled || level != null
                 ? fetchReport(reportId, level, repository) : report;
     }
 
@@ -209,7 +232,8 @@ public class DriftAnalysisService {
         if (!report.isObject()) {
             throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid response.");
         }
-        if (repository != null && !repository.equalsIgnoreCase(report.path("repository").asText())) {
+        if (!reportId.equals(report.path("id").asText())
+                || !repository.equalsIgnoreCase(report.path("repository").asText())) {
             throw ApiException.notFound("Drift report not found for this repository.");
         }
         return report;
@@ -258,8 +282,14 @@ public class DriftAnalysisService {
 
     /** LD-159: the report as Markdown grouped by severity (Pull Request comment, download). */
     public String getReportMarkdown(String userId, UUID repositoryId, String reportId, String minSeverity) {
-        requireReport(userId, repositoryId, reportId);
+        return getReportMarkdown(userId, repositoryId, reportId, minSeverity, null, null);
+    }
+
+    public String getReportMarkdown(String userId, UUID repositoryId, String reportId, String minSeverity,
+            String workspace, String access) {
+        String repository = requireReport(userId, repositoryId, reportId, workspace, access);
         String level = severity(minSeverity);
+        reconcileWorkflowDecisions(userId, reportId, fetchReport(reportId, null, repository));
         try {
             String markdown = (level == null
                     ? aiServiceClient.get().uri("/drift/reports/{id}/markdown", reportId)
@@ -295,7 +325,12 @@ public class DriftAnalysisService {
      */
     public JsonNode resolveFinding(String userId, UUID repositoryId, String reportId, String findingId,
                                    DriftResolutionRequest request) {
-        requireReport(userId, repositoryId, reportId);
+        return resolveFinding(userId, repositoryId, reportId, findingId, request, null, null);
+    }
+
+    public JsonNode resolveFinding(String userId, UUID repositoryId, String reportId, String findingId,
+            DriftResolutionRequest request, String workspace, String access) {
+        requireReport(userId, repositoryId, reportId, workspace, access);
         String status = request == null || request.status() == null ? ""
                 : request.status().trim().toLowerCase(Locale.ROOT);
         if (!RESOLUTION_STATUSES.contains(status)) {
@@ -332,7 +367,7 @@ public class DriftAnalysisService {
         }
         boolean createsDraft = "accept".equals(request.decision()) || "edit".equals(request.decision());
         if (createsDraft) {
-            requireFreshDraftSource(userId, repositoryId, reportId, findingId);
+            requireFreshDraftSource(userId, repositoryId, reportId, findingId, workspace, access);
         }
         try {
             var route = createsDraft
@@ -375,8 +410,9 @@ public class DriftAnalysisService {
         }
     }
 
-    private void requireFreshDraftSource(String userId, UUID repositoryId, String reportId, String findingId) {
-        JsonNode report = getReport(userId, repositoryId, reportId, null);
+    private void requireFreshDraftSource(String userId, UUID repositoryId, String reportId, String findingId,
+            String workspace, String access) {
+        JsonNode report = getReport(userId, repositoryId, reportId, null, workspace, access);
         for (JsonNode finding : report.path("findings")) {
             if (!findingId.equals(finding.path("id").asText())) {
                 continue;
@@ -404,10 +440,15 @@ public class DriftAnalysisService {
         throw ApiException.notFound("Drift finding not found.");
     }
 
-    /** Owner check; returns the repository name when a repository id is given. */
-    private String requireReport(String userId, UUID repositoryId, String reportId) {
+    private ConnectedRepository requireRepository(String userId, UUID repositoryId, String workspace, String access) {
+        return workspace == null && access == null
+                ? repositorySyncService.requireOwned(userId, repositoryId)
+                : repositorySyncService.requireOwned(userId, repositoryId, workspace, access);
+    }
+
+    private String requireReport(String userId, UUID repositoryId, String reportId, String workspace, String access) {
         String repository = repositoryId == null ? null
-                : repositorySyncService.requireOwned(userId, repositoryId).getFullName();
+                : requireRepository(userId, repositoryId, workspace, access).getFullName();
         ReportOwner owner = reportOwner(reportId);
         if (owner == null && repositoryId == null) {
             UUID attestedRepository = jdbc.queryForList("""
@@ -415,7 +456,7 @@ public class DriftAnalysisService {
                      WHERE report_id = ? AND owner_user_id = ?
                     """, UUID.class, reportId, userId).stream().findFirst().orElse(null);
             if (attestedRepository != null) {
-                return requireReport(userId, attestedRepository, reportId);
+                return requireReport(userId, attestedRepository, reportId, workspace, access);
             }
         }
         if (owner == null && repositoryId != null && isAttested(userId, repositoryId, reportId)) {
@@ -436,7 +477,9 @@ public class DriftAnalysisService {
         if (repositoryId != null && !Objects.equals(owner.repository(), repositoryId)) {
             throw ApiException.notFound("Drift report not found for this repository.");
         }
-        return repository;
+        return repositoryId == null
+                ? requireRepository(userId, owner.repository(), workspace, access).getFullName()
+                : repository;
     }
 
     private ReportOwner reportOwner(String reportId) {

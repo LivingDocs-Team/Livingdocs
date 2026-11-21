@@ -52,6 +52,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -101,6 +102,91 @@ class RevisionWorkflowE2ETest {
     @Autowired com.livingdocs.github.change.RevisionJobWorker revisionWorker;
     @Autowired @org.springframework.beans.factory.annotation.Qualifier("aiServiceRestClient")
     RestClient aiService;
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"11", "15"})
+    @org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable(named = "LIVINGDOCS_E2E_RESTART_PHASE", matches = ".+")
+    void upgradesExistingPostgresSchemaToV16(String version) {
+        String schema = "upgrade_v" + version;
+        var dataSource = new org.postgresql.ds.PGSimpleDataSource();
+        dataSource.setURL(System.getenv().getOrDefault("LIVINGDOCS_E2E_DB_URL",
+                "jdbc:postgresql://postgres:5432/revision_e2e"));
+        dataSource.setUser("revision_test");
+        dataSource.setPassword("fixture-password");
+        dataSource.setCurrentSchema(schema);
+        var selector = new com.livingdocs.github.config.FlywayMigrationLineageSelector();
+        String initial = version.equals("11") ? com.livingdocs.github.config.FlywayMigrationLineageSelector.LEGACY_LOCATION
+                : com.livingdocs.github.config.FlywayMigrationLineageSelector.CURRENT_LOCATION;
+        org.flywaydb.core.Flyway.configure().dataSource(dataSource).schemas(schema)
+                .locations(initial, "classpath:db/migration-common").target(version).load().migrate();
+
+        String selected = selector.select(dataSource).location();
+        var flyway = org.flywaydb.core.Flyway.configure().dataSource(dataSource).schemas(schema)
+                .locations(selected, "classpath:db/migration-common").load();
+        flyway.migrate();
+        flyway.validate();
+        assertThat(flyway.info().current().getVersion().toString()).isEqualTo("16");
+        var jdbc = new org.springframework.jdbc.core.JdbcTemplate(dataSource);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM legacy_drift_owner_attestations", Long.class))
+                .isZero();
+    }
+
+    @org.junit.jupiter.api.Test
+    @org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable(named = "LIVINGDOCS_E2E_RESTART_PHASE", matches = ".+")
+    void driftAccessTracksCurrentRepositoryAssociation() throws Exception {
+        String owner = Long.toString(java.util.concurrent.ThreadLocalRandom.current().nextLong(1, Long.MAX_VALUE));
+        var original = connectAndAddRepo(owner);
+        var other = addRepo(owner);
+        String firstWorkspace = "workspace-" + UUID.randomUUID();
+        String otherWorkspace = "workspace-" + UUID.randomUUID();
+        String newWorkspace = "workspace-" + UUID.randomUUID();
+        UUID originalId = UUID.fromString(original.id());
+        revisionJdbc.update("UPDATE repositories SET workspace_id = ? WHERE id = ?", firstWorkspace, originalId);
+        revisionJdbc.update("UPDATE repositories SET workspace_id = ? WHERE id = ?",
+                otherWorkspace, UUID.fromString(other.id()));
+        var report = aiService.post().uri("/drift/analyze").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("repository", "acme/docs", "pull_request", Map.of("number", 7),
+                        "files", List.of(Map.of("path", "README.md")), "document_ids", List.of()))
+                .retrieve().body(JsonNode.class);
+        String id = report.path("id").asText();
+        revisionJdbc.update("INSERT INTO legacy_drift_owner_attestations VALUES (?, ?, ?, ?)",
+                id, originalId, owner, "fixture audit with exact report and repository IDs");
+        String list = "/api/repositories/{repo}/drift/reports";
+        String detail = list + "/{report}";
+        String markdown = detail + "/markdown";
+        mvc.perform(get(detail, original.id(), id).header(USER_HEADER, owner)
+                .header("X-Verified-Workspace-Id", firstWorkspace).header("X-Verified-Workspace-Access", "OWNER"))
+                .andExpect(status().isOk());
+        mvc.perform(get(detail, other.id(), id).header(USER_HEADER, owner)
+                .header("X-Verified-Workspace-Id", otherWorkspace).header("X-Verified-Workspace-Access", "OWNER"))
+                .andExpect(status().isNotFound());
+
+        revisionJdbc.update("UPDATE repositories SET workspace_id = ? WHERE id = ?", newWorkspace, originalId);
+        mvc.perform(get(detail, original.id(), id).header(USER_HEADER, owner)
+                .header("X-Verified-Workspace-Id", firstWorkspace).header("X-Verified-Workspace-Access", "OWNER"))
+                .andExpect(status().isForbidden());
+        mvc.perform(get(detail, original.id(), id).header(USER_HEADER, owner)
+                .header("X-Verified-Workspace-Id", newWorkspace).header("X-Verified-Workspace-Access", "OWNER"))
+                .andExpect(status().isOk());
+        var connection = connectionRepository.findByUserId(owner).orElseThrow();
+        connection.setStatus(ConnectionStatus.INVALID);
+        connectionRepository.save(connection);
+
+        mvc.perform(get("/api/drift/reports/{report}", id).header(USER_HEADER, owner))
+                .andExpect(status().isForbidden());
+        mvc.perform(get(list, original.id()).header(USER_HEADER, owner)
+                .header("X-Verified-Workspace-Id", newWorkspace).header("X-Verified-Workspace-Access", "OWNER"))
+                .andExpect(status().isForbidden());
+        for (String route : List.of(detail, markdown)) {
+            mvc.perform(get(route, original.id(), id).header(USER_HEADER, owner)
+                    .header("X-Verified-Workspace-Id", newWorkspace).header("X-Verified-Workspace-Access", "OWNER"))
+                    .andExpect(status().isForbidden());
+        }
+        mvc.perform(put(detail + "/findings/F1/resolution", original.id(), id).header(USER_HEADER, owner)
+                .header("X-Verified-Workspace-Id", newWorkspace).header("X-Verified-Workspace-Access", "OWNER")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"resolved\"}"))
+                .andExpect(status().isForbidden());
+    }
 
     @MockitoBean GitHubClient gitHubClient;
     @MockitoBean CodeAnalyzerClient analyzerClient;
@@ -211,9 +297,47 @@ class RevisionWorkflowE2ETest {
         workflows.staffReview("staff", staff, workflow, new StaffReviewRequest(StaffReviewResult.PASSED, null));
         assertThatThrownBy(() -> workflows.decide("manager", manager, workflow, ManagerDecision.APPROVED, null, 1))
                 .isInstanceOf(com.livingdocs.github.exception.ApiException.class);
-        workflows.decide("manager", manager, workflow, ManagerDecision.APPROVED, null, 2);
+        boolean approved = decision.equals("accept");
+        ManagerDecision outcome = approved ? ManagerDecision.APPROVED : ManagerDecision.REJECTED;
+        String note = approved ? "Approved after review" : "Needs correction";
+        var permissions = Set.of("ROLE_MANAGER", "DOCUMENT_APPROVE", "DOCUMENT_REJECT");
+        // Persist the remote decision while SQL is still pending, as after a Java crash.
+        aiService.post().uri("/internal/documents/{id}/review-decision", documentId)
+                .header(USER_HEADER, "manager").header("X-Document-Owner-Id", owner)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("version", 2, "decision", outcome.name(), "note", note))
+                .retrieve().toBodilessEntity();
+        assertThatThrownBy(() -> workflows.decide("manager-b", permissions, workflow, outcome, note, 2))
+                .isInstanceOf(com.livingdocs.github.exception.ApiException.class);
+        assertThatThrownBy(() -> workflows.decide("manager", permissions, workflow, outcome, "Changed note", 2))
+                .isInstanceOf(com.livingdocs.github.exception.ApiException.class);
+        assertThat(workflowRows.findById(workflow).orElseThrow().getStatus().name())
+                .isEqualTo("PENDING_MANAGER_APPROVAL");
+        workflows.decide("manager", permissions, workflow, outcome, note, 2);
+        workflows.decide("manager", permissions, workflow, outcome, note, 2);
+        assertThat(revisionJdbc.queryForList("""
+                SELECT actor_user_id, comment FROM document_workflow_audit
+                WHERE workflow_id = ? AND document_version = 2 AND action = ?
+                """, workflow, outcome.name())).containsExactly(Map.of("actor_user_id", "manager", "comment", note));
+        String listRoute = "/api/repositories/{repo}/drift/reports";
+        String detailRoute = listRoute + "/{report}";
+        if (approved) {
+            mvc.perform(get(detailRoute, repo.id(), reportId).header(USER_HEADER, owner)
+                    .param("minSeverity", "critical")).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.review.resolved").value(1));
+        } else {
+            mvc.perform(get(detailRoute + "/markdown", repo.id(), reportId).header(USER_HEADER, owner))
+                    .andExpect(status().isOk())
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
+                            .string(org.hamcrest.Matchers.containsString("open by manager")));
+        }
+        mvc.perform(get(listRoute, repo.id()).header(USER_HEADER, owner)).andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].review.acknowledged").value(0));
+        mvc.perform(get(detailRoute, repo.id(), reportId).header(USER_HEADER, owner)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.findings[0].resolution.actor").value("manager"))
+                .andExpect(jsonPath("$.findings[0].resolution.note").value(note));
         assertThat(ai.get().uri("/internal/documents/{id}", documentId).retrieve().body(JsonNode.class)
-                .path("current_version").asInt()).isEqualTo(2);
+                .path("current_version").asInt()).isEqualTo(approved ? 2 : 1);
     }
 
     @org.junit.jupiter.params.ParameterizedTest
@@ -643,6 +767,10 @@ class RevisionWorkflowE2ETest {
 
     private Repo connectAndAddRepo(String user) throws Exception {
         saveConnection(user);
+        return addRepo(user);
+    }
+
+    private Repo addRepo(String user) throws Exception {
         long githubId = NEXT_GITHUB_REPO_ID.incrementAndGet();
         GitHubRepo docs = new GitHubRepo(githubId, "acme/docs", false, "main", "https://github.com/acme/docs");
         when(gitHubClient.listUserRepositories(TOKEN)).thenReturn(List.of(docs));

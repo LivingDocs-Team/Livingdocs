@@ -292,7 +292,8 @@ class DriftAnalysisServiceTest {
                 .andExpect(method(GET))
                 .andExpect(requestTo(containsString("pull_request=7")))
                 .andRespond(withSuccess("""
-                        [{"id":"report-1","status":"drift_detected"},{"id":"report-of-someone-else","status":"no_drift"}]
+                        [{"id":"report-1","repository":"acme/shop","status":"drift_detected"},
+                         {"id":"report-of-someone-else","repository":"acme/shop","status":"no_drift"}]
                         """, MediaType.APPLICATION_JSON));
         aiServiceServer.expect(requestTo("http://ai.test/drift/reports/report-1"))
                 .andExpect(method(GET))
@@ -344,6 +345,10 @@ class DriftAnalysisServiceTest {
                 () -> driftService.getReport(USER_ID, otherId, "report-1", null)).getStatus());
         assertEquals("report-1", newService().getReport(USER_ID, REPOSITORY_ID, "report-1", null)
                 .path("id").asText());
+        when(repositorySyncService.requireOwned(USER_ID, REPOSITORY_ID))
+                .thenThrow(ApiException.forbidden("Repository access revoked."));
+        assertEquals(HttpStatus.FORBIDDEN, assertThrows(ApiException.class,
+                () -> newService().getReport(USER_ID, "report-1")).getStatus());
         aiServiceServer.verify();
     }
 
@@ -393,8 +398,12 @@ class DriftAnalysisServiceTest {
         expectDocuments();
         aiServiceServer.expect(requestTo("http://ai.test/drift/analyze"))
                 .andRespond(withStatus(HttpStatus.CREATED).contentType(MediaType.APPLICATION_JSON).body(REPORT));
+        aiServiceServer.expect(requestTo("http://ai.test/drift/reports/report-1"))
+                .andRespond(withSuccess(REPORT, MediaType.APPLICATION_JSON));
         aiServiceServer.expect(requestTo("http://ai.test/drift/reports/report-1?min_severity=high"))
                 .andExpect(method(GET))
+                .andRespond(withSuccess(REPORT, MediaType.APPLICATION_JSON));
+        aiServiceServer.expect(requestTo("http://ai.test/drift/reports/report-1"))
                 .andRespond(withSuccess(REPORT, MediaType.APPLICATION_JSON));
         aiServiceServer.expect(requestTo("http://ai.test/drift/reports/report-1/markdown"))
                 .andRespond(withSuccess("## Documentation drift - PR #7", MediaType.parseMediaType("text/markdown")));
