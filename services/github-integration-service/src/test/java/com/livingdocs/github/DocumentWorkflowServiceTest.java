@@ -547,6 +547,8 @@ class DocumentWorkflowServiceTest {
                 new StaffReviewRequest(StaffReviewResult.CHANGES_REQUESTED, "Please clarify the setup steps"));
         assertThat(changes.status()).isEqualTo(DocumentWorkflowStatus.CHANGES_REQUESTED);
 
+        when(documents.editOwnedDocument(OWNER, "doc-1", 1, "# Updated", "Clarified setup"))
+                .thenReturn(new ObjectMapper().readTree("{\"number\":2}"));
         var edited = service.editAfterChanges(OWNER, Set.of("DOCUMENT_UPDATE"), ID,
                 new com.livingdocs.github.dto.WorkflowDtos.EditDocumentRequest("# Updated", "Clarified setup"));
         assertThat(edited.status()).isEqualTo(DocumentWorkflowStatus.CHANGES_REQUESTED);

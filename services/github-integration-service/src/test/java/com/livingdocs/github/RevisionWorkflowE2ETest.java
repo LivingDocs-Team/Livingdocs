@@ -105,9 +105,9 @@ class RevisionWorkflowE2ETest {
     RestClient aiService;
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(strings = {"11", "15"})
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"11", "15", "16"})
     @org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable(named = "LIVINGDOCS_E2E_RESTART_PHASE", matches = ".+")
-    void upgradesExistingPostgresSchemaToV16(String version) {
+    void upgradesExistingPostgresSchemaToV17(String version) {
         String schema = "upgrade_v" + version;
         var dataSource = new org.postgresql.ds.PGSimpleDataSource();
         dataSource.setURL(System.getenv().getOrDefault("LIVINGDOCS_E2E_DB_URL",
@@ -126,9 +126,11 @@ class RevisionWorkflowE2ETest {
                 .locations(selected, "classpath:db/migration-common").load();
         flyway.migrate();
         flyway.validate();
-        assertThat(flyway.info().current().getVersion().toString()).isEqualTo("16");
+        assertThat(flyway.info().current().getVersion().toString()).isEqualTo("17");
         var jdbc = new org.springframework.jdbc.core.JdbcTemplate(dataSource);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM legacy_drift_owner_attestations", Long.class))
+                .isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(trigger_source) FROM document_workflow_audit", Long.class))
                 .isZero();
     }
 
@@ -550,6 +552,10 @@ class RevisionWorkflowE2ETest {
                 .toList();
         assertThat(history).extracting(event -> event.action())
                 .containsSubsequence("REVISION_DRAFT_SUBMITTED", "PASSED", decision.name());
+        assertThat(history).filteredOn(event -> event.action().equals("REVISION_DRAFT_SUBMITTED"))
+                .singleElement().satisfies(event -> assertThat(event.triggerSource()).isEqualTo("COMMIT"));
+        assertThat(history).filteredOn(event -> event.action().equals(decision.name()))
+                .singleElement().satisfies(event -> assertThat(event.triggerSource()).isEqualTo("REVIEW_WORKFLOW"));
         assertThat(history).allSatisfy(event -> {
             assertThat(event.documentId()).isEqualTo(documentId);
             assertThat(event.createdAt()).isNotNull();

@@ -80,7 +80,8 @@ public class DocumentWorkflowService {
     public void submitRevisionDraft(JsonNode candidate, SourceChangeRequest revision,
             Supplier<JsonNode> generate) {
         submitRevisionDraft(candidate, generate, "AI", "REVISION_DRAFT_SUBMITTED",
-                "Source " + revision.repositoryId() + " at " + revision.commitSha(), "AI");
+                "Source " + revision.repositoryId() + " at " + revision.commitSha(), "AI",
+                revision.trigger().name());
     }
 
     @Transactional
@@ -91,11 +92,12 @@ public class DocumentWorkflowService {
             return;
         }
         submitRevisionDraft(document, () -> documents.getExactDocumentVersion(actor, documentId, version),
-                actor, "DRIFT_DRAFT_SUBMITTED", "Version " + version + " from a drift finding", null);
+                actor, "DRIFT_DRAFT_SUBMITTED", "Version " + version + " from a drift finding", null,
+                "DRIFT_SUGGESTION");
     }
 
     private void submitRevisionDraft(JsonNode candidate, Supplier<JsonNode> generate,
-            String actor, String action, String comment, String actorRole) {
+            String actor, String action, String comment, String actorRole, String triggerSource) {
         String id = candidate.path("id").asText();
         String owner = candidate.path("owner_user_id").asText();
         DocumentWorkflow workflow = workflows.lockByDocumentId(id).orElse(null);
@@ -119,7 +121,8 @@ public class DocumentWorkflowService {
         DocumentWorkflowStatus previous = workflow.getStatus();
         workflow.submit(version);
         workflows.saveAndFlush(workflow);
-        record(workflow, actor, action, previous, workflow.getStatus(), comment, null, null, actorRole);
+        record(workflow, actor, action, previous, workflow.getStatus(), comment, null, null, actorRole,
+                triggerSource);
     }
 
     @Transactional
@@ -345,7 +348,7 @@ public class DocumentWorkflowService {
                 .map(e -> new AuditResponse(e.getId(), e.getWorkflowId(), e.getActorUserId(), e.getActorRole(), e.getAction(),
                         e.getPreviousStatus(), e.getNewStatus(), e.getPreviousReviewerUserId(),
                         e.getNewReviewerUserId(), e.getComment(), e.getCreatedAt(),
-                        workflow.getDocumentId(), e.getDocumentVersion()))
+                        workflow.getDocumentId(), e.getDocumentVersion(), e.getTriggerSource()))
                 .toList();
     }
 
@@ -450,6 +453,7 @@ public class DocumentWorkflowService {
                 workflow.getStatus().name(), workflow.getStatus().name(),
                 normalizeComment(request.comment()), null, null, "STAFF");
         entry.setDocumentVersion(workflow.getSubmittedDocumentVersion());
+        entry.setTriggerSource("REVIEW_WORKFLOW");
         if (request.section() != null) {
             SectionFeedback section = request.section();
             String content = documents.getDocumentContent(actor, workflow.getDocumentId(),
@@ -559,9 +563,17 @@ public class DocumentWorkflowService {
         if (request.expectedVersion() != null && request.expectedVersion() != expectedVersion) {
             throw conflict("The document version changed. Reload before saving.");
         }
-        documents.editOwnedDocument(actor, workflow.getDocumentId(),
+        JsonNode version = documents.editOwnedDocument(actor, workflow.getDocumentId(),
                 expectedVersion, request.content(), comment);
-        record(workflow, actor, "DOCUMENT_EDITED", current, current, comment);
+        int editedVersion = version.path("number").asInt();
+        if (editedVersion <= expectedVersion) {
+            throw conflict("The edited document version could not be verified.");
+        }
+        var entry = new DocumentWorkflowAudit(workflow.getId(), actor, "DOCUMENT_EDITED",
+                current.name(), current.name(), comment);
+        entry.setDocumentVersion(editedVersion);
+        entry.setTriggerSource("MANUAL_EDIT");
+        audit.save(entry);
         return toResponse(workflow);
     }
 
@@ -835,10 +847,23 @@ public class DocumentWorkflowService {
     private void record(DocumentWorkflow w, String actor, String action,
             DocumentWorkflowStatus previous, DocumentWorkflowStatus next, String comment,
             String previousReviewer, String newReviewer, String actorRole) {
+        String triggerSource = switch (action) {
+            case "STAFF_DRAFT_EDITED" -> "MANUAL_EDIT";
+            case "ROLLBACK_REQUESTED" -> "ROLLBACK";
+            default -> "REVIEW_WORKFLOW";
+        };
+        record(w, actor, action, previous, next, comment, previousReviewer, newReviewer, actorRole,
+                triggerSource);
+    }
+
+    private void record(DocumentWorkflow w, String actor, String action,
+            DocumentWorkflowStatus previous, DocumentWorkflowStatus next, String comment,
+            String previousReviewer, String newReviewer, String actorRole, String triggerSource) {
         DocumentWorkflowAudit entry = new DocumentWorkflowAudit(w.getId(), actor, action,
                 previous == null ? null : previous.name(), next.name(), normalizeComment(comment),
                 previousReviewer, newReviewer, actorRole);
         entry.setDocumentVersion(w.getSubmittedDocumentVersion());
+        entry.setTriggerSource(triggerSource);
         audit.save(entry);
     }
 

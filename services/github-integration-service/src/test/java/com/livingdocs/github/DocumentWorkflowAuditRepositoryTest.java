@@ -137,7 +137,10 @@ class DocumentWorkflowAuditRepositoryTest {
                 .thenReturn("# Setup\nUse token.");
         org.mockito.Mockito.when(documents.editOwnedDocument("73", "review-integration", 1,
                 "# Setup\nUse a GitHub access token.", "Clarified token"))
-                .thenAnswer(invocation -> document.put("pending_version", 2).put("versions_total", 2));
+                .thenAnswer(invocation -> {
+                    document.put("pending_version", 2).put("versions_total", 2);
+                    return com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode().put("number", 2);
+                });
         DocumentWorkflowService service = new DocumentWorkflowService(workflows, audit, documents);
         java.util.Set<String> owner = java.util.Set.of("DOCUMENT_CREATE", "DOCUMENT_SUBMIT",
                 "DOCUMENT_UPDATE", "DOCUMENT_VIEW");
@@ -175,6 +178,11 @@ class DocumentWorkflowAuditRepositoryTest {
         assertThat(workflows.findById(id).orElseThrow().getStatus()).isEqualTo(DocumentWorkflowStatus.APPROVED);
         assertThat(service.comments("73", owner, id)).singleElement()
                 .satisfies(saved -> assertThat(saved.section()).isEqualTo(section));
+        assertThat(service.history("73", owner, id)).filteredOn(event -> event.action().equals("DOCUMENT_EDITED"))
+                .singleElement().satisfies(event -> {
+                    assertThat(event.documentVersion()).isEqualTo(2);
+                    assertThat(event.triggerSource()).isEqualTo("MANUAL_EDIT");
+                });
         assertThat(service.history("73", owner, id)).extracting(event -> event.action())
                 .containsSubsequence("REVIEW_COMMENT", "CHANGES_REQUESTED", "DOCUMENT_EDITED",
                         "SUBMITTED", "PASSED", "APPROVED");
