@@ -16,7 +16,7 @@ import org.springframework.web.client.RestClientException;
 class IntegrationHealthConfig {
     @Bean
     HealthIndicator githubIntegrationHealthIndicator(RestClient.Builder builder,
-            @Value("${services.github-integration.base-url}") String baseUrl) {
+            @Value("${services.github-integration.base-url:http://localhost:8082}") String baseUrl) {
         var factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofSeconds(1));
         factory.setReadTimeout(Duration.ofSeconds(5));
