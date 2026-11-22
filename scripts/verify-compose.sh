@@ -35,6 +35,9 @@ export TOKEN_ENCRYPTION_KEY="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 export GITHUB_INTEGRATION_INTERNAL_SECRET="smoke-test-internal-secret"
 export SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID="smoke-test-placeholder"
 export SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_SECRET="smoke-test-placeholder"
+# Use the backend catalog default on the disposable fixture. Compose's ordinary
+# default of 0 is outside the catalog's accepted range (30–3650).
+export ADMIN_USER_AUDIT_RETENTION_DAYS=730
 export GITHUB_CALLBACK_BIND_ADDRESS=127.0.0.1
 export GITHUB_REDIRECT_URI=http://localhost:8083/api/github/callback
 export BACKEND_PORT=8081 FRONTEND_PORT=3001 AI_SERVICE_PORT=8002 ANALYZER_PORT=8003 GITHUB_INTEGRATION_PORT=8083
