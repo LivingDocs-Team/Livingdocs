@@ -28,7 +28,7 @@ from .models import (Evidence, EvidenceKind, FileReport, FileResultStatus, JobRe
                      Scope, SourceSnapshot, now)
 from .renderer import render_overview
 from .version_models import (ComparedVersion, Document, DocumentDiff, DocumentVersion, FileSection,
-                             HistoryAction, HistoryEvent, PreparedRevision, RevisionDraftRequest,
+                             HistoryAction, HistoryEvent, InitialGenerationSave, PreparedRevision, RevisionDraftRequest,
                              RevisionFileChange, SectionAction, SectionChange, SkippedFile,
                              SourceChangeRef, VersionOrigin,
                              VersionStatus, VersionSummary)
@@ -47,6 +47,10 @@ class VersionError(Exception):
         super().__init__(message)
         self.status = status
         self.message = message
+
+
+class DocumentStoreSyncError(OSError):
+    """The replacement is visible, but the directory could not be synced."""
 
 
 def _not_found(what: str) -> VersionError:
@@ -192,11 +196,16 @@ class DocumentStore:
                 os.fsync(output.fileno())
             os.replace(tmp, self.path)
             if os.name == "posix":
-                directory = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)
                 try:
-                    os.fsync(directory)
-                finally:
-                    os.close(directory)
+                    directory = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)
+                    try:
+                        os.fsync(directory)
+                    finally:
+                        os.close(directory)
+                except OSError as exc:
+                    # The replacement is already visible. Keep memory aligned with the file,
+                    # but surface the durability failure so the caller can retry.
+                    raise DocumentStoreSyncError(str(exc)) from exc
         finally:
             tmp.unlink(missing_ok=True)
 
@@ -220,6 +229,14 @@ class DocumentStore:
         if doc is None:
             raise _not_found("Document")
         return doc
+
+    def document_snapshot(self, doc_id: str) -> Document:
+        with self._lock:
+            return self.get(doc_id).model_copy(deep=True)
+
+    def version_snapshot(self, doc_id: str, number: int) -> DocumentVersion:
+        with self._lock:
+            return self.version(doc_id, number).model_copy(deep=True)
 
     def get_public(self, doc_id: str) -> Document:
         doc = self.get(doc_id)
@@ -325,7 +342,8 @@ class DocumentStore:
 
     def create_from_job(self, job_id: str, output: JobOutput, title: Optional[str] = None,
                         actor: Optional[str] = None, note: Optional[str] = None,
-                        owner_user_id: Optional[str] = None,report: Optional[JobReport] = None) -> Document:
+                        owner_user_id: Optional[str] = None, report: Optional[JobReport] = None,
+                        *, actor_role: Optional[str] = None) -> Document:
         with self._lock:
             if owner_user_id is not None:
                 for existing in self._docs.values():
@@ -356,12 +374,23 @@ class DocumentStore:
                                 source_snapshot=output.source_snapshot,
                                 decided_by=None if owner_user_id is not None else actor,
                                 decided_at=None if owner_user_id is not None else now())
+            if owner_user_id is not None and actor == owner_user_id:
+                doc.initial_generation_save = InitialGenerationSave(
+                    job_id=job_id, version=v.number, actor_user_id=actor,
+                    actor_role=actor_role, saved_at=v.created_at,
+                )
             self._docs[doc.id] = doc
             self._versions[doc.id] = [v]
             self._events[doc.id] = []
             self._plans[doc.id] = {}
             self._event(doc.id, HistoryAction.created, 1, actor, note or f"From job {job_id}")
-            self._save()
+            try:
+                self._save()
+            except DocumentStoreSyncError:
+                raise
+            except OSError:
+                del self._docs[doc.id], self._versions[doc.id], self._events[doc.id], self._plans[doc.id]
+                raise
             return doc
 
     def revision_candidates(self, repository_id: str) -> List[Document]:
@@ -507,6 +536,8 @@ class DocumentStore:
                         f"Source revision {request.source_snapshot.commit_sha}", related=base.number)
             try:
                 self._save()
+            except DocumentStoreSyncError:
+                raise
             except OSError:
                 self._versions[doc_id].pop()
                 self._events[doc_id].pop()
@@ -609,7 +640,7 @@ class DocumentStore:
             return doc
 
     def edit_owned(self, doc_id: str, owner_user_id: str, expected_version: int, content: str,
-                   note: Optional[str] = None) -> DocumentVersion:
+                   note: Optional[str] = None, *, actor_role: Optional[str] = None) -> DocumentVersion:
         with self._lock:
             doc = self.get_owned(doc_id, owner_user_id)
             if doc.pending_version is not None:
@@ -620,6 +651,9 @@ class DocumentStore:
                 if doc.current_version != expected_version:
                     raise VersionError(409, "The submitted document version has changed")
                 base = self.version(doc_id, doc.current_version)
+            previous_doc = doc.model_copy(deep=True)
+            previous_base = base.model_copy(deep=True)
+            event_count = len(self._events[doc_id])
             number = len(self._versions[doc_id]) + 1
             if doc.pending_version is not None:
                 base.status = VersionStatus.superseded
@@ -639,6 +673,8 @@ class DocumentStore:
                 manual=True,
                 note=note,
                 created_by=owner_user_id,
+                owner_edit_from=expected_version,
+                saved_actor_role=actor_role,
             )
             inherit_evidence(version, base)     # LD-402: the resubmission can be reviewed
             self._versions[doc_id].append(version)
@@ -646,7 +682,16 @@ class DocumentStore:
             doc.versions_total = number
             doc.updated_at = now()
             self._event(doc_id, HistoryAction.proposed, number, owner_user_id, note or "Owner edited after changes requested")
-            self._save()
+            try:
+                self._save()
+            except DocumentStoreSyncError:
+                raise
+            except OSError:
+                self._docs[doc_id] = previous_doc
+                self._versions[doc_id].pop()
+                self._versions[doc_id][base.number - 1] = previous_base
+                del self._events[doc_id][event_count:]
+                raise
             return version
 
     def edit_staff_draft(self, doc_id: str, owner: str, expected: int, actor: str,
@@ -761,6 +806,7 @@ class DocumentStore:
             )
             inherit_evidence(version, source)   # LD-402: all evidence, not only evidence_report
 
+            previous = doc.model_copy(deep=True)
             self._versions[doc_id].append(version)
             doc.pending_version = number
             doc.versions_total = number
@@ -775,7 +821,15 @@ class DocumentStore:
                 related=source.number,
             )
 
-            self._save()
+            try:
+                self._save()
+            except DocumentStoreSyncError:
+                raise
+            except OSError:
+                self._versions[doc_id].pop()
+                self._events[doc_id].pop()
+                self._docs[doc_id] = previous
+                raise
             return version
 
     def require_workflow_decision(self, doc_id: str, version_number: int, decision: str,

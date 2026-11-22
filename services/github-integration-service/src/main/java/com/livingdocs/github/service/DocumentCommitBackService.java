@@ -146,6 +146,7 @@ public class DocumentCommitBackService {
                     reason + " at " + result.path() + "; source " + sourceSha
                             + "; observed head " + result.observedHeadSha(), null, null, "MANAGER");
             entry.setDocumentVersion(version);
+            entry.setTriggerSource("COMMIT_BACK");
             audit.save(entry);
         }
         return result;
