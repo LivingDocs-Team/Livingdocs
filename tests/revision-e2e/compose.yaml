@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: revision_e2e
+      POSTGRES_USER: revision_test
+      POSTGRES_PASSWORD: fixture-password
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "revision_test", "-d", "revision_e2e"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  ai:
+    build: ../../ai-service
+    command: ["python", "-m", "tests.revision_e2e_server"]
+    environment:
+      INTERNAL_API_SECRET: test-only-internal-credential
+      LIVINGDOCS_E2E_AI_HOST: 0.0.0.0
+      TEMPLATES_FILE: /e2e/templates.json
+      DOCUMENTS_FILE: /e2e/documents.json
+    volumes:
+      - ai-data:/e2e
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=3)"]
+      interval: 2s
+      timeout: 4s
+      retries: 30
+
+  test:
+    image: maven:3.9-eclipse-temurin-21
+    working_dir: /workspace
+    volumes:
+      - ../../services/github-integration-service:/workspace
+      - maven-cache:/root/.m2
+    environment:
+      LIVINGDOCS_E2E_AI_URL: http://ai:8001
+    command: ["mvn", "-B", "-Dtest=RevisionWorkflowE2ETest", "-Dsurefire.failIfNoSpecifiedTests=true", "test"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai:
+        condition: service_healthy
+
+volumes:
+  ai-data:
+  maven-cache:
