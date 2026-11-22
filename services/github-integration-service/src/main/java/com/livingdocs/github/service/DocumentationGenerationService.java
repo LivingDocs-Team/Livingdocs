@@ -190,11 +190,14 @@ public class DocumentationGenerationService {
             throw ApiException.forbidden("Missing permission: DOCUMENT_CREATE");
         }
         requireJobOwner(userId, jobId);
+        ObjectNode request = JsonNodeFactory.instance.objectNode().put("job_id", jobId)
+                .put("title", title == null ? "" : title);
+        request.put("actor_role", DocumentWorkflowService.authenticatedRole(authorities));
         try {
             JsonNode document = aiServiceClient.post().uri("/internal/documents/from-job")
                     .header("X-User-Id", userId)
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(java.util.Map.of("job_id", jobId, "title", title == null ? "" : title))
+                    .body(request)
                     .retrieve().body(JsonNode.class);
             if (document == null || !document.path("id").isTextual()
                     || !userId.equals(document.path("owner_user_id").asText())) {
@@ -501,11 +504,12 @@ public class DocumentationGenerationService {
 
 
     public JsonNode editOwnedDocument(String userId, String documentId, int expectedVersion,
-            String content, String note) {
+            String content, String note, String actorRole) {
         try {
             ObjectNode request = JsonNodeFactory.instance.objectNode().put("content", content)
                     .put("expected_version", expectedVersion);
             if (note != null) request.put("note", note);
+            if (actorRole != null) request.put("actor_role", actorRole);
             JsonNode version = aiServiceClient.put().uri("/internal/documents/{id}/content", documentId)
                     .header("X-User-Id", userId).contentType(MediaType.APPLICATION_JSON)
                     .body(request).retrieve().body(JsonNode.class);

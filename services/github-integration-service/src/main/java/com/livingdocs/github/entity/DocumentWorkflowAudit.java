@@ -95,6 +95,13 @@ public class DocumentWorkflowAudit {
     public DocumentWorkflowAudit(UUID workflowId, String actorUserId, String action,
             String previousStatus, String newStatus, String comment,
             String previousReviewerUserId, String newReviewerUserId, String actorRole) {
+        this(workflowId, actorUserId, action, previousStatus, newStatus, comment,
+                previousReviewerUserId, newReviewerUserId, actorRole, Instant.now());
+    }
+
+    public DocumentWorkflowAudit(UUID workflowId, String actorUserId, String action,
+            String previousStatus, String newStatus, String comment,
+            String previousReviewerUserId, String newReviewerUserId, String actorRole, Instant createdAt) {
         this.workflowId = workflowId;
         this.actorUserId = actorUserId;
         this.actorRole = actorRole;
@@ -104,7 +111,7 @@ public class DocumentWorkflowAudit {
         this.comment = comment;
         this.previousReviewerUserId = previousReviewerUserId;
         this.newReviewerUserId = newReviewerUserId;
-        this.createdAt = Instant.now();
+        this.createdAt = createdAt;
     }
 
     public UUID getId() { return id; }

@@ -287,6 +287,7 @@ def create_owned_document(data: InternalDocumentCreate,
     data.note,
     owner_user_id=user_id,
     report=jobs.get_report(data.job_id),
+    actor_role=data.actor_role,
 )
 
 
@@ -354,7 +355,7 @@ def _generate_revision(doc_id: str, data: RevisionDraftRequest, user_id: str):
 @app.get("/internal/documents/{doc_id}", response_model=Document,
          dependencies=[Depends(require_internal_service)])
 def get_owned_document(doc_id: str):
-    return _call(documents.get, doc_id)
+    return _call(documents.document_snapshot, doc_id)
 
 
 @app.get("/internal/documents/{doc_id}/versions", response_model=List[VersionSummary],
@@ -384,7 +385,7 @@ def get_internal_document_content(doc_id: str, version: Optional[int] = Query(No
          dependencies=[Depends(require_internal_service)])
 def get_internal_document_version(doc_id: str, number: int):
     """Exact version for callers that enforce document workflow access."""
-    return _call(documents.version, doc_id, number)
+    return _call(documents.version_snapshot, doc_id, number)
 @app.get(
     "/internal/documents/{doc_id}/review-evidence",
     response_model=RevisionReviewEvidence,
@@ -445,7 +446,8 @@ def get_internal_document_evidence(
 def edit_owned_document(doc_id: str, data: DocumentContentEdit,
                         user_id: str = Header(alias="X-User-Id")):
     try:
-        return documents.edit_owned(doc_id, user_id, data.expected_version, data.content, data.note)
+        return documents.edit_owned(doc_id, user_id, data.expected_version, data.content, data.note,
+                                    actor_role=data.actor_role)
     except VersionError as e:
         raise HTTPException(e.status, e.message)
 

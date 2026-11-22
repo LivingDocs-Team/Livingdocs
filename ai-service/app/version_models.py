@@ -58,12 +58,14 @@ class InternalDocumentCreate(BaseModel):
     job_id: str = Field(min_length=1)
     title: Optional[str] = Field(default=None, max_length=200)
     note: Optional[str] = Field(default=None, max_length=1000)
+    actor_role: Optional[str] = Field(default=None, min_length=1, max_length=40)
 
 
 class DocumentContentEdit(BaseModel):
     content: str = Field(min_length=1, max_length=2_000_000)
     expected_version: int = Field(ge=1)
     note: Optional[str] = Field(default=None, max_length=1000)
+    actor_role: Optional[str] = Field(default=None, min_length=1, max_length=40)
 
 
 class InternalVersionDecision(BaseModel):
@@ -155,6 +157,8 @@ class RevisionDraftCommit(RevisionDraftRequest):
 
 class DocumentVersion(VersionSummary):
     content: str
+    owner_edit_from: Optional[int] = None
+    saved_actor_role: Optional[str] = None
     drift_finding: Optional[dict] = None
     sections: List[FileSection] = Field(default_factory=list)
     revision_files: List[RevisionFileChange] = Field(default_factory=list)
@@ -168,6 +172,14 @@ class DocumentVersion(VersionSummary):
 
 
 
+class InitialGenerationSave(BaseModel):
+    job_id: str
+    version: int
+    actor_user_id: str
+    actor_role: Optional[str]
+    saved_at: AwareDatetime
+
+
 class Document(BaseModel):
     id: str
     title: str
@@ -177,6 +189,7 @@ class Document(BaseModel):
     template_version: Optional[int] = None  # LD-227: template version the document was generated with
     output_language: str
     source_job_id: Optional[str] = None
+    initial_generation_save: Optional[InitialGenerationSave] = None
     # Absent on legacy documents; never backfilled from the untrusted historical actor field.
     owner_user_id: Optional[str] = None
     current_version: int = 1               # newest accepted version

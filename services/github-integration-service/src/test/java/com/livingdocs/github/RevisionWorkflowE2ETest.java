@@ -94,6 +94,64 @@ class RevisionWorkflowE2ETest {
 
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    @org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable(named = "LIVINGDOCS_E2E_RESTART_PHASE", matches = ".+")
+    void recoversPersistedOwnerEditOnRetryOrSubmit(boolean resubmit) throws Exception {
+        String owner = Long.toString(java.util.concurrent.ThreadLocalRandom.current().nextLong(1000, Long.MAX_VALUE));
+        var ai = aiService.mutate().defaultHeader(USER_HEADER, owner).build();
+        var job = ai.post().uri("/generate").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("scope", "file", "target", PATH, "output_language", "en", "files",
+                        List.of(Map.of("path", PATH, "language", "java", "classes",
+                                List.of(Map.of("name", "Invoice", "lineno", 1))))))
+                .retrieve().body(JsonNode.class);
+        String jobId = job.path("id").asText();
+        await(() -> ai.get().uri("/jobs/{id}", jobId).retrieve().body(JsonNode.class)
+                .path("status").asText().equals("completed"));
+        var document = ai.post().uri("/internal/documents/from-job").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("job_id", jobId, "actor_role", "DEVELOPER")).retrieve().body(JsonNode.class);
+        String docId = document.path("id").asText();
+        var permissions = Set.of("DOCUMENT_CREATE", "DOCUMENT_SUBMIT", "DOCUMENT_UPDATE", "DOCUMENT_VIEW", "ROLE_STAFF");
+        var staff = Set.of("DOCUMENT_CLAIM", "DOCUMENT_REVIEW", "ROLE_STAFF");
+        UUID id = workflows.create(owner, permissions, docId).id();
+        assertThat(workflows.history(owner, permissions, id)).filteredOn(event -> event.action().equals("DOCUMENT_GENERATED"))
+                .singleElement().satisfies(event -> {
+                    assertThat(event.actorUserId()).isEqualTo(owner);
+                    assertThat(event.actorRole()).isEqualTo("DEVELOPER");
+                    assertThat(event.triggerSource()).isEqualTo("INITIAL_GENERATION");
+                    assertThat(event.documentVersion()).isEqualTo(1);
+                    assertThat(event.createdAt()).isEqualTo(Instant.parse(
+                            document.path("initial_generation_save").path("saved_at").asText()));
+                });
+        workflows.submit(owner, permissions, id, 1);
+        workflows.claim("audit-staff", staff, id);
+        workflows.staffReview("audit-staff", staff, id,
+                new StaffReviewRequest(StaffReviewResult.CHANGES_REQUESTED, "Clarify the description"));
+
+        // Save through the real AI API and omit the Java audit, as if the response had been lost.
+        var persisted = ai.put().uri("/internal/documents/{id}/content", docId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("expected_version", 1, "content", "Revised", "note", "Clarified",
+                        "actor_role", "DEVELOPER")).retrieve().body(JsonNode.class);
+        var request = new EditDocumentRequest("Revised", "Clarified", 1);
+        assertThatThrownBy(() -> workflows.editAfterChanges("unrelated", permissions, id, request))
+                .isInstanceOf(com.livingdocs.github.exception.ApiException.class);
+        if (!resubmit) {
+            workflows.editAfterChanges(owner, permissions, id, request);
+            workflows.editAfterChanges(owner, permissions, id, request);
+        }
+        workflows.submit(owner, permissions, id, 2);
+        assertThat(workflows.history(owner, permissions, id)).filteredOn(event -> event.action().equals("DOCUMENT_EDITED"))
+                .singleElement().satisfies(event -> {
+                    assertThat(event.actorRole()).isEqualTo("DEVELOPER");
+                    assertThat(event.triggerSource()).isEqualTo("MANUAL_EDIT");
+                    assertThat(event.documentVersion()).isEqualTo(2);
+                    assertThat(event.createdAt()).isEqualTo(Instant.parse(persisted.path("created_at").asText()));
+                });
+        assertThat(ai.get().uri("/internal/documents/{id}", docId).retrieve().body(JsonNode.class)
+                .path("versions_total").asInt()).isEqualTo(2);
+    }
     @Autowired GitHubConnectionRepository connectionRepository;
     @Autowired DocumentWorkflowService workflows;
     @Autowired DocumentCommitBackService commitBack;

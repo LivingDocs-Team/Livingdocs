@@ -17,7 +17,7 @@ from app.models import (
     JobReport,
     Scope,
 )  # noqa: E402
-from app.versions import DocumentStore, VersionError
+from app.versions import DocumentStore, VersionError, VersionStatus
 from main import app  # noqa: E402
 
 client = TestClient(app)
@@ -670,8 +670,51 @@ def test_rollback_rejects_when_another_version_is_pending():
     assert store.get(doc.id).pending_version == 2
 
 
-def test_rollback_retry_returns_existing_matching_proposal():
+def test_initial_save_and_owner_edit_keep_persisted_audit_evidence(tmp_path, monkeypatch):
+    path = tmp_path / "documents.json"
+    store = DocumentStore(path)
+    output = JobOutput(target="example.py", scope=Scope.file, template_id="test",
+                       output_language="en", template_name="Test",
+                       sections=[("example.py", "# Original", "generated", 1.0)], skipped=[])
+    doc = store.create_from_job("job-1", output, actor="73", owner_user_id="73", actor_role="DEVELOPER")
+    saved = DocumentStore(path).get_owned(doc.id, "73").initial_generation_save
+    assert (saved.job_id, saved.version, saved.actor_user_id, saved.actor_role) == (
+        "job-1", 1, "73", "DEVELOPER",
+    )
+    assert saved.saved_at == store.version(doc.id, 1).created_at
+    assert store.create_from_job("job-1", output, actor="73", owner_user_id="73",
+                                 actor_role="STAFF").initial_generation_save == saved
+
+    def fail_save():
+        raise OSError("Document store unavailable")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "_save", fail_save)
+        with pytest.raises(OSError, match="Document store unavailable"):
+            store.edit_owned(doc.id, "73", 1, "# Revised", actor_role="DEVELOPER")
+    assert store.get(doc.id).pending_version == 1
+    assert store.version(doc.id, 1).status == VersionStatus.proposed
+    assert len(store.history(doc.id)) == 1
+    edit = store.edit_owned(doc.id, "73", 1, "# Revised", actor_role="DEVELOPER")
+    reloaded = DocumentStore(path)
+    assert reloaded.get_owned(doc.id, "73").pending_version == 2
+    assert reloaded.version(doc.id, 2) == edit
+    assert (edit.owner_edit_from, edit.saved_actor_role, edit.created_by) == (1, "DEVELOPER", "73")
+
+
+def test_rollback_retry_returns_existing_matching_proposal(monkeypatch):
     store, doc = create_approved_owned_document()
+
+    def fail_save():
+        raise OSError("Document store unavailable")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "_save", fail_save)
+        with pytest.raises(OSError, match="Document store unavailable"):
+            store.rollback_owned(doc.id, "73", 1, "manager-9", "Restore version 1")
+    assert store.get(doc.id).pending_version is None
+    assert store.get(doc.id).versions_total == 1
+    assert len(store.history(doc.id)) == 2
 
     first = store.rollback_owned(
         doc.id,
@@ -692,6 +735,8 @@ def test_rollback_retry_returns_existing_matching_proposal():
     assert retry.number == first.number
     assert store.get(doc.id).versions_total == 2
     assert len(store.history(doc.id)) == 3
+
+
 def test_revision_draft_is_grounded_idempotent_and_only_exact_version_can_publish(monkeypatch):
     from app.generator import FileDocResult
     from datetime import timedelta
