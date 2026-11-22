@@ -169,7 +169,12 @@ verify_fixture backend-db cnpm
 verify_fixture github-db github_integration
 
 log "3. Build and start applications against the verified fixtures"
-"${COMPOSE[@]}" up --build -d --no-recreate
+if ! "${COMPOSE[@]}" up --build -d --no-recreate; then
+  "${COMPOSE[@]}" ps --all || true
+  "${COMPOSE[@]}" logs --no-color --tail 120 backend github-integration >> "$REPORT_FILE" 2>&1 || true
+  tail -n 120 "$REPORT_FILE"
+  fail "Application startup failed"
+fi
 
 log "4. Waiting for all services to become healthy"
 wait_all_healthy
