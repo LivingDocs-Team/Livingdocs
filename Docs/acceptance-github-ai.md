@@ -2,6 +2,20 @@
 
 Trạng thái **chưa chạy UAT**. Ghi phiên bản triển khai, thời gian UTC và bằng chứng theo từng ca. Chỉ sử dụng repo thử đã được chỉ định, phiên bản ứng dụng cô lập và volume mới dành riêng cho thử nghiệm.
 
+## Đo hiệu năng theo mục 3.2 d
+
+Chạy từ máy đo có quyền truy cập bản triển khai cô lập, với dữ liệu và tải nền đại diện cho vận hành bình thường. Chuẩn bị repo thử có 100.000 dòng mã nguồn, một PR đo cơ sở và 20 PR độc lập có khối lượng phân tích tương đương. Lưu cách đếm LOC, SHA của fixture, cấu hình triển khai và tải nền cùng kết quả. Chọn một từ khóa có kết quả trong tài liệu đã lập chỉ mục.
+
+Dùng phiên đăng nhập Developer ở môi trường thử. Cấp giá trị header Cookie qua biến bí mật `LIVINGDOCS_BENCHMARK_COOKIE` của máy đo. Thống nhất trước thời lượng theo dõi availability và hệ số chậm tối đa so với lần chạy cơ sở để cụ thể hóa tiêu chí «không suy giảm hiệu năng đáng kể».
+
+```text
+node scripts/benchmark-acceptance.mjs TEST_ORIGIN DEPLOYED_SHA REPOSITORY_UUID BASELINE_PR CONCURRENT_PRS SEARCH_QUERY 100000 AVAILABILITY_MINUTES MAX_SLOWDOWN > benchmark.json
+```
+
+`CONCURRENT_PRS` là danh sách 20 số PR phân tách bằng dấu phẩy. Công cụ gọi API drift qua Backend, ghi thời gian toàn phần, ID báo cáo và SHA nguồn. Cả 20 báo cáo phải riêng biệt, hợp lệ, hoàn thành trong 120 giây và nằm trong hệ số chậm đã thống nhất. Công cụ cũng đo một lần đọc repository và một truy vấn tìm kiếm có kết quả. Availability là tỷ lệ probe `/actuator/health` trả `UP`, với một probe mỗi 10 giây trong khoảng quan sát đã chọn. Lưu JSON cho từng lần lặp, kèm nhật ký vận hành để giải thích lỗi hoặc cảnh báo trong báo cáo drift.
+
+SHA triển khai và số dòng mã do người chạy cung cấp. Đối chiếu chúng với bằng chứng triển khai và fixture trước khi dùng JSON làm căn cứ nghiệm thu. Kết quả từ máy chủ giả lập chỉ xác minh cách công cụ tính và ghi kết quả.
+
 ## Điều kiện chạy
 
 - Repo thử với nhánh mặc định dành cho thử nghiệm và một repo thứ hai làm đối chứng. Commit-back chỉ hỗ trợ bản sửa đổi phát sinh từ push lên nhánh mặc định. GitHub App được cài trên các repo được phép, đăng ký sự kiện Push và Pull request. Cấu hình webhook HTTPS trỏ tới `/api/github/webhook` của môi trường thử và đặt `GITHUB_WEBHOOK_SECRET` qua nơi lưu secret.
