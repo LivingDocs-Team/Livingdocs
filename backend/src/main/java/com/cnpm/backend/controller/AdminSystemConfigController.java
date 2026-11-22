@@ -4,6 +4,8 @@ import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -33,7 +35,7 @@ public class AdminSystemConfigController {
             @Value("${app.frontend-url:http://localhost:5173}") String frontendUrl,
             @Value("${server.servlet.session.cookie.secure:false}") boolean sessionCookieSecure,
             @Value("${server.servlet.session.cookie.same-site:Lax}") String sessionCookieSameSite,
-            @Value("${spring.security.oauth2.client.registration.github.client-id:}") String githubClientId,
+            Environment environment,
             @Value("${services.github-integration.base-url:http://localhost:8082}") String githubIntegrationBaseUrl,
             @Value("${services.github-integration.internal-secret:}") String internalSecret,
             @Value("${services.github-integration.connect-timeout:5s}") Duration connectTimeout,
@@ -42,11 +44,23 @@ public class AdminSystemConfigController {
         this.frontendUrl = frontendUrl;
         this.sessionCookieSecure = sessionCookieSecure;
         this.sessionCookieSameSite = sessionCookieSameSite;
-        this.githubOAuthConfigured = githubClientId != null && !githubClientId.isBlank() && !"local-placeholder".equals(githubClientId);
+        this.githubOAuthConfigured = githubOAuthConfigured(environment);
         this.githubIntegrationBaseUrl = githubIntegrationBaseUrl;
         this.internalSecretConfigured = internalSecret != null && !internalSecret.isBlank();
         this.connectTimeoutSeconds = connectTimeout.toSeconds();
         this.readTimeoutSeconds = readTimeout.toSeconds();
+    }
+
+    /**
+     * application.properties maps the client id to ${SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID}
+     * with no default. @Value fails on that unset variable; the Binder (as the OAuth2 client itself does) keeps
+     * it as the literal "${...}", which means "not configured".
+     */
+    static boolean githubOAuthConfigured(Environment environment) {
+        String clientId = Binder.get(environment)
+                .bind("spring.security.oauth2.client.registration.github.client-id", String.class)
+                .orElse("");
+        return !clientId.isBlank() && !clientId.startsWith("${") && !"local-placeholder".equals(clientId);
     }
 
     @GetMapping
