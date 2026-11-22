@@ -135,7 +135,12 @@ public class DocumentWorkflowService {
         }
         DocumentWorkflow workflow = workflows.saveAndFlush(
                 new DocumentWorkflow(documentId, document.path("title").asText("Untitled"), actor));
-        record(workflow, actor, "CREATED", null, workflow.getStatus(), null);
+        int version = document.path("pending_version").asInt();
+        if (version <= 0) {
+            version = document.path("current_version").asInt();
+        }
+        recordVersion(workflow, actor, "CREATED", null, workflow.getStatus(), null,
+                null, null, authenticatedRole(authorities), "REVIEW_WORKFLOW", version > 0 ? version : null);
         return toResponse(workflow);
     }
 
@@ -374,7 +379,8 @@ public class DocumentWorkflowService {
         }
         workflow.submit(version);
         workflows.saveAndFlush(workflow);
-        record(workflow, actor, "SUBMITTED", previous, workflow.getStatus(), null);
+        record(workflow, actor, "SUBMITTED", previous, workflow.getStatus(), null,
+                null, null, authenticatedRole(authorities));
         return toResponse(workflow);
     }
 
@@ -389,7 +395,7 @@ public class DocumentWorkflowService {
         DocumentWorkflowStatus previous = workflow.getStatus();
         workflow.claim(actor);
         workflows.saveAndFlush(workflow);
-        record(workflow, actor, "CLAIMED", previous, workflow.getStatus(), null, null, actor);
+        record(workflow, actor, "CLAIMED", previous, workflow.getStatus(), null, null, actor, "STAFF");
         return toResponse(workflow);
     }
 
@@ -407,7 +413,7 @@ public class DocumentWorkflowService {
         DocumentWorkflowStatus previous = workflow.getStatus();
         workflow.releaseClaim();
         workflows.saveAndFlush(workflow);
-        record(workflow, actor, "STAFF_RELEASE", previous, workflow.getStatus(), null, actor, null);
+        record(workflow, actor, "STAFF_RELEASE", previous, workflow.getStatus(), null, actor, null, "STAFF");
         return toResponse(workflow);
     }
 
@@ -432,7 +438,7 @@ public class DocumentWorkflowService {
         workflow.reassignClaim(targetId);
         workflows.saveAndFlush(workflow);
         record(workflow, actor, "STAFF_REASSIGN", previous, workflow.getStatus(), request.reason(),
-                previousReviewer, targetId);
+                previousReviewer, targetId, authorities.contains("ROLE_ADMINISTRATOR") ? "ADMINISTRATOR" : "ADMIN");
         return toResponse(workflow);
     }
 
@@ -569,11 +575,8 @@ public class DocumentWorkflowService {
         if (editedVersion <= expectedVersion) {
             throw conflict("The edited document version could not be verified.");
         }
-        var entry = new DocumentWorkflowAudit(workflow.getId(), actor, "DOCUMENT_EDITED",
-                current.name(), current.name(), comment);
-        entry.setDocumentVersion(editedVersion);
-        entry.setTriggerSource("MANUAL_EDIT");
-        audit.save(entry);
+        recordVersion(workflow, actor, "DOCUMENT_EDITED", current, current, comment,
+                null, null, authenticatedRole(authorities), "MANUAL_EDIT", editedVersion);
         return toResponse(workflow);
     }
 
@@ -742,7 +745,8 @@ public class DocumentWorkflowService {
             "ROLLBACK_REQUESTED",
             previous,
             workflow.getStatus(),
-            "Restored from version " + sourceVersion + ". Reason: " + comment
+            "Restored from version " + sourceVersion + ". Reason: " + comment,
+            null, null, "MANAGER"
     );
 
     return toResponse(workflow);
@@ -833,15 +837,13 @@ public class DocumentWorkflowService {
         }
     }
 
-    private void record(DocumentWorkflow w, String actor, String action,
-            DocumentWorkflowStatus previous, DocumentWorkflowStatus next, String comment) {
-        record(w, actor, action, previous, next, comment, null, null);
-    }
-
-    private void record(DocumentWorkflow w, String actor, String action,
-            DocumentWorkflowStatus previous, DocumentWorkflowStatus next, String comment,
-            String previousReviewer, String newReviewer) {
-        record(w, actor, action, previous, next, comment, previousReviewer, newReviewer, null);
+    private static String authenticatedRole(Set<String> authorities) {
+        List<String> roles = authorities.stream()
+                .filter(authority -> authority.startsWith("ROLE_") && authority.length() > 5)
+                .map(authority -> authority.substring(5))
+                .limit(2)
+                .toList();
+        return roles.size() == 1 ? roles.getFirst() : null;
     }
 
     private void record(DocumentWorkflow w, String actor, String action,
@@ -859,10 +861,18 @@ public class DocumentWorkflowService {
     private void record(DocumentWorkflow w, String actor, String action,
             DocumentWorkflowStatus previous, DocumentWorkflowStatus next, String comment,
             String previousReviewer, String newReviewer, String actorRole, String triggerSource) {
+        recordVersion(w, actor, action, previous, next, comment, previousReviewer, newReviewer,
+                actorRole, triggerSource, w.getSubmittedDocumentVersion());
+    }
+
+    private void recordVersion(DocumentWorkflow w, String actor, String action,
+            DocumentWorkflowStatus previous, DocumentWorkflowStatus next, String comment,
+            String previousReviewer, String newReviewer, String actorRole, String triggerSource,
+            Integer version) {
         DocumentWorkflowAudit entry = new DocumentWorkflowAudit(w.getId(), actor, action,
                 previous == null ? null : previous.name(), next.name(), normalizeComment(comment),
                 previousReviewer, newReviewer, actorRole);
-        entry.setDocumentVersion(w.getSubmittedDocumentVersion());
+        entry.setDocumentVersion(version);
         entry.setTriggerSource(triggerSource);
         audit.save(entry);
     }
