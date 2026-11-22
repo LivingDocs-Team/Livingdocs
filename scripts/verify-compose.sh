@@ -22,7 +22,6 @@ pass() { printf ' [PASS] %s\n' "$1" | tee -a "$REPORT_FILE"; }
 fail() { printf ' [FAIL] %s\n' "$1" | tee -a "$REPORT_FILE" >&2; exit 1; }
 
 scratch="$(mktemp -d -t ld404.XXXXXXXXXXXX)"
-trap 'rm -f -- "$scratch/fixture.yaml" "$scratch/smoke-state.json"; rmdir -- "$scratch"' EXIT
 export SMOKE_STATE_FILE="$scratch/smoke-state.json"
 SMOKE_PROJECT="livingdocs-smoke-${scratch##*.}"
 SMOKE_PROJECT="${SMOKE_PROJECT,,}"
@@ -36,7 +35,7 @@ export GITHUB_INTEGRATION_INTERNAL_SECRET="smoke-test-internal-secret"
 export SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID="smoke-test-placeholder"
 export SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_SECRET="smoke-test-placeholder"
 # Exercise the Compose default even if the caller has set a retention override.
-unset ADMIN_USER_AUDIT_RETENTION_DAYS
+unset ADMIN_USER_AUDIT_RETENTION_DAYS BACKEND_DB_PASSWORD
 export GITHUB_CALLBACK_BIND_ADDRESS=127.0.0.1
 export GITHUB_REDIRECT_URI=http://localhost:8083/api/github/callback
 export BACKEND_PORT=8081 FRONTEND_PORT=3001 AI_SERVICE_PORT=8002 ANALYZER_PORT=8003 GITHUB_INTEGRATION_PORT=8083
@@ -60,10 +59,47 @@ YAML
 DOCKER=(docker --context default)
 COMPOSE=("${DOCKER[@]}" compose --env-file /dev/null -p "$SMOKE_PROJECT" -f compose.yaml -f "$scratch/fixture.yaml")
 
+owns_project=false
+legacy_started=false
+cleanup() {
+  local status=$? volume name identity
+  trap - EXIT
+  trap '' INT TERM
+  if [[ "$owns_project" == true ]]; then
+    if [[ "$status" != 0 ]]; then
+      "${COMPOSE[@]}" ps --all >> "$REPORT_FILE" 2>&1 || true
+      "${COMPOSE[@]}" logs --no-color --tail 80 >> "$REPORT_FILE" 2>&1 || true
+    fi
+    if [[ "$legacy_started" == true ]]; then
+      "${DOCKER[@]}" container rm -f "$SMOKE_PROJECT-legacy" >/dev/null || status=1
+    fi
+    if "${COMPOSE[@]}" down; then
+      for volume in backend-db-data github-db-data ai-templates analyzer-data; do
+        name="${SMOKE_PROJECT}_$volume"
+        if identity="$("${DOCKER[@]}" volume inspect -f '{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.volume" }}|{{ .Driver }}|{{ len .Options }}' "$name" 2>/dev/null)"; then
+          if [[ "$identity" != "$SMOKE_PROJECT|$volume|local|0" ]] || ! "${DOCKER[@]}" volume rm "$name"; then
+            log "Could not safely remove fixture volume $name"
+            status=1
+          fi
+        fi
+      done
+    else
+      log "Could not stop fixture project $SMOKE_PROJECT"
+      status=1
+    fi
+  fi
+  rm -f -- "$scratch/fixture.yaml" "$scratch/smoke-state.json" "$scratch/legacy.dump"
+  rmdir -- "$scratch" || status=1
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 wait_healthy() {
-  local svc="$1"
+  local svc="$1" timeout="${2:-$TIMEOUT}"
   local cid status elapsed=0
-  while (( elapsed < TIMEOUT )); do
+  while (( elapsed < timeout )); do
     cid="$("${COMPOSE[@]}" ps -q "$svc" 2>/dev/null || true)"
     if [[ -n "$cid" ]]; then
       status="$("${DOCKER[@]}" inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" 2>/dev/null || echo unknown)"
@@ -149,12 +185,13 @@ for resource in volume network; do
   fi
 done
 
+owns_project=true
 log "2. Start only the two Postgres fixtures"
 "${COMPOSE[@]}" up -d --no-deps --no-build backend-db github-db
 
 verify_fixture() {
   local service="$1" database="$2" cid actual volume="${SMOKE_PROJECT}_${1}-data"
-  wait_healthy "$service" || fail "$service did not become healthy"
+  wait_healthy "$service" 120 || fail "$service did not become healthy"
   cid="$("${COMPOSE[@]}" ps -q "$service")"
   actual="$("${DOCKER[@]}" inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}|{{ index .Config.Labels "com.docker.compose.service" }}|{{ range .Mounts }}{{ .Type }}:{{ .Name }}:{{ .Destination }}:{{ .RW }}{{ end }}' "$cid")"
   [[ "$actual" == "$SMOKE_PROJECT|$service|volume:$volume:/var/lib/postgresql/data:true" ]] ||
@@ -168,6 +205,57 @@ verify_fixture() {
 }
 verify_fixture backend-db cnpm
 verify_fixture github-db github_integration
+
+check_restored_data() {
+  local value
+  value="$("${COMPOSE[@]}" exec -T -e PGPASSWORD=livingdocs backend-db psql -X -h 127.0.0.1 \
+    -U livingdocs -d cnpm -v ON_ERROR_STOP=1 -Atc \
+    "SELECT payload || '|' || pg_get_userbyid(relowner) FROM upgrade_probe.records, pg_class WHERE oid = 'upgrade_probe.records'::regclass")"
+  [[ "$value" == "legacy PostgreSQL data|livingdocs" ]] || fail "Restored data or owner differs"
+  value="$("${COMPOSE[@]}" exec -T -e PGPASSWORD=livingdocs backend-db psql -X -h 127.0.0.1 \
+    -U livingdocs -d cnpm -v ON_ERROR_STOP=1 -Atc \
+    "SELECT setting_value FROM public.system_settings WHERE setting_key = 'retention.auditLogDays'")"
+  [[ "$value" == 0 ]] || fail "Restored audit policy differs"
+}
+
+if [[ "${VERIFY_LEGACY_RESTORE:-0}" == 1 ]]; then
+  log "Rehearsing legacy PostgreSQL backup and restore"
+  legacy="$SMOKE_PROJECT-legacy"
+  "${DOCKER[@]}" run -d --rm --name "$legacy" --network none \
+    --label "com.docker.compose.project=$SMOKE_PROJECT" \
+    --tmpfs /var/lib/postgresql/data \
+    -e POSTGRES_DB=cnpm -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres postgres:16
+  legacy_started=true
+  for (( attempt=0; attempt<60; attempt++ )); do
+    if "${DOCKER[@]}" exec -e PGPASSWORD=postgres "$legacy" \
+      psql -X -h 127.0.0.1 -U postgres -d cnpm -Atc 'SELECT 1' >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+  "${DOCKER[@]}" exec -e PGPASSWORD=postgres "$legacy" \
+    psql -X -h 127.0.0.1 -U postgres -d cnpm -v ON_ERROR_STOP=1 \
+    -c "CREATE SCHEMA upgrade_probe;
+        CREATE TABLE upgrade_probe.records (id bigserial PRIMARY KEY, payload text NOT NULL);
+        CREATE TABLE public.system_settings (setting_key varchar(100) PRIMARY KEY, setting_value varchar(4000) NOT NULL,
+            updated_at timestamptz NOT NULL, updated_by varchar(255));
+        INSERT INTO public.system_settings VALUES ('retention.auditLogDays', '0', now(), 'legacy-fixture');
+        INSERT INTO upgrade_probe.records (payload) VALUES ('legacy PostgreSQL data');"
+  "${DOCKER[@]}" exec -e PGPASSWORD=postgres "$legacy" \
+    pg_dump -h 127.0.0.1 -U postgres -d cnpm -Fc > "$scratch/legacy.dump"
+  "${COMPOSE[@]}" exec -T -e PGPASSWORD=livingdocs backend-db \
+    pg_restore -h 127.0.0.1 -U livingdocs -d cnpm --no-owner --no-acl --single-transaction \
+    < "$scratch/legacy.dump"
+  check_restored_data
+  "${COMPOSE[@]}" exec -T -e PGPASSWORD=livingdocs backend-db psql -X -h 127.0.0.1 \
+    -U livingdocs -d cnpm -v ON_ERROR_STOP=1 -c \
+    "BEGIN; INSERT INTO upgrade_probe.records (payload) VALUES ('write probe'); ROLLBACK;"
+  if "${COMPOSE[@]}" exec -T -e PGPASSWORD=incorrect backend-db psql -X -h 127.0.0.1 \
+    -U livingdocs -d cnpm -w -Atc 'SELECT 1'; then
+    fail "Restored database accepted an incorrect password"
+  fi
+  pass "Legacy data restored with working TCP authentication, ownership and writes"
+fi
 
 log "3. Build and start applications against the verified fixtures"
 if ! "${COMPOSE[@]}" up --build -d --no-recreate; then
@@ -205,6 +293,10 @@ log "7. Restarting services (simulating redeploy)"
 "${COMPOSE[@]}" restart
 wait_all_healthy
 pass "All services healthy after restart"
+if [[ "${VERIFY_LEGACY_RESTORE:-0}" == 1 ]]; then
+  check_restored_data
+  pass "Restored legacy data survived the stack restart"
+fi
 
 log "8. Running post-restart E2E persistence smoke"
 python3 scripts/release_smoke_test.py \

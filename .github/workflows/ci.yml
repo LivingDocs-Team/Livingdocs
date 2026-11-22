@@ -398,7 +398,7 @@ jobs:
   release-smoke-test:
     name: Release Smoke Test (LD-404)
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     needs: [docker-compose-validation]
     steps:
       - name: Checkout source code
@@ -412,8 +412,33 @@ jobs:
           bash -n scripts/verify-compose.sh
           chmod +x scripts/verify-compose.sh
 
-      - name: Run full smoke test suite
-        run: ./scripts/verify-compose.sh --clean
+      - name: Verify cleanup after failure and two consecutive runs
+        shell: bash
+        run: |
+          assert_clean() {
+            local project resource remaining
+            local -a args
+            project="$(sed -n 's/^Smoke project: //p' "$1/ld-404-smoke-report.log")"
+            [[ "$project" =~ ^livingdocs-smoke-[a-z0-9]+$ ]]
+            for resource in container volume network; do
+              args=()
+              if [[ "$resource" == container ]]; then args+=(--all); fi
+              remaining="$(docker --context default "$resource" ls "${args[@]}" -q --filter "label=com.docker.compose.project=$project")"
+              [[ -z "$remaining" ]]
+            done
+          }
+
+          if SMOKE_REPORT_DIR=artifacts/failure VERIFY_TIMEOUT=0 ./scripts/verify-compose.sh; then
+            echo "Expected a failure after application startup" >&2
+            exit 1
+          fi
+          grep -F 'backend-db did not become healthy within 0s' artifacts/failure/ld-404-smoke-report.log
+          assert_clean artifacts/failure
+
+          SMOKE_REPORT_DIR=artifacts/first VERIFY_LEGACY_RESTORE=1 ./scripts/verify-compose.sh
+          assert_clean artifacts/first
+          SMOKE_REPORT_DIR=artifacts/second ./scripts/verify-compose.sh
+          assert_clean artifacts/second
 
       - name: Upload smoke artifacts
         if: always()
@@ -421,6 +446,6 @@ jobs:
         with:
           name: ld-404-smoke-artifacts
           path: |
-            artifacts/ld-404-smoke-report.log
-            artifacts/smoke-*-result.json
+            artifacts/**/ld-404-smoke-report.log
+            artifacts/**/smoke-*-result.json
           retention-days: 7

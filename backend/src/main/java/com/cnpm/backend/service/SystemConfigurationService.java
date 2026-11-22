@@ -40,6 +40,8 @@ import com.cnpm.backend.repository.SystemSettingRepository;
 public class SystemConfigurationService {
     private static final Logger log = LoggerFactory.getLogger(SystemConfigurationService.class);
 
+    public static final String AUDIT_RETENTION_KEY = "retention.auditLogDays";
+
     public enum Type { STRING, INT, DECIMAL, BOOLEAN, CHOICE, LIST }
 
     /** One configurable setting. {@code allowed} is used by CHOICE/LIST, {@code pattern} by STRING and free-form LIST items. */
@@ -121,9 +123,9 @@ public class SystemConfigurationService {
                 integer("retention", "retention.changeLogDays",
                 envInt("RETENTION_CHANGE_LOG_DAYS", 365), 30, 3650,
                 "Days to keep change-log entries.");
-        integer("retention", "retention.auditLogDays",
-                envInt("ADMIN_USER_AUDIT_RETENTION_DAYS", 730), 30, 3650,
-                "Days to keep audit-log entries.");
+        integer("retention", AUDIT_RETENTION_KEY,
+                auditRetentionDefault(System.getenv("ADMIN_USER_AUDIT_RETENTION_DAYS")), 0, 3650,
+                "Use 0 to keep audit records forever, or 30–3650 days.");
 
         // LD-279 - AI model, embedding model, confidence threshold, token budget
         group("ai", "AI Model & Confidence");
@@ -186,7 +188,7 @@ public class SystemConfigurationService {
 
     public boolean isAutoUpdateEnabled()       { return getBoolean("autoUpdate.enabled"); }
     public int     getGenerationMaxAttempts()  { return getInt("generation.maxAttempts"); }
-    public int     getAuditLogRetentionDays()  { return getInt("retention.auditLogDays"); }
+    public int     getAuditLogRetentionDays()  { return getInt(AUDIT_RETENTION_KEY); }
     public int     getChangeLogRetentionDays() { return getInt("retention.changeLogDays"); }
 
 
@@ -271,8 +273,9 @@ public class SystemConfigurationService {
         try {
             return coerce(d, stored);
         } catch (IllegalArgumentException e) {
-            log.warn("Stored value of {} is invalid ({}); using the default", d.key(), e.getMessage());
-            return coerce(d, d.defaultValue());
+            log.warn("Stored value of {} is invalid ({})", d.key(), e.getMessage());
+            // An invalid override must never cause audit deletion under another policy.
+            return AUDIT_RETENTION_KEY.equals(d.key()) ? 0 : coerce(d, d.defaultValue());
         }
     }
 
@@ -306,6 +309,10 @@ public class SystemConfigurationService {
     private static Integer asInt(Definition d, Object raw) {
         BigDecimal n = asNumber(raw);
         if (n.stripTrailingZeros().scale() > 0) throw new IllegalArgumentException("must be a whole number");
+        if (AUDIT_RETENTION_KEY.equals(d.key()) && n.signum() != 0
+                && (n.compareTo(BigDecimal.valueOf(30)) < 0 || n.compareTo(d.max()) > 0)) {
+            throw new IllegalArgumentException("must be 0 (keep forever) or between 30 and 3650");
+        }
         checkRange(d, n);
         return n.intValueExact();
     }
@@ -378,6 +385,22 @@ public class SystemConfigurationService {
     }
 
         // ---------------------------------------------------------------- env fallback (LD-273)
+
+    static boolean isPurgeRetention(int days) {
+        return days >= 30 && days <= 3650;
+    }
+
+    static int auditRetentionDefault(String raw) {
+        if (raw == null || raw.isBlank()) return 730;
+        try {
+            int days = Integer.parseInt(raw.trim());
+            if (days == 0 || isPurgeRetention(days)) return days;
+        } catch (NumberFormatException ignored) {
+            // Invalid environment values disable purge until corrected.
+        }
+        log.warn("Invalid ADMIN_USER_AUDIT_RETENTION_DAYS; keeping audit records indefinitely");
+        return 0;
+    }
 
     /**
      * Reads an integer from an environment variable, falling back to {@code defaultValue} when the
