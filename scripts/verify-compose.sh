@@ -1,48 +1,66 @@
 #!/usr/bin/env bash
 # LD-404: Release Smoke Testing & Deployment Verification
-# Usage:
-#   ./scripts/verify-compose.sh --clean   # Clean deployment (down -v -> up --build), E2E smoke, restart & persistence
-#   ./scripts/verify-compose.sh           # Build/start stack, E2E smoke, restart & persistence
-#   ./scripts/verify-compose.sh --no-up   # Verify already running stack + restart & persistence
+# Usage: ./scripts/verify-compose.sh [--clean]
+# Both modes start a fresh project. Existing stacks are never reused.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# === P1 FIX: Dùng project name riêng cho smoke test ===
-# Không dùng project mặc định (tên thư mục) để tránh xóa volume của stack đang vận hành.
-SMOKE_PROJECT="${SMOKE_PROJECT:-livingdocs-smoke}"
-COMPOSE=(docker compose -p "${SMOKE_PROJECT}" -f compose.yaml)
+case "${1:-}" in
+  ""|--clean) ;;
+  *) printf 'Usage: %s [--clean] (fresh fixtures required)\n' "$0" >&2; exit 2 ;;
+esac
+(( $# <= 1 )) || exit 2
 
-# === P1 FIX: Ánh xạ cổng riêng để tránh xung đột với stack dev ===
-export BACKEND_DB_PORT="${SMOKE_BACKEND_DB_PORT:-5444}"
-export GITHUB_DB_PORT="${SMOKE_GITHUB_DB_PORT:-5443}"
-export BACKEND_PORT="${SMOKE_BACKEND_PORT:-8081}"
-export FRONTEND_PORT="${SMOKE_FRONTEND_PORT:-3001}"
-export AI_SERVICE_PORT="${SMOKE_AI_SERVICE_PORT:-8002}"
-export ANALYZER_PORT="${SMOKE_ANALYZER_PORT:-8003}"
-export GITHUB_INTEGRATION_PORT="${SMOKE_GITHUB_INTEGRATION_PORT:-8083}"
-
-export FRONTEND_URL="http://localhost:${FRONTEND_PORT}"
-export BACKEND_URL="http://localhost:${BACKEND_PORT}"
-export ANALYZER_URL="http://localhost:${ANALYZER_PORT}"
-export AI_SERVICE_URL="http://localhost:${AI_SERVICE_PORT}"
-export GITHUB_INTEGRATION_URL="http://localhost:${GITHUB_INTEGRATION_PORT}"
-
-TIMEOUT="${VERIFY_TIMEOUT:-300}"
-MODE="${1:-default}"
 REPORT_DIR="${SMOKE_REPORT_DIR:-artifacts}"
 REPORT_FILE="$REPORT_DIR/ld-404-smoke-report.log"
 mkdir -p "$REPORT_DIR"
 : > "$REPORT_FILE"
 
-# === P2 FIX: State file nằm trong thư mục tạm bảo mật (700) ===
-SMOKE_STATE_DIR="${SMOKE_STATE_DIR:-$(mktemp -d -t ld404-smoke-state.XXXXXX)}"
-chmod 700 "$SMOKE_STATE_DIR"
-export SMOKE_STATE_FILE="${SMOKE_STATE_FILE:-$SMOKE_STATE_DIR/smoke-state.json}"
-
 log()  { printf '%s\n' "$1" | tee -a "$REPORT_FILE"; }
 pass() { printf ' [PASS] %s\n' "$1" | tee -a "$REPORT_FILE"; }
 fail() { printf ' [FAIL] %s\n' "$1" | tee -a "$REPORT_FILE" >&2; exit 1; }
+
+scratch="$(mktemp -d -t ld404.XXXXXXXXXXXX)"
+trap 'rm -f -- "$scratch/fixture.yaml" "$scratch/smoke-state.json"; rmdir -- "$scratch"' EXIT
+export SMOKE_STATE_FILE="$scratch/smoke-state.json"
+SMOKE_PROJECT="livingdocs-smoke-${scratch##*.}"
+SMOKE_PROJECT="${SMOKE_PROJECT,,}"
+
+# Use fixture credentials and ignore repository .env and inherited Compose settings.
+unset COMPOSE_ENV_FILES COMPOSE_PROFILES COMPOSE_COMPATIBILITY
+unset AI_SERVICE_INTERNAL_SECRET INTERNAL_API_SECRET
+unset ANTHROPIC_API_KEY GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET GITHUB_WEBHOOK_SECRET
+export TOKEN_ENCRYPTION_KEY="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+export GITHUB_INTEGRATION_INTERNAL_SECRET="smoke-test-internal-secret"
+export SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID="smoke-test-placeholder"
+export SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_SECRET="smoke-test-placeholder"
+export GITHUB_CALLBACK_BIND_ADDRESS=127.0.0.1
+export GITHUB_REDIRECT_URI=http://localhost:8083/api/github/callback
+export BACKEND_PORT=8081 FRONTEND_PORT=3001 AI_SERVICE_PORT=8002 ANALYZER_PORT=8003 GITHUB_INTEGRATION_PORT=8083
+export FRONTEND_URL=http://localhost:3001 BACKEND_URL=http://localhost:8081
+export ANALYZER_URL=http://localhost:8003 AI_SERVICE_URL=http://localhost:8002
+export GITHUB_INTEGRATION_URL=http://localhost:8083 SMOKE_ORIGIN=http://localhost:3000
+export no_proxy=localhost,127.0.0.1 NO_PROXY=localhost,127.0.0.1
+TIMEOUT="${VERIFY_TIMEOUT:-300}"
+
+# The backend JDBC user must exist before Hibernate starts. No fixture DB publishes a host port.
+cat > "$scratch/fixture.yaml" <<'YAML'
+services:
+  backend-db:
+    ports: !reset []
+    environment:
+      POSTGRES_USER: livingdocs
+      POSTGRES_PASSWORD: livingdocs
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "livingdocs", "-d", "cnpm"]
+  github-db:
+    ports: !reset []
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "livingdocs", "-d", "github_integration"]
+YAML
+DOCKER=(docker --context default)
+COMPOSE=("${DOCKER[@]}" compose --env-file /dev/null -p "$SMOKE_PROJECT" -f compose.yaml -f "$scratch/fixture.yaml")
 
 wait_healthy() {
   local svc="$1"
@@ -50,7 +68,7 @@ wait_healthy() {
   while (( elapsed < TIMEOUT )); do
     cid="$("${COMPOSE[@]}" ps -q "$svc" 2>/dev/null || true)"
     if [[ -n "$cid" ]]; then
-      status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" 2>/dev/null || echo unknown)"
+      status="$("${DOCKER[@]}" inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" 2>/dev/null || echo unknown)"
       [[ "$status" == "healthy" || "$status" == "running" ]] && return 0
     fi
     sleep 3
@@ -69,32 +87,89 @@ wait_all_healthy() {
   done
 }
 
-# Load .env nếu có
-if [[ -f .env ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source .env
-  set +a
-fi
-
 log "=== LD-404 Release Smoke & Deployment Verification ($(date -u +%Y-%m-%dT%H:%M:%SZ)) ==="
-log "Smoke project: ${SMOKE_PROJECT}"
-log "State file (secure, tmp): ${SMOKE_STATE_FILE}"
+log "Smoke project: $SMOKE_PROJECT"
 
-log "1. Validate compose configuration"
-"${COMPOSE[@]}" config --quiet && pass "compose.yaml is valid"
+log "1. Verify the rendered Compose targets and volume definitions"
+"${COMPOSE[@]}" config --format json | python3 -c '
+import json
+import sys
 
-# === P1 FIX: Chỉ xóa volume trong project smoke ===
-if [[ "$MODE" == "--clean" ]]; then
-  log "2. Clean deployment: tearing down smoke project (project: ${SMOKE_PROJECT})"
-  "${COMPOSE[@]}" down -v --remove-orphans
-  pass "Removed old smoke project containers and volumes (project: ${SMOKE_PROJECT})"
-fi
+model = json.load(sys.stdin)
+project = sys.argv[1]
+volumes = model["volumes"]
+services = model["services"]
+def require(condition, message):
+    if not condition:
+        sys.exit(message)
 
-if [[ "$MODE" != "--no-up" ]]; then
-  log "3. Starting stack with docker compose up --build -d (project: ${SMOKE_PROJECT})"
-  "${COMPOSE[@]}" up --build -d
-fi
+require(model["name"] == project, "Unexpected Compose project")
+for kind, driver in (("volumes", "local"), ("networks", "bridge")):
+    for key, resource in model[kind].items():
+        require(resource["name"] == f"{project}_{key}" and not resource.get("external")
+                and not resource.get("driver_opts") and resource.get("driver", driver) == driver, f"Unexpected {kind} definition: {key}")
+for service, db, database, network in (
+    ("backend", "backend-db", "cnpm", "backend-network"),
+    ("github-integration", "github-db", "github_integration", "github-internal"),
+):
+    fixture = services[db]
+    app = services[service]
+    env = app["environment"]
+    require(env.get("DB_URL") == f"jdbc:postgresql://{db}:5432/{database}"
+            and env.get("DB_USERNAME") == env.get("DB_PASSWORD") == "livingdocs"
+            and not any(k.startswith(("SPRING_DATASOURCE_", "SPRING_FLYWAY_")) for k in env),
+            f"Unexpected JDBC target for {service}")
+    require(network in app["networks"] and set(fixture["networks"]) == {network}
+            and not app.get("network_mode") and not fixture.get("network_mode")
+            and not app.get("extra_hosts"), f"Unexpected network for {service} or {db}")
+    require(not fixture.get("ports") and fixture["image"] == "postgres:16"
+            and fixture["environment"] == dict(POSTGRES_DB=database, POSTGRES_USER="livingdocs", POSTGRES_PASSWORD="livingdocs"),
+            f"Unexpected fixture config for {db}")
+    mounts = fixture["volumes"]
+    require(db + "-data" in volumes and len(mounts) == 1 and mounts[0]["type"] == "volume"
+            and mounts[0]["source"] == db + "-data" and mounts[0]["target"] == "/var/lib/postgresql/data",
+            f"Unexpected data mount for {db}")
+' "$SMOKE_PROJECT" || fail "Compose fixture configuration rejected"
+pass "JDBC targets and project-scoped fixture volumes verified"
+
+# Check both labels and names before creating anything. In particular, Compose can
+# reuse an existing volume with the expected name even if its labels are missing.
+for resource in container volume network; do
+  list_args=()
+  if [[ "$resource" == container ]]; then list_args+=(--all); fi
+  existing="$("${DOCKER[@]}" "$resource" ls "${list_args[@]}" --filter "label=com.docker.compose.project=$SMOKE_PROJECT" --quiet)" ||
+    fail "Cannot check existing $resource resources"
+  [[ -z "$existing" ]] || fail "Smoke project already owns $resource resources"
+done
+for resource in volume network; do
+  names="$("${DOCKER[@]}" "$resource" ls --format '{{.Name}}')" || fail "Cannot list $resource names"
+  if grep -q "^${SMOKE_PROJECT}_" <<< "$names"; then
+    fail "A $resource already uses the smoke project name"
+  fi
+done
+
+log "2. Start only the two Postgres fixtures"
+"${COMPOSE[@]}" up -d --no-deps --no-build backend-db github-db
+
+verify_fixture() {
+  local service="$1" database="$2" cid actual volume="${SMOKE_PROJECT}_${1}-data"
+  wait_healthy "$service" || fail "$service did not become healthy"
+  cid="$("${COMPOSE[@]}" ps -q "$service")"
+  actual="$("${DOCKER[@]}" inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}|{{ index .Config.Labels "com.docker.compose.service" }}|{{ range .Mounts }}{{ .Type }}:{{ .Name }}:{{ .Destination }}:{{ .RW }}{{ end }}' "$cid")"
+  [[ "$actual" == "$SMOKE_PROJECT|$service|volume:$volume:/var/lib/postgresql/data:true" ]] ||
+    fail "Unexpected container identity or data mount for $service"
+  actual="$("${DOCKER[@]}" volume inspect -f '{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.volume" }}|{{ .Driver }}|{{ .Scope }}|{{ len .Options }}' "$volume")"
+  [[ "$actual" == "$SMOKE_PROJECT|$service-data|local|local|0" ]] ||
+    fail "Unexpected volume identity for $service"
+  actual="$("${COMPOSE[@]}" exec -T -e PGPASSWORD=livingdocs "$service" psql -X -h 127.0.0.1 -U livingdocs -d "$database" -v ON_ERROR_STOP=1 -Atc 'SELECT current_database(), current_user')"
+  [[ "$actual" == "$database|livingdocs" ]] || fail "Unexpected SQL identity for $service"
+  pass "$service uses $volume and authenticated as livingdocs on $database"
+}
+verify_fixture backend-db cnpm
+verify_fixture github-db github_integration
+
+log "3. Build and start applications against the verified fixtures"
+"${COMPOSE[@]}" up --build -d --no-recreate
 
 log "4. Waiting for all services to become healthy"
 wait_all_healthy
@@ -132,10 +207,6 @@ python3 scripts/release_smoke_test.py \
   --report-file "$REPORT_DIR/smoke-post-restart-result.json" \
   || fail "post-restart smoke failed"
 pass "post-restart smoke passed"
-
-# Cleanup state file an toàn
-rm -f "$SMOKE_STATE_FILE" 2>/dev/null || true
-rmdir "$SMOKE_STATE_DIR" 2>/dev/null || true
 
 log "=== LD-404 smoke & deployment verification complete ==="
 log "Report: ${REPORT_FILE}"

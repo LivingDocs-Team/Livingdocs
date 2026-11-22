@@ -400,14 +400,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: [docker-compose-validation]
-    env:
-      TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-      # Một secret dùng chung: compose.yaml truyền giá trị này cho cả GitHub Integration và AI Service.
-      GITHUB_INTEGRATION_INTERNAL_SECRET: "smoke-test-internal-secret"
-      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID: "ci-validation-placeholder-only"
-      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_SECRET: "ci-validation-placeholder-only"
-      SMOKE_PROJECT: livingdocs-smoke
-
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
@@ -416,14 +408,12 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Make scripts executable
-        run: chmod +x scripts/verify-compose.sh
+        run: |
+          bash -n scripts/verify-compose.sh
+          chmod +x scripts/verify-compose.sh
 
       - name: Run full smoke test suite
         run: ./scripts/verify-compose.sh --clean
-
-      - name: Cleanup smoke project
-        if: always()
-        run: docker compose -p livingdocs-smoke down -v --remove-orphans || true
 
       - name: Upload smoke artifacts
         if: always()
