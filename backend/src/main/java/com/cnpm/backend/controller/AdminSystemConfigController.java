@@ -1,12 +1,16 @@
 package com.cnpm.backend.controller;
 
 import java.time.Duration;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.math.BigDecimal;
+import java.util.Map;
+
+import com.cnpm.backend.service.SystemConfigurationService;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -20,7 +24,7 @@ import org.springframework.web.server.ResponseStatusException;
 @PreAuthorize("hasAnyRole('ADMIN', 'ADMINISTRATOR') and @systemAdminAccess.allows(authentication)")
 public class AdminSystemConfigController {
 
-    private final AtomicInteger auditRetentionDays;
+    private final SystemConfigurationService configuration;
     private final String frontendUrl;
     private final boolean sessionCookieSecure;
     private final String sessionCookieSameSite;
@@ -31,7 +35,7 @@ public class AdminSystemConfigController {
     private final long readTimeoutSeconds;
 
     public AdminSystemConfigController(
-            @Value("${app.admin-user-audit.retention-days:0}") int retentionDays,
+            SystemConfigurationService configuration,
             @Value("${app.frontend-url:http://localhost:5173}") String frontendUrl,
             @Value("${server.servlet.session.cookie.secure:false}") boolean sessionCookieSecure,
             @Value("${server.servlet.session.cookie.same-site:Lax}") String sessionCookieSameSite,
@@ -40,7 +44,7 @@ public class AdminSystemConfigController {
             @Value("${services.github-integration.internal-secret:}") String internalSecret,
             @Value("${services.github-integration.connect-timeout:5s}") Duration connectTimeout,
             @Value("${services.github-integration.read-timeout:150s}") Duration readTimeout) {
-        this.auditRetentionDays = new AtomicInteger(Math.max(0, retentionDays));
+        this.configuration = configuration;
         this.frontendUrl = frontendUrl;
         this.sessionCookieSecure = sessionCookieSecure;
         this.sessionCookieSameSite = sessionCookieSameSite;
@@ -66,7 +70,7 @@ public class AdminSystemConfigController {
     @GetMapping
     public SystemConfigResponse getConfig() {
         return new SystemConfigResponse(
-                new AuditConfig(auditRetentionDays.get(), "0 0 0 * * * UTC"),
+                new AuditConfig(configuration.getAuditLogRetentionDays(), "0 0 0 * * * UTC"),
                 new SecurityConfigSummary(frontendUrl, sessionCookieSecure, sessionCookieSameSite, githubOAuthConfigured),
                 new IntegrationConfigSummary(
                         githubIntegrationBaseUrl,
@@ -76,19 +80,16 @@ public class AdminSystemConfigController {
     }
 
     @PatchMapping
-    public SystemConfigResponse updateConfig(@RequestBody UpdateSystemConfigRequest request) {
+    public SystemConfigResponse updateConfig(@RequestBody UpdateSystemConfigRequest request, Authentication authentication) {
         if (request == null || request.auditRetentionDays() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "auditRetentionDays is required");
         }
-        int days = request.auditRetentionDays();
-        if (days < 0 || days > 3650) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "auditRetentionDays must be between 0 and 3650");
-        }
-        auditRetentionDays.set(days);
+        configuration.update("retention", Map.of(SystemConfigurationService.AUDIT_RETENTION_KEY,
+                request.auditRetentionDays()), authentication.getName());
         return getConfig();
     }
 
-    public record UpdateSystemConfigRequest(Integer auditRetentionDays) {}
+    public record UpdateSystemConfigRequest(BigDecimal auditRetentionDays) {}
     public record AuditConfig(int retentionDays, String purgeSchedule) {}
     public record SecurityConfigSummary(
             String frontendUrl,

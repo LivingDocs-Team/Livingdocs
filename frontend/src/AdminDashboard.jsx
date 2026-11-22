@@ -580,8 +580,8 @@ function ConfigPanel() {
     setSaveError('');
     try {
       const days = Number(retentionValue);
-      if (!Number.isInteger(days) || days < 0 || days > 3650) {
-        throw new Error('Audit retention days must be an integer between 0 and 3650.');
+      if (retentionValue.trim() === '' || !Number.isInteger(days) || (days !== 0 && (days < 30 || days > 3650))) {
+        throw new Error('Enter 0 to keep audit records forever, or a whole number from 30 to 3650.');
       }
       await adminApi('/api/admin/system-config', {
         method: 'PATCH',
@@ -609,11 +609,12 @@ function ConfigPanel() {
         <>
           <h3>Audit retention policy</h3>
           <form className="admin-toolbar" onSubmit={saveRetention}>
-            <label htmlFor="audit-retention-days">Audit retention (days, 0 = keep forever)</label>
+            <label htmlFor="audit-retention-days">Audit retention (30–3650 days, or 0 to keep forever)</label>
             <input
               id="audit-retention-days"
               aria-label="Audit retention days"
               type="number"
+              required
               min="0"
               max="3650"
               value={retentionValue}

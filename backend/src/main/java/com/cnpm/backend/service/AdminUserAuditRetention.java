@@ -26,8 +26,9 @@ public class AdminUserAuditRetention {
     @Scheduled(cron = "0 0 0 * * *", zone = "UTC")
     public void purgeExpiredRecords() {
         int retentionDays = config.getAuditLogRetentionDays();
-        if (retentionDays <= 0) {
-            log.warn("retention.auditLogDays={} is not positive; skipping admin-user audit purge", retentionDays);
+        if (retentionDays == 0) return;
+        if (!SystemConfigurationService.isPurgeRetention(retentionDays)) {
+            log.warn("retention.auditLogDays={} is outside 30–3650; skipping admin-user audit purge", retentionDays);
             return;
         }
         Instant cutoff = Instant.now().minus(retentionDays, ChronoUnit.DAYS);
