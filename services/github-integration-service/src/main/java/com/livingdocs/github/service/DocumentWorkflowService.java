@@ -80,7 +80,8 @@ public class DocumentWorkflowService {
     public void submitRevisionDraft(JsonNode candidate, SourceChangeRequest revision,
             Supplier<JsonNode> generate) {
         submitRevisionDraft(candidate, generate, "AI", "REVISION_DRAFT_SUBMITTED",
-                "Source " + revision.repositoryId() + " at " + revision.commitSha(), "AI");
+                "Source " + revision.repositoryId() + " at " + revision.commitSha(), "AI",
+                revision.trigger().name());
     }
 
     @Transactional
@@ -91,11 +92,12 @@ public class DocumentWorkflowService {
             return;
         }
         submitRevisionDraft(document, () -> documents.getExactDocumentVersion(actor, documentId, version),
-                actor, "DRIFT_DRAFT_SUBMITTED", "Version " + version + " from a drift finding", null);
+                actor, "DRIFT_DRAFT_SUBMITTED", "Version " + version + " from a drift finding", null,
+                "DRIFT_SUGGESTION");
     }
 
     private void submitRevisionDraft(JsonNode candidate, Supplier<JsonNode> generate,
-            String actor, String action, String comment, String actorRole) {
+            String actor, String action, String comment, String actorRole, String triggerSource) {
         String id = candidate.path("id").asText();
         String owner = candidate.path("owner_user_id").asText();
         DocumentWorkflow workflow = workflows.lockByDocumentId(id).orElse(null);
@@ -113,13 +115,18 @@ public class DocumentWorkflowService {
                     && version <= workflow.getSubmittedDocumentVersion())) {
             return;
         }
-        if (workflow == null) {
+        boolean newWorkflow = workflow == null;
+        if (newWorkflow) {
             workflow = new DocumentWorkflow(id, candidate.path("title").asText("Untitled"), owner);
         }
         DocumentWorkflowStatus previous = workflow.getStatus();
         workflow.submit(version);
         workflows.saveAndFlush(workflow);
-        record(workflow, actor, action, previous, workflow.getStatus(), comment, null, null, actorRole);
+        if (newWorkflow) {
+            recordInitialGeneration(workflow, candidate, previous);
+        }
+        record(workflow, actor, action, previous, workflow.getStatus(), comment, null, null, actorRole,
+                triggerSource);
     }
 
     @Transactional
@@ -132,7 +139,13 @@ public class DocumentWorkflowService {
         }
         DocumentWorkflow workflow = workflows.saveAndFlush(
                 new DocumentWorkflow(documentId, document.path("title").asText("Untitled"), actor));
-        record(workflow, actor, "CREATED", null, workflow.getStatus(), null);
+        int version = document.path("pending_version").asInt();
+        if (version <= 0) {
+            version = document.path("current_version").asInt();
+        }
+        recordInitialGeneration(workflow, document, workflow.getStatus());
+        recordVersion(workflow, actor, "CREATED", null, workflow.getStatus(), null,
+                null, null, authenticatedRole(authorities), "REVIEW_WORKFLOW", version > 0 ? version : null);
         return toResponse(workflow);
     }
 
@@ -345,7 +358,7 @@ public class DocumentWorkflowService {
                 .map(e -> new AuditResponse(e.getId(), e.getWorkflowId(), e.getActorUserId(), e.getActorRole(), e.getAction(),
                         e.getPreviousStatus(), e.getNewStatus(), e.getPreviousReviewerUserId(),
                         e.getNewReviewerUserId(), e.getComment(), e.getCreatedAt(),
-                        workflow.getDocumentId(), e.getDocumentVersion()))
+                        workflow.getDocumentId(), e.getDocumentVersion(), e.getTriggerSource()))
                 .toList();
     }
 
@@ -369,9 +382,13 @@ public class DocumentWorkflowService {
         if (expectedVersion != null && expectedVersion != version) {
             throw conflict("The document version changed. Reload before submitting.");
         }
+        if (previous == DocumentWorkflowStatus.CHANGES_REQUESTED) {
+            recoverOwnerEdits(workflow, pendingOwnerEdit(workflow, document));
+        }
         workflow.submit(version);
         workflows.saveAndFlush(workflow);
-        record(workflow, actor, "SUBMITTED", previous, workflow.getStatus(), null);
+        record(workflow, actor, "SUBMITTED", previous, workflow.getStatus(), null,
+                null, null, authenticatedRole(authorities));
         return toResponse(workflow);
     }
 
@@ -386,7 +403,7 @@ public class DocumentWorkflowService {
         DocumentWorkflowStatus previous = workflow.getStatus();
         workflow.claim(actor);
         workflows.saveAndFlush(workflow);
-        record(workflow, actor, "CLAIMED", previous, workflow.getStatus(), null, null, actor);
+        record(workflow, actor, "CLAIMED", previous, workflow.getStatus(), null, null, actor, "STAFF");
         return toResponse(workflow);
     }
 
@@ -404,7 +421,7 @@ public class DocumentWorkflowService {
         DocumentWorkflowStatus previous = workflow.getStatus();
         workflow.releaseClaim();
         workflows.saveAndFlush(workflow);
-        record(workflow, actor, "STAFF_RELEASE", previous, workflow.getStatus(), null, actor, null);
+        record(workflow, actor, "STAFF_RELEASE", previous, workflow.getStatus(), null, actor, null, "STAFF");
         return toResponse(workflow);
     }
 
@@ -429,7 +446,7 @@ public class DocumentWorkflowService {
         workflow.reassignClaim(targetId);
         workflows.saveAndFlush(workflow);
         record(workflow, actor, "STAFF_REASSIGN", previous, workflow.getStatus(), request.reason(),
-                previousReviewer, targetId);
+                previousReviewer, targetId, authorities.contains("ROLE_ADMINISTRATOR") ? "ADMINISTRATOR" : "ADMIN");
         return toResponse(workflow);
     }
 
@@ -450,6 +467,7 @@ public class DocumentWorkflowService {
                 workflow.getStatus().name(), workflow.getStatus().name(),
                 normalizeComment(request.comment()), null, null, "STAFF");
         entry.setDocumentVersion(workflow.getSubmittedDocumentVersion());
+        entry.setTriggerSource("REVIEW_WORKFLOW");
         if (request.section() != null) {
             SectionFeedback section = request.section();
             String content = documents.getDocumentContent(actor, workflow.getDocumentId(),
@@ -546,7 +564,6 @@ public class DocumentWorkflowService {
             throw conflict("A document can only be edited after staff requests changes.");
         }
         String comment = normalizeComment(request.note());
-        DocumentWorkflowStatus current = workflow.getStatus();
         JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
         requireDocumentOwner(document, workflow.getOwnerUserId());
         int expectedVersion = document.path("pending_version").asInt(0);
@@ -556,13 +573,103 @@ public class DocumentWorkflowService {
         if (expectedVersion <= 0) {
             throw conflict("The document has no editable version.");
         }
-        if (request.expectedVersion() != null && request.expectedVersion() != expectedVersion) {
+        JsonNode pendingEdit = pendingOwnerEdit(workflow, document);
+        Integer requestedBase = request.expectedVersion();
+        if (pendingEdit != null
+                && (requestedBase == null || requestedBase == pendingEdit.path("owner_edit_from").asInt())
+                && request.content().equals(pendingEdit.path("content").asText(null))
+                && Objects.equals(comment, pendingEdit.path("note").asText(null))) {
+            recoverOwnerEdits(workflow, pendingEdit);
+            return toResponse(workflow);
+        }
+        if (requestedBase != null && requestedBase != expectedVersion) {
             throw conflict("The document version changed. Reload before saving.");
         }
-        documents.editOwnedDocument(actor, workflow.getDocumentId(),
-                expectedVersion, request.content(), comment);
-        record(workflow, actor, "DOCUMENT_EDITED", current, current, comment);
+        recoverOwnerEdits(workflow, pendingEdit);
+        JsonNode version = documents.editOwnedDocument(actor, workflow.getDocumentId(),
+                expectedVersion, request.content(), comment, authenticatedRole(authorities));
+        if (!isOwnerEdit(workflow, version) || !"proposed".equals(version.path("status").asText())
+                || version.path("owner_edit_from").asInt() != expectedVersion) {
+            throw conflict("The edited document version could not be verified.");
+        }
+        recordOwnerEdit(workflow, version);
         return toResponse(workflow);
+    }
+
+    private JsonNode pendingOwnerEdit(DocumentWorkflow workflow, JsonNode document) {
+        int pending = document.path("pending_version").asInt();
+        if (workflow.getSubmittedDocumentVersion() == null || pending <= workflow.getSubmittedDocumentVersion()) {
+            return null;
+        }
+        JsonNode version = documents.getExactDocumentVersion(
+                workflow.getOwnerUserId(), workflow.getDocumentId(), pending);
+        return isOwnerEdit(workflow, version) && version.path("number").asInt() == pending
+                && "proposed".equals(version.path("status").asText()) ? version : null;
+    }
+
+    private static boolean isOwnerEdit(DocumentWorkflow workflow, JsonNode version) {
+        if (version == null || workflow.getSubmittedDocumentVersion() == null) {
+            return false;
+        }
+        int base = version.path("owner_edit_from").asInt();
+        return base >= workflow.getSubmittedDocumentVersion()
+                && version.path("number").asInt() > base
+                && "edit".equals(version.path("origin").asText())
+                && workflow.getOwnerUserId().equals(version.path("created_by").asText());
+    }
+
+    private void recoverOwnerEdits(DocumentWorkflow workflow, JsonNode version) {
+        // If another edit was saved during a failed workflow transaction, follow the persisted
+        // supersession chain until reaching an audited edit or the submitted version.
+        while (version != null) {
+            int number = version.path("number").asInt();
+            if (ownerEditRecorded(workflow, number)) {
+                return;
+            }
+            recordOwnerEdit(workflow, version);
+            int base = version.path("owner_edit_from").asInt();
+            if (base <= workflow.getSubmittedDocumentVersion() || ownerEditRecorded(workflow, base)) {
+                return;
+            }
+            JsonNode parent = documents.getExactDocumentVersion(workflow.getOwnerUserId(),
+                    workflow.getDocumentId(), base);
+            version = isOwnerEdit(workflow, parent) && parent.path("number").asInt() == base
+                    && "superseded".equals(parent.path("status").asText())
+                    && parent.path("superseded_by").asInt() == number ? parent : null;
+        }
+    }
+
+    private boolean ownerEditRecorded(DocumentWorkflow workflow, int number) {
+        return audit.existsByWorkflowIdAndActionAndDocumentVersion(workflow.getId(), "DOCUMENT_EDITED", number);
+    }
+
+    private void recordOwnerEdit(DocumentWorkflow workflow, JsonNode version) {
+        recordPersistedVersion(workflow, workflow.getOwnerUserId(), "DOCUMENT_EDITED", workflow.getStatus(),
+                workflow.getStatus(), version.path("note").asText(null),
+                version.path("saved_actor_role").asText(null), "MANUAL_EDIT", version.path("number").asInt(),
+                Instant.parse(version.path("created_at").asText()));
+    }
+
+    private void recordInitialGeneration(DocumentWorkflow workflow, JsonNode document, DocumentWorkflowStatus status) {
+        JsonNode saved = document.path("initial_generation_save");
+        String actor = saved.path("actor_user_id").asText(null);
+        String job = saved.path("job_id").asText(null);
+        if (saved.path("version").asInt() == 1 && workflow.getOwnerUserId().equals(actor)
+                && job != null && !job.isBlank() && job.equals(document.path("source_job_id").asText(null))) {
+            recordPersistedVersion(workflow, actor, "DOCUMENT_GENERATED", null, status, null,
+                    saved.path("actor_role").asText(null), "INITIAL_GENERATION", 1,
+                    Instant.parse(saved.path("saved_at").asText()));
+        }
+    }
+
+    private void recordPersistedVersion(DocumentWorkflow workflow, String actor, String action,
+            DocumentWorkflowStatus previous, DocumentWorkflowStatus next, String comment,
+            String role, String trigger, int version, Instant savedAt) {
+        DocumentWorkflowAudit entry = new DocumentWorkflowAudit(workflow.getId(), actor, action,
+                previous == null ? null : previous.name(), next.name(), comment, null, null, role, savedAt);
+        entry.setDocumentVersion(version);
+        entry.setTriggerSource(trigger);
+        audit.save(entry);
     }
 
     @Transactional
@@ -695,14 +802,11 @@ public class DocumentWorkflowService {
     int pendingVersion = document.path("pending_version").asInt(0);
     int currentVersion = document.path("current_version").asInt(0);
 
-    // Không rollback nếu tài liệu đang có phiên bản chờ xử lý
-    // hoặc phiên bản hiện tại không khớp workflow.
-    if (pendingVersion != 0
-            || currentVersion != workflow.getSubmittedDocumentVersion()) {
+    if (!Objects.equals(currentVersion, workflow.getSubmittedDocumentVersion())) {
         throw conflict("The document version changed. Reload and retry.");
     }
 
-    // Yêu cầu AI service tạo phiên bản mới từ phiên bản đã duyệt.
+    // The version store only reuses a pending rollback with the same actor, source and reason.
     JsonNode rollbackVersion = documents.rollbackDocumentVersion(
             actor,
             workflow.getOwnerUserId(),
@@ -713,7 +817,10 @@ public class DocumentWorkflowService {
 
     int newVersion = rollbackVersion.path("number").asInt(0);
 
-    if (newVersion <= 0) {
+    if (newVersion <= currentVersion || (pendingVersion > 0 && newVersion != pendingVersion)
+            || !"proposed".equals(rollbackVersion.path("status").asText())
+            || !"rollback".equals(rollbackVersion.path("origin").asText())
+            || rollbackVersion.path("restored_from").asInt() != sourceVersion) {
         throw conflict("The rollback service returned an invalid version.");
     }
 
@@ -730,7 +837,8 @@ public class DocumentWorkflowService {
             "ROLLBACK_REQUESTED",
             previous,
             workflow.getStatus(),
-            "Restored from version " + sourceVersion + ". Reason: " + comment
+            "Restored from version " + sourceVersion + ". Reason: " + comment,
+            null, null, "MANAGER"
     );
 
     return toResponse(workflow);
@@ -821,24 +929,43 @@ public class DocumentWorkflowService {
         }
     }
 
-    private void record(DocumentWorkflow w, String actor, String action,
-            DocumentWorkflowStatus previous, DocumentWorkflowStatus next, String comment) {
-        record(w, actor, action, previous, next, comment, null, null);
-    }
-
-    private void record(DocumentWorkflow w, String actor, String action,
-            DocumentWorkflowStatus previous, DocumentWorkflowStatus next, String comment,
-            String previousReviewer, String newReviewer) {
-        record(w, actor, action, previous, next, comment, previousReviewer, newReviewer, null);
+    static String authenticatedRole(Set<String> authorities) {
+        List<String> roles = authorities.stream()
+                .filter(authority -> authority.startsWith("ROLE_") && authority.length() > 5)
+                .map(authority -> authority.substring(5))
+                .limit(2)
+                .toList();
+        return roles.size() == 1 ? roles.getFirst() : null;
     }
 
     private void record(DocumentWorkflow w, String actor, String action,
             DocumentWorkflowStatus previous, DocumentWorkflowStatus next, String comment,
             String previousReviewer, String newReviewer, String actorRole) {
+        String triggerSource = switch (action) {
+            case "STAFF_DRAFT_EDITED" -> "MANUAL_EDIT";
+            case "ROLLBACK_REQUESTED" -> "ROLLBACK";
+            default -> "REVIEW_WORKFLOW";
+        };
+        record(w, actor, action, previous, next, comment, previousReviewer, newReviewer, actorRole,
+                triggerSource);
+    }
+
+    private void record(DocumentWorkflow w, String actor, String action,
+            DocumentWorkflowStatus previous, DocumentWorkflowStatus next, String comment,
+            String previousReviewer, String newReviewer, String actorRole, String triggerSource) {
+        recordVersion(w, actor, action, previous, next, comment, previousReviewer, newReviewer,
+                actorRole, triggerSource, w.getSubmittedDocumentVersion());
+    }
+
+    private void recordVersion(DocumentWorkflow w, String actor, String action,
+            DocumentWorkflowStatus previous, DocumentWorkflowStatus next, String comment,
+            String previousReviewer, String newReviewer, String actorRole, String triggerSource,
+            Integer version) {
         DocumentWorkflowAudit entry = new DocumentWorkflowAudit(w.getId(), actor, action,
                 previous == null ? null : previous.name(), next.name(), normalizeComment(comment),
                 previousReviewer, newReviewer, actorRole);
-        entry.setDocumentVersion(w.getSubmittedDocumentVersion());
+        entry.setDocumentVersion(version);
+        entry.setTriggerSource(triggerSource);
         audit.save(entry);
     }
 

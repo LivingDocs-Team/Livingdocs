@@ -71,7 +71,7 @@ public final class WorkflowDtos {
     public record ContentResponse(String documentId, int version, String content) { }
     public record AuditResponse(UUID id, UUID workflowId, String actorUserId, String actorRole, String action, String previousStatus,
             String newStatus, String previousReviewerUserId, String newReviewerUserId,
-            String comment, Instant createdAt, String documentId, Integer documentVersion) { }
+            String comment, Instant createdAt, String documentId, Integer documentVersion, String triggerSource) { }
     public record PageResponse<T>(List<T> content, int page, int size, long totalElements,
             int totalPages, boolean first, boolean last) { }
 }
