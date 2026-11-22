@@ -35,9 +35,8 @@ export TOKEN_ENCRYPTION_KEY="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 export GITHUB_INTEGRATION_INTERNAL_SECRET="smoke-test-internal-secret"
 export SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID="smoke-test-placeholder"
 export SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_SECRET="smoke-test-placeholder"
-# Use the backend catalog default on the disposable fixture. Compose's ordinary
-# default of 0 is outside the catalog's accepted range (30–3650).
-export ADMIN_USER_AUDIT_RETENTION_DAYS=730
+# Exercise the Compose default even if the caller has set a retention override.
+unset ADMIN_USER_AUDIT_RETENTION_DAYS
 export GITHUB_CALLBACK_BIND_ADDRESS=127.0.0.1
 export GITHUB_REDIRECT_URI=http://localhost:8083/api/github/callback
 export BACKEND_PORT=8081 FRONTEND_PORT=3001 AI_SERVICE_PORT=8002 ANALYZER_PORT=8003 GITHUB_INTEGRATION_PORT=8083
@@ -107,6 +106,8 @@ def require(condition, message):
         sys.exit(message)
 
 require(model["name"] == project, "Unexpected Compose project")
+require(services["backend"]["environment"].get("ADMIN_USER_AUDIT_RETENTION_DAYS") == "730",
+        "Expected Compose audit retention default of 730 days")
 for kind, driver in (("volumes", "local"), ("networks", "bridge")):
     for key, resource in model[kind].items():
         require(resource["name"] == f"{project}_{key}" and not resource.get("external")
@@ -134,6 +135,7 @@ for service, db, database, network in (
             f"Unexpected data mount for {db}")
 ' "$SMOKE_PROJECT" || fail "Compose fixture configuration rejected"
 pass "JDBC targets and project-scoped fixture volumes verified"
+pass "Compose audit retention default is 730 days without an override"
 
 # Check both labels and names before creating anything. In particular, Compose can
 # reuse an existing volume with the expected name even if its labels are missing.
