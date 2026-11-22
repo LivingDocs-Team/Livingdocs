@@ -1,6 +1,7 @@
 package com.cnpm.backend;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -9,6 +10,7 @@ import org.springframework.boot.convert.ApplicationConversionService;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import com.cnpm.backend.controller.AdminSystemConfigController;
+import com.cnpm.backend.service.SystemConfigurationService;
 
 class AdminSystemConfigControllerTest {
 
@@ -19,6 +21,7 @@ class AdminSystemConfigControllerTest {
             .withInitializer(context -> context.getBeanFactory()
                     .setConversionService(ApplicationConversionService.getSharedInstance()))
             .withConfiguration(AutoConfigurations.of(PropertyPlaceholderAutoConfiguration.class))
+            .withBean(SystemConfigurationService.class, () -> mock(SystemConfigurationService.class))
             .withUserConfiguration(AdminSystemConfigController.class);
 
     private static boolean oauthConfigured(org.springframework.context.ApplicationContext context) {

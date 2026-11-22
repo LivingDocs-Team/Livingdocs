@@ -9,3 +9,5 @@ link tl SRS: https://ut-team-lvdocs.atlassian.net/wiki/spaces/L/pages/458757/Liv
 link jira: https://ut-team-lvdocs.atlassian.net/jira/software/projects/LD/boards/1/backlog
 
 
+
+For a backend database initialized with the legacy PostgreSQL role, follow the [PostgreSQL volume upgrade guide](Docs/postgresql-volume-upgrade.md) before deploying the updated Compose stack.

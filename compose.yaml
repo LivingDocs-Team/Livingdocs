@@ -3,15 +3,17 @@
     image: postgres:16
     environment:
       POSTGRES_DB: cnpm
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: livingdocs
+      POSTGRES_PASSWORD: ${BACKEND_DB_PASSWORD:-livingdocs}
     ports:
       # Local developer database access only; keep PostgreSQL off host network interfaces.
       - "127.0.0.1:${BACKEND_DB_PORT:-5434}:5432"
     volumes:
       - backend-db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d cnpm"]
+      test:
+        - CMD-SHELL
+        - PGPASSWORD="$${POSTGRES_PASSWORD}" psql -X -w -h backend-db -U livingdocs -d cnpm -Atqc "SELECT 1"
       interval: 5s
       timeout: 3s
       retries: 20
@@ -47,12 +49,12 @@
     environment:
       DB_URL: jdbc:postgresql://backend-db:5432/cnpm
       DB_USERNAME: livingdocs
-      DB_PASSWORD: livingdocs
+      DB_PASSWORD: ${BACKEND_DB_PASSWORD:-livingdocs}
       SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID: ${SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID:?Set the LivingDocs sign-in GitHub OAuth App client ID in the project .env}
       SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_SECRET: ${SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_SECRET:?Set the LivingDocs sign-in GitHub OAuth App client secret in the project .env}
       GITHUB_INTEGRATION_BASE_URL: http://github-integration:8082
       GITHUB_INTEGRATION_INTERNAL_SECRET: ${GITHUB_INTEGRATION_INTERNAL_SECRET:?GITHUB_INTEGRATION_INTERNAL_SECRET must be set in .env}
-      ADMIN_USER_AUDIT_RETENTION_DAYS: ${ADMIN_USER_AUDIT_RETENTION_DAYS:-0}
+      ADMIN_USER_AUDIT_RETENTION_DAYS: ${ADMIN_USER_AUDIT_RETENTION_DAYS:-730}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
     depends_on:
       backend-db:

@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -21,9 +22,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
 import org.springframework.http.HttpStatus;
+import org.springframework.mock.env.MockEnvironment;
+import org.springframework.security.authentication.TestingAuthenticationToken;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.cnpm.backend.controller.AdminSystemConfigController;
+import com.cnpm.backend.controller.AdminSystemConfigController.UpdateSystemConfigRequest;
 import com.cnpm.backend.entity.SystemSetting;
+import com.cnpm.backend.repository.AdminUserAuditRepository;
+import com.cnpm.backend.service.AdminUserAuditRetention;
 import com.cnpm.backend.repository.SystemSettingRepository;
 import com.cnpm.backend.service.SystemConfigurationService;
 import com.cnpm.backend.service.SystemConfigurationService.GroupView;
@@ -56,6 +63,48 @@ class SystemConfigurationServiceTest {
             return null;
         }).when(repository).deleteAllById(ArgumentMatchers.<Iterable<? extends String>>any());
         service = new SystemConfigurationService(repository);
+    }
+
+
+    @Test
+    void auditDashboardAndSchedulerUseTheSamePersistedPolicy() {
+        var dashboard = new AdminSystemConfigController(service, "http://localhost:3000", false,
+                "Lax", new MockEnvironment(), "http://localhost:8082", "",
+                Duration.ofSeconds(5), Duration.ofSeconds(150));
+        var authentication = new TestingAuthenticationToken("admin", "unused");
+        var audit = mock(AdminUserAuditRepository.class);
+        var reloadedService = new SystemConfigurationService(repository);
+        var scheduler = new AdminUserAuditRetention(audit, reloadedService);
+
+        assertThat(dashboard.updateConfig(new UpdateSystemConfigRequest(BigDecimal.ZERO), authentication)
+                .audit().retentionDays()).isZero();
+        assertThat(rows.get("retention.auditLogDays").getUpdatedBy()).isEqualTo("admin");
+        scheduler.purgeExpiredRecords();
+        verify(audit, never()).deleteOlderThan(any());
+
+        service.update("retention", Map.of("retention.auditLogDays", 30), "admin");
+        assertThat(dashboard.getConfig().audit().retentionDays()).isEqualTo(30);
+        scheduler.purgeExpiredRecords();
+        verify(audit).deleteOlderThan(any());
+
+        dashboard.updateConfig(new UpdateSystemConfigRequest(BigDecimal.valueOf(3650)), authentication);
+        assertThat(reloadedService.getAuditLogRetentionDays()).isEqualTo(3650);
+        for (String invalid : List.of("-1", "1", "29", "30.5", "3651")) {
+            assertThatThrownBy(() -> dashboard.updateConfig(
+                    new UpdateSystemConfigRequest(new BigDecimal(invalid)), authentication))
+                    .isInstanceOf(ResponseStatusException.class);
+            assertThat(reloadedService.getAuditLogRetentionDays()).isEqualTo(3650);
+        }
+    }
+
+    @Test
+    void invalidStoredAuditPolicyKeepsRecordsInsteadOfUsingThePurgeDefault() {
+        var invalid = new SystemSetting("retention.auditLogDays");
+        invalid.update("29", "admin");
+        rows.put(invalid.getKey(), invalid);
+
+        assertThat(service.getAuditLogRetentionDays()).isZero();
+        assertThat(service.getGroup("retention").settings().get(0).value()).isEqualTo(0);
     }
 
     @Test
