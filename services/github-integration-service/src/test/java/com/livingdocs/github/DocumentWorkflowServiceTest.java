@@ -17,6 +17,10 @@ import java.lang.reflect.Field;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -25,12 +29,14 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.data.jpa.repository.Lock;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.livingdocs.github.change.SourceChangeRequest;
 import com.livingdocs.github.dto.WorkflowDtos.StaffReviewRequest;
 import com.livingdocs.github.dto.WorkflowDtos.ReassignRequest;
 import com.livingdocs.github.entity.DocumentWorkflow;
 import com.livingdocs.github.entity.DocumentWorkflowAudit;
 import com.livingdocs.github.entity.DocumentWorkflowStatus;
 import com.livingdocs.github.entity.ManagerDecision;
+import com.livingdocs.github.entity.SourceChange;
 import com.livingdocs.github.entity.StaffReviewResult;
 import com.livingdocs.github.exception.ApiException;
 import com.livingdocs.github.repository.DocumentWorkflowAuditRepository;
@@ -285,7 +291,7 @@ class DocumentWorkflowServiceTest {
         assertThat(approvalEvent.getNewStatus()).isEqualTo("APPROVED");
         assertThat(approvalEvent.getComment()).isEqualTo("Approved");
         assertThat(approvalEvent.getCreatedAt()).isNotNull();
-        verify(documents, never()).resolveDocumentVersion(any(), any(), any(), any(Integer.class), any(), any());
+        verify(documents).resolveDocumentVersion(MANAGER, "73", "doc-1", 1, "APPROVED", "Approved");
     }
 
     @Test
@@ -348,13 +354,29 @@ class DocumentWorkflowServiceTest {
         when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
         when(workflows.saveAndFlush(workflow)).thenReturn(workflow);
         when(documents.getDocument(OWNER, "doc-1")).thenReturn(new ObjectMapper().readTree(
-                "{\"owner_user_id\":\"73\",\"current_version\":0,\"pending_version\":1}"));
+                """
+                {"owner_user_id":"73","current_version":0,"pending_version":1,"source_job_id":"job-1",
+                 "initial_generation_save":{"job_id":"job-1","version":1,"actor_user_id":"73",
+                 "actor_role":"STAFF","saved_at":"2026-01-01T00:00:00Z"}}
+                """));
+        when(workflows.saveAndFlush(any(DocumentWorkflow.class))).thenReturn(workflow);
+
+        service.create(OWNER, Set.of("DOCUMENT_CREATE", "ROLE_DEVELOPER"), "doc-1");
+        var created = ArgumentCaptor.forClass(DocumentWorkflowAudit.class);
+        verify(audit, org.mockito.Mockito.times(2)).save(created.capture());
+        var generation = created.getAllValues().getFirst();
+        assertThat(generation.getDocumentVersion()).isEqualTo(1);
+        assertThat(generation.getTriggerSource()).isEqualTo("INITIAL_GENERATION");
+        assertThat(generation.getActorUserId()).isEqualTo(OWNER);
+        assertThat(generation.getActorRole()).isEqualTo("STAFF");
+        assertThat(generation.getCreatedAt()).isEqualTo(java.time.Instant.parse("2026-01-01T00:00:00Z"));
+        assertThat(created.getValue().getTriggerSource()).isEqualTo("REVIEW_WORKFLOW");
 
         var submitted = service.submit(OWNER, Set.of("DOCUMENT_SUBMIT"), ID);
 
         assertThat(submitted.status()).isEqualTo(DocumentWorkflowStatus.PENDING_STAFF_REVIEW);
         assertThat(submitted.submittedDocumentVersion()).isEqualTo(1);
-        verify(workflows).saveAndFlush(workflow);
+        verify(workflows, org.mockito.Mockito.times(2)).saveAndFlush(any(DocumentWorkflow.class));
     }
 
     @Test
@@ -508,7 +530,7 @@ class DocumentWorkflowServiceTest {
                 new com.livingdocs.github.dto.WorkflowDtos.EditDocumentRequest("Updated text", "Fix setup", 2)))
                 .isInstanceOf(ApiException.class)
                 .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(409));
-        verify(documents, never()).editOwnedDocument(any(), any(), anyInt(), any(), any());
+        verify(documents, never()).editOwnedDocument(any(), any(), anyInt(), any(), any(), any());
         assertThatThrownBy(() -> service.submit(OWNER, Set.of("DOCUMENT_SUBMIT"), ID, 2))
                 .isInstanceOf(ApiException.class)
                 .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(409));
@@ -531,7 +553,7 @@ class DocumentWorkflowServiceTest {
                 .isInstanceOf(ApiException.class);
         assertThatThrownBy(() -> service.editAfterChanges(OWNER, Set.of(), ID, request))
                 .isInstanceOf(ApiException.class);
-        verify(documents, never()).editOwnedDocument(any(), any(), anyInt(), any(), any());
+        verify(documents, never()).editOwnedDocument(any(), any(), anyInt(), any(), any(), any());
     }
 
     @Test
@@ -547,15 +569,62 @@ class DocumentWorkflowServiceTest {
                 new StaffReviewRequest(StaffReviewResult.CHANGES_REQUESTED, "Please clarify the setup steps"));
         assertThat(changes.status()).isEqualTo(DocumentWorkflowStatus.CHANGES_REQUESTED);
 
+        when(documents.editOwnedDocument(OWNER, "doc-1", 1, "# Updated", "Clarified setup", null))
+                .thenReturn(new ObjectMapper().readTree("{\"number\":2,\"status\":\"proposed\",\"origin\":\"edit\",\"owner_edit_from\":1,\"created_by\":\"73\",\"saved_actor_role\":\"DEVELOPER\",\"created_at\":\"2026-01-01T00:00:00Z\",\"content\":\"# Updated\",\"note\":\"Clarified setup\"}"));
         var edited = service.editAfterChanges(OWNER, Set.of("DOCUMENT_UPDATE"), ID,
                 new com.livingdocs.github.dto.WorkflowDtos.EditDocumentRequest("# Updated", "Clarified setup"));
         assertThat(edited.status()).isEqualTo(DocumentWorkflowStatus.CHANGES_REQUESTED);
-        verify(documents).editOwnedDocument(OWNER, "doc-1", 1, "# Updated", "Clarified setup");
+        verify(documents).editOwnedDocument(OWNER, "doc-1", 1, "# Updated", "Clarified setup", null);
 
         var resubmitted = service.submit(OWNER, Set.of("DOCUMENT_SUBMIT"), ID);
         assertThat(resubmitted.status()).isEqualTo(DocumentWorkflowStatus.PENDING_STAFF_REVIEW);
         assertThat(resubmitted.submittedDocumentVersion()).isEqualTo(2);
         verify(audit, org.mockito.Mockito.times(3)).save(any(DocumentWorkflowAudit.class));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void recoversOwnerEditAfterLostResponseOrAuditFailure(boolean auditFailure) throws Exception {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+        workflow.review(StaffReviewResult.CHANGES_REQUESTED, "Clarify setup");
+        when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
+        var mapper = new ObjectMapper();
+        var document = mapper.createObjectNode().put("owner_user_id", OWNER).put("pending_version", 1);
+        var saved = mapper.readTree("{\"number\":2,\"status\":\"proposed\",\"origin\":\"edit\",\"owner_edit_from\":1,\"created_by\":\"73\",\"saved_actor_role\":\"DEVELOPER\",\"created_at\":\"2026-01-01T00:00:00Z\",\"content\":\"# Updated\",\"note\":\"Clarified setup\"}");
+        when(documents.getDocument(OWNER, "doc-1")).thenReturn(document);
+        when(documents.getExactDocumentVersion(OWNER, "doc-1", 2)).thenReturn(saved);
+        when(documents.editOwnedDocument(OWNER, "doc-1", 1, "# Updated", "Clarified setup", "DEVELOPER"))
+                .thenAnswer(call -> {
+                    document.put("pending_version", 2);
+                    if (!auditFailure) {
+                        throw new IllegalStateException("Response lost after saving");
+                    }
+                    return saved;
+                });
+        if (auditFailure) {
+            when(audit.save(any(DocumentWorkflowAudit.class)))
+                    .thenThrow(new IllegalStateException("Audit unavailable")).thenAnswer(call -> call.getArgument(0));
+        }
+        var request = new com.livingdocs.github.dto.WorkflowDtos.EditDocumentRequest("# Updated", "Clarified setup", 1);
+        assertThatThrownBy(() -> service.editAfterChanges(OWNER, Set.of("DOCUMENT_UPDATE", "ROLE_DEVELOPER"), ID, request))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> service.editAfterChanges("99", Set.of("DOCUMENT_UPDATE"), ID, request))
+                .isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> service.editAfterChanges(OWNER, Set.of(), ID, request))
+                .isInstanceOf(ApiException.class);
+        var mismatch = new com.livingdocs.github.dto.WorkflowDtos.EditDocumentRequest("# Different", "Clarified setup", 1);
+        assertThatThrownBy(() -> service.editAfterChanges(OWNER, Set.of("DOCUMENT_UPDATE"), ID, mismatch))
+                .isInstanceOf(ApiException.class);
+
+        service.editAfterChanges(OWNER, Set.of("DOCUMENT_UPDATE", "ROLE_STAFF"), ID, request);
+        when(audit.existsByWorkflowIdAndActionAndDocumentVersion(ID, "DOCUMENT_EDITED", 2)).thenReturn(true);
+        service.editAfterChanges(OWNER, Set.of("DOCUMENT_UPDATE"), ID, request);
+        verify(documents).editOwnedDocument(any(), any(), anyInt(), any(), any(), any());
+        var captured = ArgumentCaptor.forClass(DocumentWorkflowAudit.class);
+        verify(audit, org.mockito.Mockito.times(auditFailure ? 2 : 1)).save(captured.capture());
+        assertThat(captured.getValue().getDocumentVersion()).isEqualTo(2);
+        assertThat(captured.getValue().getActorRole()).isEqualTo("DEVELOPER");
+        assertThat(captured.getValue().getCreatedAt()).isEqualTo(java.time.Instant.parse("2026-01-01T00:00:00Z"));
     }
 
     @Test
@@ -583,6 +652,24 @@ class DocumentWorkflowServiceTest {
         assertThat(rejectionEvent.getNewStatus()).isEqualTo("REJECTED");
         assertThat(rejectionEvent.getComment()).isEqualTo("Does not meet the documentation standard");
         assertThat(rejectionEvent.getCreatedAt()).isNotNull();
+    }
+
+    @Test
+    void committedManagerRetryRepairsAiWithoutCreatingAnotherAuditRow() {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+        workflow.review(StaffReviewResult.PASSED, "Checks passed");
+        workflow.decide(MANAGER, ManagerDecision.REJECTED, "Original reason");
+        when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
+        Set<String> permissions = Set.of("ROLE_MANAGER", "DOCUMENT_REJECT");
+
+        assertThatThrownBy(() -> service.decide(MANAGER, permissions, ID,
+                ManagerDecision.REJECTED, "Changed reason", 1)).isInstanceOf(ApiException.class);
+        service.decide(MANAGER, permissions, ID, ManagerDecision.REJECTED, " Original reason ", 1);
+
+        verify(documents).resolveDocumentVersion(MANAGER, OWNER, "doc-1", 1,
+                "REJECTED", "Original reason", true);
+        verify(audit, never()).save(any(DocumentWorkflowAudit.class));
+        verify(workflows, never()).saveAndFlush(workflow);
     }
 
     @Test
@@ -689,6 +776,63 @@ class DocumentWorkflowServiceTest {
 
         assertThat(result).isEqualTo(comparison);
         verify(documents).getDocumentReviewComparison(REVIEWER, "doc-1");
+    }
+
+    @Test
+    void ownerCanListAndCompareAnyTwoVersionsOfTheirDocument() throws Exception {
+        // LD-183 / LD-184: the owner of a draft compares version 1 with version 3.
+        DocumentWorkflow workflow = new DocumentWorkflow("doc-1", "Document", OWNER);
+        ReflectionTestUtils.setField(workflow, "id", ID);
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+        when(documents.getDocument(OWNER, "doc-1")).thenReturn(new ObjectMapper().readTree(
+                "{\"id\":\"doc-1\",\"owner_user_id\":\"73\",\"current_version\":0,\"pending_version\":3}"));
+        var versions = new ObjectMapper().readTree("[{\"number\":3},{\"number\":2},{\"number\":1}]");
+        var diff = new ObjectMapper().readTree(
+                "{\"from_version\":{\"number\":1},\"to_version\":{\"number\":3},\"rows\":[]}");
+        when(documents.getDocumentVersions(OWNER, "doc-1")).thenReturn(versions);
+        when(documents.compareDocumentVersions(OWNER, "doc-1", 1, 3)).thenReturn(diff);
+        Set<String> owner = Set.of("ROLE_DEVELOPER", "DOCUMENT_VIEW");
+
+        assertThat(service.versions(OWNER, owner, ID)).isEqualTo(versions);
+        assertThat(service.compareVersions(OWNER, owner, ID, 1, 3)).isEqualTo(diff);
+        verify(documents).compareDocumentVersions(OWNER, "doc-1", 1, 3);
+    }
+
+    @Test
+    void comparisonDefaultsToCurrentAgainstPreviousAndValidatesTheChoice() throws Exception {
+        DocumentWorkflow workflow = new DocumentWorkflow("doc-1", "Document", OWNER);
+        ReflectionTestUtils.setField(workflow, "id", ID);
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+        when(documents.getDocument(OWNER, "doc-1")).thenReturn(new ObjectMapper().readTree(
+                "{\"id\":\"doc-1\",\"owner_user_id\":\"73\",\"current_version\":2}"));
+        var diff = new ObjectMapper().readTree("{\"rows\":[]}");
+        when(documents.compareDocumentVersions(OWNER, "doc-1", null, null)).thenReturn(diff);
+        Set<String> owner = Set.of("ROLE_DEVELOPER", "DOCUMENT_VIEW");
+
+        assertThat(service.compareVersions(OWNER, owner, ID, null, null)).isEqualTo(diff);
+        assertThatThrownBy(() -> service.compareVersions(OWNER, owner, ID, 2, 2))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> {
+                    assertThat(((ApiException) error).getStatus().value()).isEqualTo(400);
+                    assertThat(((ApiException) error).getCode()).isEqualTo("DOCUMENT_COMPARISON_INVALID");
+                });
+        assertThatThrownBy(() -> service.compareVersions(OWNER, owner, ID, 0, 2))
+                .isInstanceOf(ApiException.class);
+        verify(documents, never()).compareDocumentVersions(OWNER, "doc-1", 2, 2);
+    }
+
+    @Test
+    void userWhoCannotReadTheWorkflowCannotCompareItsVersions() {
+        DocumentWorkflow workflow = new DocumentWorkflow("doc-1", "Document", OWNER);
+        ReflectionTestUtils.setField(workflow, "id", ID);
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+
+        assertThatThrownBy(() -> service.compareVersions("99", Set.of("ROLE_DEVELOPER", "DOCUMENT_VIEW"), ID, 1, 2))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(404));
+        assertThatThrownBy(() -> service.versions("99", Set.of("ROLE_DEVELOPER", "DOCUMENT_VIEW"), ID))
+                .isInstanceOf(ApiException.class);
+        verify(documents, never()).getDocument(any(), any());
     }
 
     @Test
@@ -927,15 +1071,39 @@ void managerCanReadAuditTrailForPendingApprovalWorkflow() {
     assertThat(history).hasSize(2);
     verify(audit).findByWorkflowIdOrderByCreatedAtAsc(ID);
 }
-        @Test
-    void managerCanRollbackApprovedDocumentAndRollbackMustPassStaffReviewAgain() throws Exception {
+    @ParameterizedTest
+    @EnumSource(SourceChange.Trigger.class)
+    void automaticDraftRecordsTheActualVersionAndTriggerOnce(SourceChange.Trigger trigger) throws Exception {
+        DocumentWorkflow workflow = approvedWorkflow();
+        when(workflows.lockByDocumentId("doc-1")).thenReturn(Optional.of(workflow));
+        var mapper = new ObjectMapper();
+        var candidate = mapper.readTree("{\"id\":\"doc-1\",\"owner_user_id\":\"73\"}");
+        var draft = mapper.readTree("{\"number\":3,\"status\":\"proposed\"}");
+        var revision = new SourceChangeRequest(UUID.randomUUID(), trigger, "a".repeat(40),
+                trigger == SourceChange.Trigger.PULL_REQUEST ? 17 : null);
+
+        service.submitRevisionDraft(candidate, revision, () -> draft);
+        service.submitRevisionDraft(candidate, revision, () -> draft);
+
+        var event = ArgumentCaptor.forClass(DocumentWorkflowAudit.class);
+        verify(audit).save(event.capture());
+        assertThat(event.getValue().getDocumentVersion()).isEqualTo(3);
+        assertThat(event.getValue().getTriggerSource()).isEqualTo(trigger.name());
+        assertThat(event.getValue().getActorRole()).isEqualTo("AI");
+        assertThat(event.getValue().getCreatedAt()).isNotNull();
+        assertThat(workflow.getStatus()).isEqualTo(DocumentWorkflowStatus.PENDING_STAFF_REVIEW);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 3})
+    void managerCanStartOrRecoverRollbackAndSendItToStaffReview(int pendingVersion) throws Exception {
         DocumentWorkflow workflow = approvedWorkflow();
 
         when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
 
         when(documents.getDocument(MANAGER, "doc-1")).thenReturn(
                 new ObjectMapper().readTree(
-                        "{\"owner_user_id\":\"73\",\"current_version\":2,\"pending_version\":null}"
+                        "{\"owner_user_id\":\"73\",\"current_version\":2,\"pending_version\":" + pendingVersion + "}"
                 )
         );
 
@@ -973,7 +1141,11 @@ void managerCanReadAuditTrailForPendingApprovalWorkflow() {
         );
 
         verify(workflows).saveAndFlush(workflow);
-        verify(audit).save(any(DocumentWorkflowAudit.class));
+        var event = ArgumentCaptor.forClass(DocumentWorkflowAudit.class);
+        verify(audit).save(event.capture());
+        assertThat(event.getValue().getDocumentVersion()).isEqualTo(3);
+        assertThat(event.getValue().getTriggerSource()).isEqualTo("ROLLBACK");
+        assertThat(event.getValue().getActorRole()).isEqualTo("MANAGER");
     }
     @Test
 

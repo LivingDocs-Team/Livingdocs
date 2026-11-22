@@ -175,7 +175,10 @@ class DocumentWorkflowEndToEndTest {
                         "PENDING_MANAGER_APPROVAL", "APPROVED");
         assertThat(history.get(3).comment()).isEqualTo("Matches the source code");
         assertThat(history.get(4).comment()).isEqualTo("Approved for publishing");
-        assertThat(history.get(4).actorRole()).isEqualTo("MANAGER");
+        assertThat(history).extracting(AuditResponse::actorRole)
+                .containsExactly("DEVELOPER", "DEVELOPER", "STAFF", "STAFF", "MANAGER");
+        assertThat(history).extracting(AuditResponse::documentVersion).containsOnly(2);
+        assertThat(history).extracting(AuditResponse::triggerSource).containsOnly("REVIEW_WORKFLOW");
         assertThat(history).allSatisfy(event -> assertThat(event.createdAt()).isNotNull());
         assertThat(history).extracting(AuditResponse::createdAt).isSorted();
     }
