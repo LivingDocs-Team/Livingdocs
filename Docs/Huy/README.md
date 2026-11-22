@@ -1,4 +1,4 @@
-# Functional Requirements — Tasks của Huy (Auth, AST Analysis, AI Generation, Evidence & Submission, Documentation Drift, Confidence Scoring)
+# Functional Requirements — Tasks của Huy (Auth, AST Analysis, AI Generation, Evidence & Submission, Documentation Drift, Confidence Scoring, Documentation Diff)
 
 Các chức năng do Huy thực hiện từ Sprint 1 đến Sprint 7, mỗi chức năng được lưu thành một file riêng:
 
@@ -14,6 +14,7 @@ Các chức năng do Huy thực hiện từ Sprint 1 đến Sprint 7, mỗi ch�
 | [FR-AI-08](FR08.md) | Phân tích drift dựa trên AI: so sánh mã nguồn – tài liệu, AI review, xử lý finding | LD-346 (LD-347, LD-348, LD-349, LD-350, LD-351) |
 | [FR-AI-09](FR09.md) | Chuẩn hoá điểm độ tin cậy (confidence) của tài liệu AI sinh và drift finding | LD-356 |
 | [FR-AI-10](FR10.md) | Sửa lỗi lưu trữ evidence và submission (PR #108) | LD-402 |
+| [FR-AI-11](FR11.md) | So sánh hai phiên bản tài liệu: nội dung thêm / xoá / sửa, hiển thị cạnh nhau | LD-183 (LD-184, LD-185, LD-186, LD-187, LD-188) |
 
 Mỗi file gồm: mô tả, danh sách yêu cầu (FR-xx-yy.z), API, dữ liệu, luồng chính, luồng lỗi, quy tắc nghiệp vụ, tiêu chí chấp nhận và test liên quan. Các con số (trọng số, giới hạn, ngưỡng) trong file là giá trị đang dùng trong code, để có thể dựng lại đúng hành vi.
 
@@ -26,6 +27,7 @@ Mỗi file gồm: mô tả, danh sách yêu cầu (FR-xx-yy.z), API, dữ liệu
       → Trích xuất Bằng chứng Code (`GroundingEvidence`) & Kiểm tra Tiến độ (FR-EVI-04)
       → Xác minh CI/CD Pipeline → Khóa bản thảo & Gửi Phê duyệt (`submitted`) (FR-EVI-04)
         (evidence của bản sửa / rollback và lưu trữ submission: FR-AI-10)
+        (so sánh các phiên bản tài liệu khi review: FR-AI-11)
       → Khi có Pull Request mới: phát hiện tài liệu lỗi thời (FR-AI-05)
       → Phân loại drift (FR-AI-06) → Đánh giá mức độ nghiêm trọng (FR-AI-07)
       → AI review, xem bằng chứng & xử lý finding: Acknowledge / Resolve / Dismiss (FR-AI-08)
@@ -49,3 +51,4 @@ Kiểm thử và cấu hình hạ tầng CI/CD không phải chức năng giao d
 - **LD-364 / LD-376 / LD-391:** Thiết lập và kiểm thử đường ống tích hợp liên tục GitHub Actions CI/CD Pipeline (job `test-ai-service` chạy `pytest tests/ -v`).
 - **LD-105-Tests / LD-390:** Kịch bản kiểm thử tích hợp giao diện Preview và Unit Test Backend cho các endpoints `GroundingEvidence` & `Submission` (tệp `tests/test_evidence_submission.py`).
 - **LD-150 / LD-155 / LD-160:** Bộ test phát hiện, phân loại và đánh giá mức độ drift (`ai-service/tests/test_drift*.py`, `tests/test_frontend_drift.py`); nội dung kiểm thử đã ghi trong mục 8 của FR-AI-05, FR-AI-06, FR-AI-07.
+- **LD-188:** Bộ test so sánh tài liệu (`ai-service/tests/test_doc_diff.py`, `tests/test_documentation_diff.py`); nội dung kiểm thử đã ghi trong mục 8 của FR-AI-11.

@@ -4140,3 +4140,150 @@ button:disabled {
     justify-content: center;
   }
 }
+
+/* ---------- LD-183 Documentation diff & comparison ---------- */
+
+.documentation-diff.diff-view {
+  display: block;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
+.diff-view .diff-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.diff-view .diff-row > .documentation-diff-line:first-child {
+  border-right: 1px solid #e2e8f0;
+}
+
+.diff-view .diff-header {
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.diff-view .diff-header > div {
+  padding: 11px 12px;
+}
+
+.diff-view .documentation-diff-line > .diff-line-number {
+  flex: 0 0 34px;
+  color: #94a3b8;
+  font-weight: 400;
+  text-align: right;
+  user-select: none;
+}
+
+.diff-view .documentation-diff-line > .diff-marker {
+  flex: 0 0 12px;
+  font-weight: 700;
+}
+
+.diff-view .diff-text {
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.documentation-diff-line.diff-empty {
+  background: repeating-linear-gradient(135deg, #f8fafc, #f8fafc 6px, #f1f5f9 6px, #f1f5f9 12px);
+}
+
+.documentation-diff-line.diff-modified {
+  color: #854d0e;
+  background: #fffbeb;
+}
+
+.documentation-diff-line.diff-modified > .diff-marker {
+  color: #d97706;
+}
+
+.diff-inline-changed {
+  padding: 0 1px;
+  color: inherit;
+  border-radius: 3px;
+  background: #fde68a;
+}
+
+.diff-view .diff-row-removed .diff-inline-changed,
+.diff-view .diff-row-modified .documentation-diff-line:first-child .diff-inline-changed {
+  background: #fecaca;
+  text-decoration: line-through;
+}
+
+.diff-view .diff-row-modified .documentation-diff-line:last-child .diff-inline-changed {
+  background: #bbf7d0;
+}
+
+.diff-view .diff-fold {
+  grid-template-columns: 1fr;
+  background: #f8fafc;
+  border-bottom: 1px solid #f1f5f9;
+  text-align: center;
+}
+
+.diff-view .diff-fold .text-button {
+  margin: 4px auto;
+  font-size: 12px;
+}
+
+.diff-summary {
+  margin-top: 16px;
+}
+
+.diff-stats {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+.diff-sections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.diff-section {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  font-size: 12px;
+}
+
+.diff-section-added { color: #166534; background: #dcfce7; }
+.diff-section-removed { color: #991b1b; background: #fee2e2; }
+.diff-section-modified { color: #854d0e; background: #fef3c7; }
+
+.documentation-version-comparison {
+  margin-top: 24px;
+}
+
+.diff-version-pickers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.diff-version-pickers label {
+  display: grid;
+  flex: 1 1 200px;
+  gap: 4px;
+}
+
+.diff-version-pickers .documentation-secondary-button {
+  width: auto;
+}
+
+@media (max-width: 640px) {
+  .diff-view .documentation-diff-line > .diff-line-number {
+    flex-basis: 24px;
+  }
+}

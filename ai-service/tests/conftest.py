@@ -5,3 +5,5 @@ import os
 os.environ["TEMPLATES_FILE"] = ""
 # Same for versioned documents (never write data/documents.json).
 os.environ["DOCUMENTS_FILE"] = ""
+# Same for drift reports and their resolution history (never write data/drift_reports.json).
+os.environ["DRIFT_REPORTS_FILE"] = ""
