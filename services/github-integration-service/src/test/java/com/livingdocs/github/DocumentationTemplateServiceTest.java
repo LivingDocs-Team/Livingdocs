@@ -97,6 +97,54 @@ class DocumentationTemplateServiceTest {
     }
 
     @Test
+    void listsReadsAndRestoresTemplateVersions() {
+        aiServer.expect(requestTo("http://ai.test/templates/a1b2c3d4/versions")).andExpect(method(GET))
+                .andRespond(withSuccess("""
+                        [{"template_id":"a1b2c3d4","version":2,"name":"Onboarding","description":"",
+                          "instructions":"Short.","sections":["Overview"]},
+                         {"template_id":"a1b2c3d4","version":1,"name":"Onboarding","description":"",
+                          "instructions":"Short.","sections":["Overview","Functions"]}]
+                        """, MediaType.APPLICATION_JSON));
+        aiServer.expect(requestTo("http://ai.test/templates/a1b2c3d4/versions/1")).andExpect(method(GET))
+                .andRespond(withSuccess("""
+                        {"template_id":"a1b2c3d4","version":1,"name":"Onboarding","description":"",
+                         "instructions":"Short.","sections":["Overview","Functions"]}
+                        """, MediaType.APPLICATION_JSON));
+        aiServer.expect(requestTo("http://ai.test/templates/a1b2c3d4/versions/1/restore"))
+                .andExpect(method(POST))
+                .andRespond(withSuccess(TEMPLATE.replace("\"built_in\":false", "\"built_in\":false,\"version\":3"),
+                        MediaType.APPLICATION_JSON));
+
+        JsonNode versions = service.versions("a1b2c3d4");
+        JsonNode first = service.version("a1b2c3d4", 1);
+        JsonNode restored = service.restore("a1b2c3d4", 1);
+
+        assertEquals(2, versions.size());
+        assertEquals(2, versions.get(0).path("version").asInt());
+        assertEquals(2, first.path("sections").size());
+        assertEquals(3, restored.path("version").asInt());
+        aiServer.verify();
+    }
+
+    @Test
+    void mapsMissingVersionAndReadOnlyRestore() {
+        aiServer.expect(requestTo("http://ai.test/templates/a1b2c3d4/versions/9")).andRespond(
+                withStatus(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"detail\":\"Template version not found\"}"));
+        aiServer.expect(requestTo("http://ai.test/templates/default/versions/1/restore")).andRespond(
+                withStatus(HttpStatus.FORBIDDEN).contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"detail\":\"Built-in templates cannot be modified\"}"));
+
+        ApiException missing = assertThrows(ApiException.class, () -> service.version("a1b2c3d4", 9));
+        ApiException readOnly = assertThrows(ApiException.class, () -> service.restore("default", 1));
+
+        assertEquals(HttpStatus.NOT_FOUND, missing.getStatus());
+        assertEquals("TEMPLATE_NOT_FOUND", missing.getCode());
+        assertEquals("Documentation template version not found.", missing.getMessage());
+        assertEquals("TEMPLATE_READ_ONLY", readOnly.getCode());
+    }
+
+    @Test
     void mapsValidationErrorToBadRequestWithReadableReason() {
         aiServer.expect(requestTo("http://ai.test/templates")).andExpect(method(POST))
                 .andRespond(withStatus(HttpStatus.UNPROCESSABLE_ENTITY)

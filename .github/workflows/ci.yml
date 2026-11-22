@@ -8,6 +8,7 @@ on:
   pull_request:
     branches:
       - main
+      - "codex/p0-*"
   workflow_dispatch:
 
 permissions:
@@ -20,7 +21,7 @@ concurrency:
 jobs:
   backend-build-test:
     name: Backend Build and Test
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 15
 
     services:
@@ -72,7 +73,7 @@ jobs:
 
   frontend-build:
     name: Frontend Build and Test
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
@@ -164,11 +165,26 @@ jobs:
 
   github-integration-test:
     name: GitHub Integration Service Test
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    # PostgreSQL thật cho các test Documentation Collections (cần khóa hàng FOR UPDATE, H2 không đủ).
     services:
       postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: collections_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d collections_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      # PostgreSQL cho kiểm tra migration Flyway và API quan hệ tài liệu–code (LD-405).
+      postgres-relationships:
         image: postgres:16
         env:
           POSTGRES_DB: github_integration
@@ -197,6 +213,27 @@ jobs:
       - name: Build and test (H2 database, mocked GitHub)
         run: mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml verify
 
+      - name: Documentation Collections tests (PostgreSQL)
+        env:
+          COLLECTIONS_TEST_DB_URL: "jdbc:postgresql://localhost:5432/collections_test"
+          COLLECTIONS_TEST_DB_USER: "postgres"
+          COLLECTIONS_TEST_DB_PASSWORD: "postgres"
+        run: >-
+          mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml test
+          -Dtest='DocumentationCollections*PostgresTest'
+
+      # Maven báo thành công cả khi test bị bỏ qua, nên kiểm tra báo cáo để chắc test đã chạy trên PostgreSQL.
+      - name: Verify Documentation Collections tests ran on PostgreSQL
+        run: python3 .github/scripts/verify_collections_postgres_tests.py
+
+      - name: Upload Documentation Collections PostgreSQL reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation-collections-postgres-reports
+          path: services/github-integration-service/target/surefire-reports/*DocumentationCollections*PostgresTest*
+          if-no-files-found: error
+
       - name: Verify Flyway V1-V5 migrations and relationship API on PostgreSQL
         env:
           DB_URL: "jdbc:postgresql://localhost:5433/github_integration"
@@ -221,6 +258,13 @@ jobs:
         run: >-
           mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml test
           -Dtest=GitHubRepositoryFetcherLiveTest -Dsurefire.failIfNoSpecifiedTests=false
+
+      - name: Revision workflow through FastAPI and PostgreSQL
+        run: docker compose -f tests/revision-e2e/compose.yaml up --build --abort-on-container-exit --exit-code-from test
+
+      - name: Stop revision workflow fixtures
+        if: always()
+        run: docker compose -f tests/revision-e2e/compose.yaml down --volumes
 
       - name: Upload test reports
         if: always()

@@ -190,11 +190,14 @@ public class DocumentationGenerationService {
             throw ApiException.forbidden("Missing permission: DOCUMENT_CREATE");
         }
         requireJobOwner(userId, jobId);
+        ObjectNode request = JsonNodeFactory.instance.objectNode().put("job_id", jobId)
+                .put("title", title == null ? "" : title);
+        request.put("actor_role", DocumentWorkflowService.authenticatedRole(authorities));
         try {
             JsonNode document = aiServiceClient.post().uri("/internal/documents/from-job")
                     .header("X-User-Id", userId)
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(java.util.Map.of("job_id", jobId, "title", title == null ? "" : title))
+                    .body(request)
                     .retrieve().body(JsonNode.class);
             if (document == null || !document.path("id").isTextual()
                     || !userId.equals(document.path("owner_user_id").asText())) {
@@ -240,6 +243,22 @@ public class DocumentationGenerationService {
             throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not return document content.");
         } catch (RestClientException e) {
             throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not return document content.");
+        }
+    }
+
+    public JsonNode getExactDocumentVersion(String userId, String documentId, int version) {
+        try {
+            JsonNode result = aiServiceClient.get().uri("/internal/documents/{id}/versions/{version}", documentId, version)
+                    .header("X-User-Id", userId).retrieve().body(JsonNode.class);
+            if (result == null || !result.isObject() || result.path("number").asInt() != version) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid version.");
+            }
+            return result;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) throw ApiException.notFound("Document version not found.");
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not return the document version.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not return the document version.");
         }
     }
 
@@ -349,6 +368,70 @@ public class DocumentationGenerationService {
         return result;
     }
 
+    /** LD-184: every version of a saved document, newest first. */
+    public JsonNode getDocumentVersions(String userId, String documentId) {
+        try {
+            JsonNode versions = aiServiceClient.get()
+                    .uri("/internal/documents/{id}/versions", documentId)
+                    .header("X-User-Id", userId)
+                    .retrieve()
+                    .body(JsonNode.class);
+            if (versions == null || !versions.isArray()) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE",
+                        "The AI service returned an invalid version list.");
+            }
+            return versions;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) throw ApiException.notFound("Document not found.");
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not list the document versions.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not list the document versions.");
+        }
+    }
+
+    /**
+     * LD-183: added, removed and modified lines between two versions of a saved document.
+     * {@code from} / {@code to} may be null: the current version is then compared with the
+     * previous one.
+     */
+    public JsonNode compareDocumentVersions(String userId, String documentId, Integer from, Integer to) {
+        try {
+            JsonNode diff = aiServiceClient.get()
+                    .uri(uri -> {
+                        uri.path("/internal/documents/{id}/compare");
+                        if (from != null) uri.queryParam("from", from);
+                        if (to != null) uri.queryParam("to", to);
+                        return uri.build(documentId);
+                    })
+                    .header("X-User-Id", userId)
+                    .retrieve()
+                    .body(JsonNode.class);
+            if (diff == null || !diff.isObject() || !diff.path("rows").isArray()
+                    || !diff.path("from_version").isObject() || !diff.path("to_version").isObject()) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE",
+                        "The AI service returned an invalid version comparison.");
+            }
+            return diff;
+        } catch (RestClientResponseException e) {
+            String detail = DocumentationTemplateService.detail(e);
+            int status = e.getStatusCode().value();
+            if (status == 404) {
+                throw ApiException.notFound(detail != null ? detail : "Document version not found.");
+            }
+            if (status == 409) {
+                throw new ApiException(HttpStatus.CONFLICT, "DOCUMENT_COMPARISON_UNAVAILABLE",
+                        detail != null ? detail : "Create a version first to enable comparison.");
+            }
+            if (status == 400 || status == 422) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "DOCUMENT_COMPARISON_INVALID",
+                        detail != null ? detail : "Select two different versions to compare.");
+            }
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not compare the document versions.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not compare the document versions.");
+        }
+    }
+
     public JsonNode getDocumentReviewComparison(String userId, String documentId) {
         try {
             JsonNode comparison = aiServiceClient.get()
@@ -421,11 +504,12 @@ public class DocumentationGenerationService {
 
 
     public JsonNode editOwnedDocument(String userId, String documentId, int expectedVersion,
-            String content, String note) {
+            String content, String note, String actorRole) {
         try {
             ObjectNode request = JsonNodeFactory.instance.objectNode().put("content", content)
                     .put("expected_version", expectedVersion);
             if (note != null) request.put("note", note);
+            if (actorRole != null) request.put("actor_role", actorRole);
             JsonNode version = aiServiceClient.put().uri("/internal/documents/{id}/content", documentId)
                     .header("X-User-Id", userId).contentType(MediaType.APPLICATION_JSON)
                     .body(request).retrieve().body(JsonNode.class);
@@ -443,11 +527,44 @@ public class DocumentationGenerationService {
         }
     }
 
+    public int editStaffDraft(String actor, String owner, String documentId, int expected,
+            String content, String reason) {
+        try {
+            ObjectNode body = JsonNodeFactory.instance.objectNode().put("expected_version", expected)
+                    .put("content", content).put("note", reason);
+            JsonNode response = aiServiceClient.put().uri("/internal/documents/{id}/staff-draft", documentId)
+                    .header("X-User-Id", actor).header("X-Document-Owner-Id", owner)
+                    .contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(JsonNode.class);
+            if (response == null || response.path("number").asInt() != expected + 1
+                    || response.path("evidence_from_version").asInt() != expected) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid Staff draft.");
+            }
+            return response.path("number").asInt();
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 409) {
+                throw new ApiException(HttpStatus.CONFLICT, "STAFF_DRAFT_CONFLICT",
+                        DocumentationTemplateService.detail(e));
+            }
+            if (e.getStatusCode().value() == 422) {
+                throw ApiException.badRequest(DocumentationTemplateService.detail(e));
+            }
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not save the Staff draft.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not save the Staff draft.");
+        }
+    }
+
     public void resolveDocumentVersion(String actorUserId, String ownerUserId, String documentId,
             int version, String decision, String note) {
+        resolveDocumentVersion(actorUserId, ownerUserId, documentId, version, decision, note, false);
+    }
+
+    public void resolveDocumentVersion(String actorUserId, String ownerUserId, String documentId,
+            int version, String decision, String note, boolean replay) {
         try {
             ObjectNode request = JsonNodeFactory.instance.objectNode()
                     .put("version", version).put("decision", decision);
+            if (replay) request.put("replay", true);
             if (note != null) request.put("note", note);
             aiServiceClient.post().uri("/internal/documents/{id}/review-decision", documentId)
                     .header("X-User-Id", actorUserId)

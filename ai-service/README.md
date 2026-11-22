@@ -47,12 +47,16 @@ export LLM_MODEL=claude-sonnet-5-5  # optional
 | POST | `/retrieval/preview` | Index summary and the related code (C) / docs (D) each file would get (LD-335) |
 | GET/POST | `/templates` | List (built-in first, then custom by name) / create templates |
 | GET | `/templates/sections` | Sections a template may contain |
-| GET/PUT/DELETE | `/templates/{id}` | Read / update / delete (built-ins are read-only) |
+| GET/PUT/DELETE | `/templates/{id}` | Read / update / delete (built-ins are read-only); every change saves a new version (LD-227) |
+| GET | `/templates/{id}/versions`, `/templates/{id}/versions/{n}` | Saved versions of a template, newest first / one version (LD-227) |
+| POST | `/templates/{id}/versions/{n}/restore` | Make an older version current again, saved as a new version (LD-227) |
 | POST | `/documents` | Save a completed job as version 1 of a document (LD-195) |
 | GET | `/documents`, `/documents/{id}` | List / read documents |
 | GET | `/documents/{id}/content?version=N` | Markdown of the current (or given) version |
 | GET | `/documents/{id}/versions`, `/versions/{n}` | Version history (newest first) / one version |
 | GET | `/documents/{id}/history` | Audit trail: created, proposed, accepted, edited, dismissed, ... |
+| GET | `/documents/{id}/compare?from=N&to=M` | Side-by-side diff of two versions: added / removed / modified lines (changed words marked), stats, changed sections. Default: the current version against the previous one (LD-183). Only documents without an owner |
+| GET | `/internal/documents/{id}/versions`, `/internal/documents/{id}/compare?from=&to=` | Internal (`INTERNAL_API_SECRET`). The same for GitHub Integration's `GET /document-workflows/{id}/versions` and `/comparison` (LD-183); 409 with fewer than two versions, 400 for the same version twice, 404 for an unknown version |
 | POST | `/drift/changes` | Changed code entities of a Pull Request (LD-146); nothing is stored |
 | POST | `/suggestions/updates` | Proposed edits (original → proposed text, reason, confidence) to the docs describing code changed by a PR (LD-353); kept for review |
 | POST | `/drift/reports/{id}/suggestions` | Concrete fixes for the findings of a drift report, same format as `/suggestions/updates`; send the repository Markdown again in `docs` (LD-354) |
@@ -161,8 +165,8 @@ PR files (patch + analyzer result at base/head)
   - *Evidence*: `finding.severity_assessment` = level, score, base rule + reason + evidence ids,
     every adjustment with its evidence ids (X1 code diff, D2 documentation line), cap, one-line
     summary. `finding.rules` keeps the short form.
-  - *LD-159 display*: `GET /drift/reports/{id}/markdown` (PR comment) and the frontend page
-    "Documentation Drift" (`frontend/src/DocumentationDrift.jsx`).
+  - *LD-159 display*: `GET /drift/reports/{id}/markdown` (PR comment); the frontend page
+    "Documentation Drift" was removed on 2026-11-17 (RBAC #16).
 - **Confidence** 0-1 = match x method x location x certainty x evidence; levels as LD-340
   (high >= 0.75, medium >= 0.50). Every finding has `factors` explaining the score. LD-356: a
   finding missing its code diff or its documentation passage is x0.70 per missing proof (never
@@ -207,16 +211,26 @@ PR files (patch + analyzer result at base/head)
 - **Review and resolution (LD-346)**: every finding has `resolution` (status, actor, note,
   history), starting `open`; reviewers acknowledge, resolve, dismiss (with a reason) or reopen it.
   The report's `review` gives the progress (`pending`, `in_progress`, `completed`, `not_required`)
-  and the AI verdict counts; the Markdown report and the frontend page show both.
+  and the AI verdict counts; the Markdown report shows both.
+- **Accept or edit the AI suggestion (LD-161)**: resolving with `accepted_update` records the
+  documentation text the reviewer accepted, the AI's `suggested_update` as is or edited (at most
+  20,000 characters, only with status `resolved`, otherwise `422`). It is kept in `resolution`
+  and in the history entry, and cleared when the finding is reopened.
 - **Manual analysis from the app:** github-integration-service `POST /api/repositories/{id}/drift/analyze`
   `{"pullRequestNumber": 7}` reads the PR from GitHub, runs the analyzer on both commits and calls
   `/drift/analyze` with the saved documents of that repository only. Details:
   [github-integration-service README](../services/github-integration-service/README.md).
-- Reports (with their resolutions) are kept in memory (last 500); persistent drift history is LD-167.
-- Tests (LD-150, LD-155, LD-160, LD-346, LD-347): `tests/test_drift.py`, `tests/test_drift_classification.py`,
+- **No web page since 2026-11-17**: the RBAC screen matrix removed #16 Drift Alerts & Review for
+  every role, so the Documentation Drift page is gone and the Backend BFF refuses
+  `/api/repositories/{id}/drift/**` ([Docs/rbac-screen-flow.md](../Docs/rbac-screen-flow.md)). The
+  drift API of this service and of github-integration-service is unchanged.
+- **Drift history (LD-167)**: reports, with each finding's resolution and its history, are saved to
+  `DRIFT_REPORTS_FILE` (default `data/drift_reports.json`, atomic writes, newest 500 kept; empty =
+  memory only), so `GET /drift/reports` still lists earlier analyses after a restart. A file that
+  cannot be read is moved aside as `drift_reports.corrupt-<time>.json`.
+- Tests (LD-150, LD-155, LD-160, LD-346, LD-347, LD-166, LD-172): `tests/test_drift.py`, `tests/test_drift_classification.py`,
   `tests/test_drift_severity.py`, `tests/test_drift_cases.py`, `tests/test_drift_review.py`, `tests/test_drift_api.py`,
-  `tests/integration/test_drift_integration.py`, live: `test_live_pipeline.py`; UI:
-  `tests/test_frontend_drift.py` (repository root).
+  `tests/test_drift_review_history.py`, `tests/integration/test_drift_integration.py`, live: `test_live_pipeline.py`.
 
 ### Example request
 

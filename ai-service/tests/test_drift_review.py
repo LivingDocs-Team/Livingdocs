@@ -190,6 +190,52 @@ def test_store_resolve_and_list():
     assert row.review.resolved == 1 and row.review.status == ReviewStatus.in_progress
 
 
+def test_report_and_developer_review_survive_store_restart(tmp_path, monkeypatch):
+    path = tmp_path / "drift-reports.json"
+    store = DriftReportStore(path=str(path))
+    report = store.add(report_with(ai_review=False))
+    store.resolve(report.id, "F1", ResolutionUpdate(status="acknowledged", decision="edit",
+                                                    proposed="Pass qty instead.", actor="42"))
+    restored = DriftReportStore(path=str(path))
+    [row] = restored.list(repository=report.repository)
+    assert row.id == report.id
+    finding = restored.get(report.id).findings[0]
+    assert finding.resolution.history[-1].actor == "42"
+    assert finding.resolution.proposed == "Pass qty instead."
+
+    def unavailable(*args):
+        raise OSError("fixture write failure")
+
+    monkeypatch.setattr("app.drift.os.replace", unavailable)
+    with pytest.raises(OSError, match="fixture write failure"):
+        restored.resolve(report.id, "F1", ResolutionUpdate(status="dismissed", note="stale"))
+    assert restored.get(report.id).findings[0].resolution.decision == "edit"
+    assert DriftReportStore(path=str(path)).get(report.id).findings[0].resolution.decision == "edit"
+
+
+@pytest.mark.parametrize("wrapped", [True, False])
+def test_drift_history_formats_preserve_resolutions_and_drafts(tmp_path, wrapped):
+    path = tmp_path / "drift-reports.json"
+    report = report_with(ai_review=False)
+    resolve(report, "F1", ResolutionUpdate(status="resolved", accepted_update="Update the guide."))
+    rows = [report.model_dump(mode="json")]
+    path.write_text(json.dumps({"reports": rows} if wrapped else rows), encoding="utf-8")
+
+    store = DriftReportStore(path=str(path))
+    store.resolve(
+        report.id,
+        "F1",
+        ResolutionUpdate(status="acknowledged", decision="edit", proposed="Document qty."),
+        draft=lambda report, finding: 2,
+    )
+
+    restored = DriftReportStore(path=str(path))
+    resolution = restored.get(report.id).findings[0].resolution
+    assert resolution.history[0].accepted_update == "Update the guide."
+    assert resolution.history[1].proposed == "Document qty."
+    assert resolution.draft_version == 2
+
+
 def test_markdown_shows_ai_review_and_resolution():
     r = report_with(DriftReviewer(FakeModel()))
     resolve(r, "F1", ResolutionUpdate(status="resolved", actor="an", note="Fixed in #43"))
@@ -226,3 +272,16 @@ def test_api_resolution_endpoint_and_ai_flag():
     assert again["review"]["resolved"] == 1
     row = client.get("/drift/reports", params={"repository": "acme/shop"}).json()[0]
     assert row["review"]["status"] == "in_progress"
+
+    accepted = client.put(url, json={"status": "acknowledged", "decision": "accept", "actor": "7"})
+    assert accepted.status_code == 200
+    assert accepted.json()["resolution"]["proposed"] == f1["suggestion"]
+    assert client.put(url, json={"status": "acknowledged", "decision": "edit", "proposed": " "}).status_code == 422
+    edited = client.put(url, json={"status": "acknowledged", "decision": "edit", "proposed": "Use qty"})
+    assert edited.status_code == 200 and edited.json()["resolution"]["proposed"] == "Use qty"
+    assert client.put(url, json={"status": "dismissed", "decision": "dismiss"}).status_code == 422
+    dismissed = client.put(url, json={"status": "dismissed", "decision": "dismiss", "note": "Archived"})
+    assert dismissed.status_code == 200 and dismissed.json()["resolution"]["proposed"] is None
+    history = dismissed.json()["resolution"]["history"]
+    assert [action["decision"] for action in history] == [None, "accept", "edit", "dismiss"]
+    assert history[-2]["proposed"] == "Use qty"

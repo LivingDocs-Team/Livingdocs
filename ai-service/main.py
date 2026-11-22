@@ -5,11 +5,11 @@ with review and resolution (LD-346).
 Run:  uvicorn main:app --reload --port 8001
 Docs: http://localhost:8001/docs
 """
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import PlainTextResponse
-from pydantic import AwareDatetime
+from pydantic import AwareDatetime, BaseModel
 
 from app.change_context import ChangeContextReport, ChangeContextRequest, change_context
 from app.drift import analyze as analyze_drift
@@ -27,13 +27,14 @@ from app.generator import get_generator
 from app.jobs import jobs, run_job
 from app.models import (SECTION_KINDS, SECTION_NAMES, FileRetrieval, GenerateRequest, IndexSummary,
                         Job, JobReport, RetrievalHit, RetrievalPreview,
-                        JobStatus, ReviewEvidenceResponse, Template, TemplateIn,
-                        TemplateSections)
+                        JobStatus, Template, TemplateIn,
+                        TemplateSections, TemplateVersion)
 from app.normalize import normalize
 from app.retrieval import build_index, retrieve
 from app.templates import TemplateNameTaken, templates
-from app.version_models import (Document, DocumentContentEdit, DocumentCreate, DocumentVersion,
-                                HistoryEvent, InternalDocumentCreate, InternalVersionDecision,
+from app.version_models import (Document, DocumentContentEdit, DocumentCreate, DocumentDiff, DocumentVersion,
+                                FileSection, HistoryEvent, InternalDocumentCreate, InternalVersionDecision,
+                                PreparedRevision, RevisionDraftCommit, RevisionDraftRequest, RevisionReviewEvidence,
                                 InternalRollbackRequest, VersionComparison,
                                 VersionSummary)
 from app.versions import VersionError, documents
@@ -74,9 +75,10 @@ def system_analytics(start: AwareDatetime = Query(alias="from"),
 @app.post("/generate", response_model=Job, status_code=202)
 def generate(req: GenerateRequest, background: BackgroundTasks):
     """Start generating docs for a file, module or repository. Returns a job to poll."""
-    tpl = templates.get(req.template_id)
+    tpl = templates.at_version(req.template_id, req.template_version)
     if tpl is None:
-        raise HTTPException(404, f"Template '{req.template_id}' not found")
+        what = f"Template '{req.template_id}'" + (f" version {req.template_version}" if req.template_version else "")
+        raise HTTPException(404, f"{what} not found")
     job = jobs.create(req, tpl)
     # the job keeps the template as it was now: editing or deleting it later does not change this job
     background.add_task(run_job, job.id, req, None, tpl)
@@ -192,6 +194,36 @@ def update_template(template_id: str, data: TemplateIn):
         raise HTTPException(409, str(e))
 
 
+@app.get("/templates/{template_id}/versions", response_model=List[TemplateVersion])
+def list_template_versions(template_id: str):
+    """LD-227: every saved version of a template, newest first (built-in templates have one)."""
+    try:
+        return templates.versions(template_id)
+    except KeyError:
+        raise HTTPException(404, "Template not found")
+
+
+@app.get("/templates/{template_id}/versions/{number}", response_model=TemplateVersion)
+def get_template_version(template_id: str, number: int):
+    try:
+        return templates.version(template_id, number)
+    except KeyError:
+        raise HTTPException(404, "Template version not found")
+
+
+@app.post("/templates/{template_id}/versions/{number}/restore", response_model=Template)
+def restore_template_version(template_id: str, number: int):
+    """LD-227: make an older version current again; its content is saved as a new version."""
+    try:
+        return templates.restore(template_id, number)
+    except KeyError:
+        raise HTTPException(404, "Template or version not found")
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except TemplateNameTaken as e:
+        raise HTTPException(409, str(e))
+
+
 @app.delete("/templates/{template_id}", status_code=204)
 def delete_template(template_id: str):
     try:
@@ -255,13 +287,91 @@ def create_owned_document(data: InternalDocumentCreate,
     data.note,
     owner_user_id=user_id,
     report=jobs.get_report(data.job_id),
+    actor_role=data.actor_role,
 )
+
+
+@app.get("/internal/revision-draft-candidates/{repository_id}", response_model=List[Document],
+         dependencies=[Depends(require_internal_service)])
+def revision_draft_candidates(repository_id: str):
+    return documents.revision_candidates(repository_id)
+
+
+@app.post("/internal/documents/{doc_id}/revision-drafts/prepare", response_model=Optional[PreparedRevision],
+          dependencies=[Depends(require_internal_service)])
+def prepare_revision_draft(doc_id: str, data: RevisionDraftRequest,
+                           user_id: str = Header(alias="X-User-Id")):
+    return _generate_revision(doc_id, data, user_id)
+
+
+@app.post("/internal/documents/{doc_id}/revision-drafts/commit", response_model=Optional[DocumentVersion],
+          dependencies=[Depends(require_internal_service)])
+def commit_revision_draft(doc_id: str, data: RevisionDraftCommit,
+                          user_id: str = Header(alias="X-User-Id")):
+    return _call(documents.commit_revision, doc_id, user_id, data, data.prepared, data.lease_expires_at)
+
+
+def _generate_revision(doc_id: str, data: RevisionDraftRequest, user_id: str):
+    def generate(doc, files):
+        from app.confidence import METHOD, average, level_of
+        from app.models import FileResultStatus
+
+        tpl = templates.at_version(doc.template_id, doc.template_version)
+        if tpl is None:
+            raise VersionError(409, "The original documentation template is unavailable")
+        replacements, reports = {}, []
+        if files:
+            generator = get_generator()
+            request = GenerateRequest(
+                scope=doc.scope, target=doc.target, files=data.files, template_id=tpl.id,
+                template_version=tpl.version, output_language=doc.output_language,
+                source_snapshot=data.source_snapshot,
+            )
+            for file in request.files:
+                normalize(file)
+            index = build_index(request)
+        for file in files:
+            if file.status.value != "ok":
+                raise VersionError(503, "The source file could not be analyzed")
+            result = generator.document_file(file, tpl, doc.output_language, retrieve(index, file))
+            if result.status != FileResultStatus.generated:
+                raise VersionError(503, "Grounded AI generation is currently unavailable")
+            replacements[file.path] = FileSection(
+                path=file.path, markdown=result.markdown,
+                status=result.status.value, confidence=result.confidence,
+            )
+            reports.append(result.report)
+        score = average([entity.confidence for report in reports for entity in report.entities])
+        return replacements, JobReport(
+            job_id=data.source_change_id, template_id=tpl.id, template_name=tpl.name,
+            template_version=tpl.version, template_instructions=tpl.instructions,
+            template_sections=list(tpl.sections), confidence=score, level=level_of(score),
+            method=METHOD, files=reports,
+        )
+
+    return _call(documents.prepare_revision, doc_id, user_id, data, generate)
 
 
 @app.get("/internal/documents/{doc_id}", response_model=Document,
          dependencies=[Depends(require_internal_service)])
 def get_owned_document(doc_id: str):
-    return _call(documents.get, doc_id)
+    return _call(documents.document_snapshot, doc_id)
+
+
+@app.get("/internal/documents/{doc_id}/versions", response_model=List[VersionSummary],
+         dependencies=[Depends(require_internal_service)])
+def list_internal_document_versions(doc_id: str):
+    """LD-184: every version of a document, newest first (to choose two for a comparison)."""
+    return _call(documents.versions, doc_id)
+
+
+@app.get("/internal/documents/{doc_id}/compare", response_model=DocumentDiff,
+         dependencies=[Depends(require_internal_service)])
+def compare_internal_document_versions(doc_id: str, from_version: Optional[int] = Query(None, alias="from", ge=1),
+                                       to_version: Optional[int] = Query(None, alias="to", ge=1)):
+    """LD-183: added, removed and modified lines between any two versions (UC-30, BR-44);
+    without `from` / `to` the current version is compared with the previous one."""
+    return _call(documents.compare, doc_id, from_version, to_version)
 
 
 @app.get("/internal/documents/{doc_id}/content", response_class=PlainTextResponse,
@@ -269,9 +379,16 @@ def get_owned_document(doc_id: str):
 def get_internal_document_content(doc_id: str, version: Optional[int] = Query(None, ge=1)):
     v = _call(documents.version, doc_id, version)
     return PlainTextResponse(v.content, media_type="text/markdown")
+
+
+@app.get("/internal/documents/{doc_id}/versions/{number}", response_model=DocumentVersion,
+         dependencies=[Depends(require_internal_service)])
+def get_internal_document_version(doc_id: str, number: int):
+    """Exact version for callers that enforce document workflow access."""
+    return _call(documents.version_snapshot, doc_id, number)
 @app.get(
     "/internal/documents/{doc_id}/review-evidence",
-    response_model=ReviewEvidenceResponse,
+    response_model=RevisionReviewEvidence,
     dependencies=[Depends(require_internal_service)],
 )
 def get_internal_document_review_evidence(
@@ -287,9 +404,10 @@ def get_internal_document_review_evidence(
             detail="Review evidence is not available for this document version",
         )
 
-    return ReviewEvidenceResponse(
+    return RevisionReviewEvidence(
         **v.review_report.model_dump(),
         source_snapshot=v.source_snapshot,
+        revision_files=v.revision_files,
     )
 
 
@@ -328,7 +446,8 @@ def get_internal_document_evidence(
 def edit_owned_document(doc_id: str, data: DocumentContentEdit,
                         user_id: str = Header(alias="X-User-Id")):
     try:
-        return documents.edit_owned(doc_id, user_id, data.expected_version, data.content, data.note)
+        return documents.edit_owned(doc_id, user_id, data.expected_version, data.content, data.note,
+                                    actor_role=data.actor_role)
     except VersionError as e:
         raise HTTPException(e.status, e.message)
 
@@ -340,9 +459,21 @@ def resolve_owned_document_version(doc_id: str, data: InternalVersionDecision,
                                    owner_id: str = Header(alias="X-Document-Owner-Id")):
     try:
         documents.resolve_workflow_version(doc_id, owner_id,
-                                           data.version, data.decision, user_id, data.note)
+                                           data.version, data.decision, user_id, data.note,
+                                           replay=data.replay)
     except VersionError as e:
         raise HTTPException(e.status, e.message)
+
+
+@app.put("/internal/documents/{doc_id}/staff-draft", response_model=DocumentVersion,
+         dependencies=[Depends(require_internal_service)])
+def edit_staff_draft(doc_id: str, data: DocumentContentEdit,
+                     actor: str = Header(alias="X-User-Id"),
+                     owner: str = Header(alias="X-Document-Owner-Id")):
+    if not data.note or not data.note.strip():
+        raise HTTPException(422, "A reason is required for a Staff edit")
+    return _call(documents.edit_staff_draft, doc_id, owner, data.expected_version,
+                 actor, data.content, data.note.strip())
 
 @app.post(
     "/internal/documents/{doc_id}/rollback",
@@ -395,6 +526,14 @@ def list_versions(doc_id: str):
 def get_version(doc_id: str, number: int):
     _call(documents.get_public, doc_id)
     return _call(documents.version, doc_id, number)
+
+
+@app.get("/documents/{doc_id}/compare", response_model=DocumentDiff)
+def compare_versions(doc_id: str, from_version: Optional[int] = Query(None, alias="from", ge=1),
+                     to_version: Optional[int] = Query(None, alias="to", ge=1)):
+    """LD-183: difference between two versions of a (legacy, ownerless) document."""
+    _call(documents.get_public, doc_id)
+    return _call(documents.compare, doc_id, from_version, to_version)
 
 
 @app.get("/documents/{doc_id}/history", response_model=List[HistoryEvent])
@@ -479,6 +618,55 @@ def resolve_drift_finding(report_id: str, finding_id: str, update: ResolutionUpd
     if finding is None:
         raise HTTPException(404, "Drift report not found")
     return finding
+
+
+@app.put("/internal/repositories/{repository_id}/drift/reports/{report_id}/findings/{finding_id}/resolution",
+         response_model=DriftFinding, dependencies=[Depends(require_internal_service)])
+def submit_drift_resolution(repository_id: str, report_id: str, finding_id: str,
+                            update: ResolutionUpdate, user_id: str = Header(alias="X-User-Id")):
+    update = update.model_copy(update={"actor": user_id})
+    try:
+        draft = None
+        if update.decision in ("accept", "edit"):
+            def draft(report, finding):
+                return documents.propose_drift(user_id, repository_id, report, finding)
+        finding = drift_reports.resolve(report_id, finding_id, update, draft=draft)
+    except (ResolutionError, VersionError) as error:
+        raise HTTPException(error.status, error.message)
+    if finding is None:
+        raise HTTPException(404, "Drift report not found")
+    return finding
+
+
+class DriftWorkflowDecision(BaseModel):
+    document_id: str
+    owner_user_id: Optional[str] = None
+    version: int
+    decision: Literal["APPROVED", "REJECTED"]
+    actor: str
+    note: Optional[str] = None
+
+
+@app.put("/internal/drift/reports/{report_id}/findings/{finding_id}/workflow-decision",
+         status_code=204, dependencies=[Depends(require_internal_service)])
+def apply_drift_workflow_decision(report_id: str, finding_id: str, update: DriftWorkflowDecision):
+    version = _call(documents.version, update.document_id, update.version)
+    link = version.drift_finding or {}
+    if link.get("report_id") != report_id or link.get("finding_id") != finding_id:
+        raise HTTPException(409, "Workflow decision does not match the linked drift draft")
+    if update.owner_user_id is not None:
+        _call(documents.resolve_workflow_version, update.document_id, update.owner_user_id,
+              update.version, update.decision, update.actor, update.note, replay=True)
+    else:
+        _call(documents.require_workflow_decision, update.document_id, update.version,
+              update.decision, update.actor, update.note)
+    try:
+        drift_reports.apply_workflow_decision(report_id, finding_id, update.document_id, update.version,
+                                            update.decision, update.actor, update.note)
+    except ResolutionError as error:
+        raise HTTPException(error.status, error.message)
+
+
 @app.post("/internal/affected-documents", response_model=AffectedDocumentsResult,
           dependencies=[Depends(require_internal_service)])
 def affected_documents(req: AffectedDocumentsRequest):
