@@ -193,12 +193,12 @@ public class GitHubIntegrationBffController {
         Matcher collectionRoute = WORKSPACE_COLLECTION_ROUTE.matcher(path);
         if (collectionRoute.matches()) {
             String workspaceId = collectionRoute.group(1);
-            return new WorkspaceAuthorization(workspaceId, null, verifiedWorkspaceAccess(workspaceId, actor));
+            return new WorkspaceAuthorization(workspaceId, null, verifiedWorkspaceAccess(workspaceId, actor, authorities));
         }
         Matcher workspaceRoute = WORKSPACE_REPOSITORY_ROUTE.matcher(path);
         if (workspaceRoute.matches()) {
             String targetWorkspaceId = workspaceRoute.group(1);
-            String accessLevel = verifiedWorkspaceAccess(targetWorkspaceId, actor);
+            String accessLevel = verifiedWorkspaceAccess(targetWorkspaceId, actor, authorities);
             if (!HttpMethod.GET.equals(method) || workspaceRoute.group(2) != null) {
                 requireWorkspaceOwner(accessLevel);
             }
@@ -206,7 +206,7 @@ public class GitHubIntegrationBffController {
             if (HttpMethod.PUT.equals(method) && workspaceRoute.group(2) != null) {
                 sourceWorkspaceId = resolveRepositoryWorkspace(
                         workspaceRoute.group(2), actor, authorities);
-                requireWorkspaceOwner(verifiedWorkspaceAccess(sourceWorkspaceId, actor));
+                requireWorkspaceOwner(verifiedWorkspaceAccess(sourceWorkspaceId, actor, authorities));
             }
             return new WorkspaceAuthorization(targetWorkspaceId, sourceWorkspaceId, accessLevel);
         }
@@ -214,19 +214,23 @@ public class GitHubIntegrationBffController {
         Matcher repositoryRoute = REPOSITORY_ID_ROUTE.matcher(path);
         if (!repositoryRoute.matches()) return null;
         String workspaceId = resolveRepositoryWorkspace(repositoryRoute.group(1), actor, authorities);
-        String accessLevel = verifiedWorkspaceAccess(workspaceId, actor);
+        String accessLevel = verifiedWorkspaceAccess(workspaceId, actor, authorities);
         boolean repositoryDetailRead = HttpMethod.GET.equals(method)
                 && path.matches("^/api/repositories/[0-9a-fA-F-]{36}$");
         if (!repositoryDetailRead) requireWorkspaceOwner(accessLevel);
         return new WorkspaceAuthorization(workspaceId, null, accessLevel);
     }
 
-    private String verifiedWorkspaceAccess(String workspaceId, User actor) {
+    private String verifiedWorkspaceAccess(String workspaceId, User actor, Set<String> authorities) {
         if (workspaceId == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Workspace not found");
         }
         if (workspaceId.equals("ws-" + actor.getId())) return "OWNER";
+        boolean isAdmin = authorities.contains("ROLE_ADMINISTRATOR") || authorities.contains("ROLE_ADMIN");
         if (!isManagedWorkspaceId(workspaceId)) {
+            if (isAdmin && workspaceId.startsWith("ws-")) {
+                return "OWNER";
+            }
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Workspace not found");
         }
         if (workspaceRepository == null) {
@@ -234,6 +238,7 @@ public class GitHubIntegrationBffController {
                     "Workspace ownership verification is unavailable.");
         }
         if (workspaceRepository.findByIdAndOwner_Id(workspaceId, actor.getId()).isPresent()) return "OWNER";
+        if (isAdmin && workspaceRepository.existsById(workspaceId)) return "OWNER";
         if (workspaceMembershipRepository == null
                 || !workspaceMembershipRepository.existsByWorkspace_IdAndUser_IdAndUser_ActiveTrue(
                         workspaceId, actor.getId())) {
@@ -256,7 +261,7 @@ public class GitHubIntegrationBffController {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
                         "Select an active workspace owner or member."));
         try {
-            verifiedWorkspaceAccess(workspaceId, target);
+            verifiedWorkspaceAccess(workspaceId, target, Set.of());
         } catch (ResponseStatusException exception) {
             if (exception.getStatusCode() != HttpStatus.NOT_FOUND) throw exception;
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Select an active workspace owner or member.");

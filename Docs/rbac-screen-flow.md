@@ -111,7 +111,7 @@ Nhóm chưa có screen flow cho 2 role này. `technicalLead.flow.js` và `admini
 
 Chỉ gắn component có sẵn khi component đó không có hành động vượt quyền của role:
 - Technical Lead: Profile, Notification Preferences, Documentation Collections (#21, CRUD và phân công), Knowledge Search (#20, DocumentationSearch), Documentation Templates (#22, CRUD → `TemplateLibrary` dùng lại TemplateManager). Mọi màn hình khác là placeholder (ví dụ Documentation #8 chỉ R trong khi trang Documentation Management có nút tạo).
-- Administrator: Profile, Notification Preferences. Repository Management (#6) là placeholder vì trang Repository Management hiện có cũng hiển thị PR/commit (#7) mà Administrator không có quyền.
+- Administrator: Profile, Notification Preferences. Các màn hình Administration và Monitoring (#24 Users, Roles & Permissions, #25 Workspace & Repository Administration, #26 System Configuration, #27 Monitoring, Audit Logs & Analytics, #28 Notification Policies) dùng chung component `AdminDashboard` (LD-316) và mở đúng tab của mình; test: `tests/test_frontend_admin.py`. Repository Management (#6) và Approval Audit Trail (#13) là placeholder; Repository Management chưa nối vì trang hiện có cũng hiển thị PR/commit (#7) mà Administrator không có quyền.
 
 ## 5. Điểm chưa khớp (để nhóm quyết định)
 
