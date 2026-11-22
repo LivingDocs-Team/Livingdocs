@@ -9,6 +9,8 @@ import java.util.UUID;
 
 public interface CodeEntityRepository extends JpaRepository<CodeEntity, UUID> {
     Optional<CodeEntity> findByRepositoryIdAndStableKey(UUID repositoryId, String stableKey);
+    List<CodeEntity> findByRepositoryIdAndActiveTrue(UUID repositoryId);
+    List<CodeEntity> findByRepositoryIdAndPathAndActiveTrue(UUID repositoryId, String path);
     List<CodeEntity> findByRepositoryIdAndActiveTrueOrderByPathAscLineStartAsc(UUID repositoryId);
     List<CodeEntity> findByIdInAndRepositoryIdAndActiveTrue(List<UUID> ids, UUID repositoryId);
 }

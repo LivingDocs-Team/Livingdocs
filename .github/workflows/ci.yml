@@ -183,6 +183,20 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      # PostgreSQL cho kiểm tra migration Flyway và API quan hệ tài liệu–code (LD-405).
+      postgres-relationships:
+        image: postgres:16
+        env:
+          POSTGRES_DB: github_integration
+          POSTGRES_USER: livingdocs
+          POSTGRES_PASSWORD: livingdocs
+        ports:
+          - "5433:5432"
+        options: >-
+          --health-cmd "pg_isready -U livingdocs -d github_integration"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout source code
@@ -223,6 +237,22 @@ jobs:
           name: documentation-collections-postgres-reports
           path: services/github-integration-service/target/surefire-reports/*DocumentationCollections*PostgresTest*
           if-no-files-found: error
+
+      - name: Verify Flyway V1-V5 migrations and relationship API on PostgreSQL
+        env:
+          DB_URL: "jdbc:postgresql://localhost:5433/github_integration"
+          DB_USERNAME: "livingdocs"
+          DB_PASSWORD: "livingdocs"
+          TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          GITHUB_INTEGRATION_INTERNAL_SECRET: "ci-postgres-verification-secret"
+        run: >-
+          mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml test
+          -Dtest=DocumentationCodeRelationshipApiTest
+          -Dspring.datasource.url="$DB_URL"
+          -Dspring.datasource.username="$DB_USERNAME"
+          -Dspring.datasource.password="$DB_PASSWORD"
+          -Dspring.datasource.driver-class-name=org.postgresql.Driver
+          -Dspring.jpa.hibernate.ddl-auto=validate
 
       - name: Live test against real GitHub API
         env:
