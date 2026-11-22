@@ -33,10 +33,27 @@ public class AutoUpdatePolicies {
         return rules(repository);
     }
 
+    /** Oversight (Technical Lead, Administrator) reads the policies of any repository. */
+    @Transactional(readOnly = true)
+    public List<Rule> rulesFor(UUID repository) {
+        return rules(repository);
+    }
+
     @Transactional
     public List<Rule> replace(String actor, String workspace, UUID repository, List<Rule> rules) {
         repositories.lockById(repository).orElseThrow(() -> ApiException.notFound("Repository not found."));
         access.get(actor, repository, workspace, "OWNER");
+        return replaceRules(repository, rules);
+    }
+
+    /** Oversight edit: the caller has already been authorised as Technical Lead or Administrator. */
+    @Transactional
+    public List<Rule> replaceUnchecked(UUID repository, List<Rule> rules) {
+        repositories.lockById(repository).orElseThrow(() -> ApiException.notFound("Repository not found."));
+        return replaceRules(repository, rules);
+    }
+
+    private List<Rule> replaceRules(UUID repository, List<Rule> rules) {
         if (rules == null || rules.size() > 100) {
             throw ApiException.badRequest("Supply up to 100 auto-update policies.");
         }

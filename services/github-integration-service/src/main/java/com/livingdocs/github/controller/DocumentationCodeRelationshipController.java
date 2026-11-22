@@ -1,6 +1,7 @@
 package com.livingdocs.github.controller;
 
 import com.livingdocs.github.dto.CodeEntityResponse;
+import com.livingdocs.github.dto.CoverageGapsResponse;
 import com.livingdocs.github.dto.DocumentationArtifactResponse;
 import com.livingdocs.github.dto.ReplaceDocumentationCodeLinksRequest;
 import com.livingdocs.github.service.DocumentationCodeRelationshipService;
@@ -29,6 +30,12 @@ public class DocumentationCodeRelationshipController {
     public List<CodeEntityResponse> codeEntities(@RequestHeader(USER_HEADER) String userId,
             @PathVariable UUID repositoryId) {
         return relationshipService.listCodeEntities(userId, repositoryId);
+    }
+
+    @GetMapping("/api/repositories/{repositoryId}/coverage-gaps")
+    public CoverageGapsResponse coverageGaps(@RequestHeader(USER_HEADER) String userId,
+            @PathVariable UUID repositoryId) {
+        return relationshipService.coverageGaps(userId, repositoryId);
     }
 
     @GetMapping("/api/repositories/{repositoryId}/documentation")

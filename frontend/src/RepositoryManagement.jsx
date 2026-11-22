@@ -429,7 +429,7 @@ function RepositoryManagementForUser({ userId }) {
                               {syncing ? 'Syncing…' : !isConnected ? 'Reconnect to sync' : syncError ? 'Retry sync' : 'Sync now'}
                             </button>
                           )}
-                          {inWorkspace && (
+                          {inWorkspace && can('pullRequests', 'R') && (
                             <button type="button" className="sync-secondary-button" aria-expanded={activityRepoId === repo.id}
                               onClick={() => setActivityRepoId((current) => (current === repo.id ? null : repo.id))}>
                               {activityRepoId === repo.id ? 'Hide PRs & commits' : 'PRs & commits'}
@@ -469,7 +469,7 @@ function RepositoryManagementForUser({ userId }) {
                             </>
                           )}
                         </div>
-                        {inWorkspace && activityRepoId === repo.id && (
+                        {inWorkspace && can('pullRequests', 'R') && activityRepoId === repo.id && (
                           // key: reload after each sync, which also backfills pull requests and commits
                           <RepositoryActivity key={`${repo.id}-${repo.lastSyncedAt}`} repository={repo} userId={userId} />
                         )}
