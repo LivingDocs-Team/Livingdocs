@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # LD-404: Release Smoke Testing & Deployment Verification
-# Usage: ./scripts/verify-compose.sh [--clean]
-# Both modes start a fresh project. Existing stacks are never reused.
+# Usage: ./scripts/verify-compose.sh [--clean|--no-build]
+# All modes start a fresh project. Existing stacks are never reused.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+build_option=--build
 case "${1:-}" in
   ""|--clean) ;;
-  *) printf 'Usage: %s [--clean] (fresh fixtures required)\n' "$0" >&2; exit 2 ;;
+  --no-build) build_option=--no-build ;;
+  *) printf 'Usage: %s [--clean|--no-build] (fresh fixtures required)\n' "$0" >&2; exit 2 ;;
 esac
 (( $# <= 1 )) || exit 2
 
@@ -258,7 +260,7 @@ if [[ "${VERIFY_LEGACY_RESTORE:-0}" == 1 ]]; then
 fi
 
 log "3. Build and start applications against the verified fixtures"
-if ! "${COMPOSE[@]}" up --build -d --no-recreate; then
+if ! "${COMPOSE[@]}" up "$build_option" -d --no-recreate; then
   "${COMPOSE[@]}" ps --all || true
   "${COMPOSE[@]}" logs --no-color --tail 120 backend github-integration >> "$REPORT_FILE" 2>&1 || true
   tail -n 120 "$REPORT_FILE"
