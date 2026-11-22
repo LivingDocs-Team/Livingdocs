@@ -33,6 +33,9 @@ BACKEND_URL    = _env_url("BACKEND_URL",             "http://localhost:8080")
 ANALYZER_URL   = _env_url("ANALYZER_URL",            "http://localhost:8003")
 AI_SERVICE_URL = _env_url("AI_SERVICE_URL",          "http://localhost:8002")
 GITHUB_INTEGRATION_URL = _env_url("GITHUB_INTEGRATION_URL", "http://localhost:8083")
+# Origin gửi kèm yêu cầu tới backend. Mặc định là origin frontend mà SecurityConfig đã cho phép
+# (localhost:3000), vì frontend của stack smoke chạy ở cổng khác nhưng không được nới CORS cho smoke test.
+SMOKE_ORIGIN   = _env_url("SMOKE_ORIGIN",            "http://localhost:3000")
 
 # ai-service dùng Authorization: Bearer <INTERNAL_API_SECRET>.
 # Fallback qua GITHUB_INTEGRATION_INTERNAL_SECRET để 1 secret dùng chung cho smoke.
@@ -93,9 +96,9 @@ def http_json(opener, method: str, url: str, data=None, headers=None, timeout=30
     # ai-service (FastAPI) không cần — và gắn bừa có thể bị reject.
     if url.startswith(BACKEND_URL) or url.startswith(FRONTEND_URL):
         if "Origin" not in (headers or {}):
-            req.add_header("Origin", FRONTEND_URL)
+            req.add_header("Origin", SMOKE_ORIGIN)
         if "Referer" not in (headers or {}):
-            req.add_header("Referer", FRONTEND_URL + "/")
+            req.add_header("Referer", SMOKE_ORIGIN + "/")
 
     for k, v in (headers or {}).items():
         req.add_header(k, v)

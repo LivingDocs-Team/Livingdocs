@@ -8,6 +8,7 @@ on:
   pull_request:
     branches:
       - main
+      - "codex/p0-*"
   workflow_dispatch:
 
 permissions:
@@ -20,7 +21,7 @@ concurrency:
 jobs:
   backend-build-test:
     name: Backend Build and Test
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 15
 
     services:
@@ -56,12 +57,15 @@ jobs:
           test -s backend/pom.xml
           test -s .github/workflows/ci.yml
 
+      - name: Make Maven Wrapper executable
+        run: chmod +x backend/mvnw
+
       - name: Build and test backend
         env:
           DB_URL: "jdbc:postgresql://localhost:5432/cnpm"
           DB_USERNAME: "postgres"
           DB_PASSWORD: "postgres"
-        run: mvn --batch-mode --no-transfer-progress -f backend/pom.xml clean verify
+        run: ./backend/mvnw --batch-mode --no-transfer-progress -f backend/pom.xml clean verify
 
       - name: Report CI result
         if: success()
@@ -69,7 +73,7 @@ jobs:
 
   frontend-build:
     name: Frontend Build and Test
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
@@ -161,8 +165,24 @@ jobs:
 
   github-integration-test:
     name: GitHub Integration Service Test
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 15
+
+    # PostgreSQL thật cho các test Documentation Collections (cần khóa hàng FOR UPDATE, H2 không đủ).
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: collections_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d collections_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout source code
@@ -179,6 +199,27 @@ jobs:
       - name: Build and test (H2 database, mocked GitHub)
         run: mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml verify
 
+      - name: Documentation Collections tests (PostgreSQL)
+        env:
+          COLLECTIONS_TEST_DB_URL: "jdbc:postgresql://localhost:5432/collections_test"
+          COLLECTIONS_TEST_DB_USER: "postgres"
+          COLLECTIONS_TEST_DB_PASSWORD: "postgres"
+        run: >-
+          mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml test
+          -Dtest='DocumentationCollections*PostgresTest'
+
+      # Maven báo thành công cả khi test bị bỏ qua, nên kiểm tra báo cáo để chắc test đã chạy trên PostgreSQL.
+      - name: Verify Documentation Collections tests ran on PostgreSQL
+        run: python3 .github/scripts/verify_collections_postgres_tests.py
+
+      - name: Upload Documentation Collections PostgreSQL reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation-collections-postgres-reports
+          path: services/github-integration-service/target/surefire-reports/*DocumentationCollections*PostgresTest*
+          if-no-files-found: error
+
       - name: Live test against real GitHub API
         env:
           GITHUB_LIVE_TEST: "true"
@@ -187,6 +228,13 @@ jobs:
         run: >-
           mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml test
           -Dtest=GitHubRepositoryFetcherLiveTest -Dsurefire.failIfNoSpecifiedTests=false
+
+      - name: Revision workflow through FastAPI and PostgreSQL
+        run: docker compose -f tests/revision-e2e/compose.yaml up --build --abort-on-container-exit --exit-code-from test
+
+      - name: Stop revision workflow fixtures
+        if: always()
+        run: docker compose -f tests/revision-e2e/compose.yaml down --volumes
 
       - name: Upload test reports
         if: always()
@@ -292,7 +340,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+      TOKEN_ENCRYPTION_KEY: "ci-validation-placeholder-only"
       GITHUB_INTEGRATION_INTERNAL_SECRET: "ci-validation-placeholder-only"
       # compose.yaml requires the sign-in OAuth App credentials (no default), like the two variables above
       SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID: "ci-validation-placeholder-only"
@@ -308,7 +356,6 @@ jobs:
       - name: Build application images
         run: docker compose -f compose.yaml build backend ai-service code-analyzer github-integration frontend
 
-    # === FIX: Release Smoke Test ===
   release-smoke-test:
     name: Release Smoke Test (LD-404)
     runs-on: ubuntu-24.04
@@ -316,9 +363,8 @@ jobs:
     needs: [docker-compose-validation]
     env:
       TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+      # Một secret dùng chung: compose.yaml truyền giá trị này cho cả GitHub Integration và AI Service.
       GITHUB_INTEGRATION_INTERNAL_SECRET: "smoke-test-internal-secret"
-      INTERNAL_API_SECRET: "dummy-secret-123"
-      AI_SERVICE_INTERNAL_SECRET: "dummy-secret-123" 
       SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID: "ci-validation-placeholder-only"
       SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_SECRET: "ci-validation-placeholder-only"
       SMOKE_PROJECT: livingdocs-smoke

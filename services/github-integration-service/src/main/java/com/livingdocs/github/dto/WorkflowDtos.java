@@ -42,8 +42,13 @@ public final class WorkflowDtos {
                                         String comment, Instant createdAt,
                                         List<ReviewCommentResponse> relatedComments) { }
     public record StaffReviewRequest(@NotNull StaffReviewResult result,
-                                     @Size(max = 2000) String comment) { }
-    public record ManagerDecisionRequest(@Size(max = 2000) String comment) { }
+                                     @Size(max = 2000) String comment,
+                                     @jakarta.validation.Valid EditDocumentRequest edit) {
+        public StaffReviewRequest(StaffReviewResult result, String comment) {
+            this(result, comment, null);
+        }
+    }
+    public record ManagerDecisionRequest(@Size(max = 2000) String comment, @Positive Integer documentVersion) { }
     public record SubmitWorkflowRequest(@Positive Integer expectedVersion) { }
     public record ReassignRequest(@NotNull @Positive Long targetStaffUserId,
                                  @NotBlank @Size(max = 1000) String reason) { }
@@ -66,7 +71,7 @@ public final class WorkflowDtos {
     public record ContentResponse(String documentId, int version, String content) { }
     public record AuditResponse(UUID id, UUID workflowId, String actorUserId, String actorRole, String action, String previousStatus,
             String newStatus, String previousReviewerUserId, String newReviewerUserId,
-            String comment, Instant createdAt) { }
+            String comment, Instant createdAt, String documentId, Integer documentVersion, String triggerSource) { }
     public record PageResponse<T>(List<T> content, int page, int size, long totalElements,
             int totalPages, boolean first, boolean last) { }
 }
