@@ -46,16 +46,12 @@ export GITHUB_INTEGRATION_URL=http://localhost:8083 SMOKE_ORIGIN=http://localhos
 export no_proxy=localhost,127.0.0.1 NO_PROXY=localhost,127.0.0.1
 TIMEOUT="${VERIFY_TIMEOUT:-300}"
 
-# The backend JDBC user must exist before Hibernate starts. No fixture DB publishes a host port.
+# Keep the backend database credentials and healthcheck from compose.yaml.
+# Neither smoke database publishes a host port.
 cat > "$scratch/fixture.yaml" <<'YAML'
 services:
   backend-db:
     ports: !reset []
-    environment:
-      POSTGRES_USER: livingdocs
-      POSTGRES_PASSWORD: livingdocs
-    healthcheck:
-      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "livingdocs", "-d", "cnpm"]
   github-db:
     ports: !reset []
     healthcheck:
@@ -134,7 +130,7 @@ for service, db, database, network in (
             and mounts[0]["source"] == db + "-data" and mounts[0]["target"] == "/var/lib/postgresql/data",
             f"Unexpected data mount for {db}")
 ' "$SMOKE_PROJECT" || fail "Compose fixture configuration rejected"
-pass "JDBC targets and project-scoped fixture volumes verified"
+pass "Default Compose PostgreSQL credentials, JDBC targets and project-scoped volumes verified"
 pass "Compose audit retention default is 730 days without an override"
 
 # Check both labels and names before creating anything. In particular, Compose can
