@@ -542,12 +542,45 @@ class GitHubIntegrationBffControllerTest {
     }
 
     @Test
+    void versionComparisonRoutesAreForwardedWithTheChosenVersionsAndTheVerifiedIdentity() throws Exception {
+        // LD-183: the page reads /versions, then /comparison?from=&to=; both must pass the BFF (not 403).
+        String workflow = "/api/document-workflows/11111111-1111-4111-8111-111111111111";
+        for (String[] call : new String[][] {
+                {"DEVELOPER", workflow + "/versions", null},
+                {"DEVELOPER", workflow + "/comparison", "from=2&to=3"},
+                {"STAFF", workflow + "/comparison", "from=1&to=3"},
+                {"MANAGER", workflow + "/comparison", null}}) {
+            RestClient.Builder builder = RestClient.builder();
+            MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+            UserRepository users = mock(UserRepository.class);
+            User actor = mock(User.class);
+            when(actor.getId()).thenReturn(73L);
+            when(actor.getRole()).thenReturn(call[0]);
+            when(users.findByEmail("reader@example.test")).thenReturn(Optional.of(actor));
+            server.expect(requestTo("http://github.test:8082" + call[1] + (call[2] == null ? "" : "?" + call[2])))
+                    .andExpect(method(HttpMethod.GET))
+                    .andExpect(header("X-User-Id", "73"))
+                    .andRespond(withSuccess("{\"rows\":[]}", MediaType.APPLICATION_JSON));
+            var controller = new GitHubIntegrationBffController(builder.build(), users,
+                    "http://github.test:8082", "internal-test-credential");
+            MockHttpServletRequest incoming = new MockHttpServletRequest("GET", call[1]);
+            incoming.setQueryString(call[2]);
+            incoming.addHeader("X-User-Id", "forged-user");
+
+            var response = controller.proxy(incoming, authenticatedEmail("reader@example.test"), null);
+
+            assertThat(response.getStatusCode().value()).as(call[0] + " " + call[1]).isEqualTo(200);
+            server.verify();
+        }
+    }
+
+    @Test
     void refusesARouteTheRoleHasNoRowForWithoutCallingGitHubIntegration() {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();   // no call is expected
         UserRepository users = mock(UserRepository.class);
         for (String[] denied : new String[][] {
-                {"STAFF", "GET", "/api/github/connection"},                          // GitHub connection is Developer only
+                {"STAFF", "GET", "/api/github/connection"},
                 {"MANAGER", "POST", "/api/repositories/11111111-1111-4111-8111-111111111111/documentation/generate"},
                 {"DEVELOPER", "POST", "/api/document-workflows/11111111-1111-4111-8111-111111111111/approve"},
                 {"STAFF", "POST", "/api/document-workflows/11111111-1111-4111-8111-111111111111/approve"},
@@ -555,7 +588,7 @@ class GitHubIntegrationBffControllerTest {
                 {"MANAGER", "POST", "/api/document-workflows/11111111-1111-4111-8111-111111111111/comments"},
                 {"MANAGER", "POST", "/api/documentation/templates"},
                 {"DEVELOPER", "GET", "/api/document-workflows/manager/queue"},
-                {"DEVELOPER", "POST", "/api/repositories/11111111-1111-4111-8111-111111111111/drift/analyze"},
+                {"STAFF", "POST", "/api/repositories/11111111-1111-4111-8111-111111111111/drift/analyze"},
                 {"DEVELOPER", "GET", "/api/documentation/no/such/route/here"}}) {
             User actor = mock(User.class);
             when(actor.getId()).thenReturn(73L);

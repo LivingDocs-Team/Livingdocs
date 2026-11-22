@@ -71,6 +71,8 @@ class DocumentWorkflowRoutesSecurityTest {
             new String[] {"GET", "/api/document-workflows/history-accessible", null},
             new String[] {"GET", "/api/document-workflows/" + ID, null},
             new String[] {"GET", "/api/document-workflows/" + ID + "/history", null},
+            new String[] {"GET", "/api/document-workflows/" + ID + "/versions", null},
+            new String[] {"GET", "/api/document-workflows/" + ID + "/comparison", null},
             new String[] {"POST", "/api/document-workflows", "{\"documentId\":\"doc-1\"}"},
             new String[] {"POST", "/api/document-workflows/" + ID + "/submit", null},
             new String[] {"POST", "/api/document-workflows/" + ID + "/claim", null},

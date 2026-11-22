@@ -136,6 +136,26 @@ public class DocumentWorkflowController {
             @PathVariable UUID id) {
         return workflowService.reviewComparison(userId, parse(authorities), id);
     }
+    /** LD-184: versions of the workflow's document, newest first. */
+    @GetMapping("/document-workflows/{id}/versions")
+    public com.fasterxml.jackson.databind.JsonNode versions(
+            @RequestHeader(USER_HEADER) String userId,
+            @RequestHeader(AUTHORITIES_HEADER) String authorities,
+            @PathVariable UUID id) {
+        return workflowService.versions(userId, parse(authorities), id);
+    }
+
+    /** LD-183: difference between two versions; without from/to: current vs previous. */
+    @GetMapping("/document-workflows/{id}/comparison")
+    public com.fasterxml.jackson.databind.JsonNode comparison(
+            @RequestHeader(USER_HEADER) String userId,
+            @RequestHeader(AUTHORITIES_HEADER) String authorities,
+            @PathVariable UUID id,
+            @RequestParam(name = "from", required = false) Integer from,
+            @RequestParam(name = "to", required = false) Integer to) {
+        return workflowService.compareVersions(userId, parse(authorities), id, from, to);
+    }
+
     @GetMapping("/document-workflows/{id}/history")
     public java.util.List<AuditResponse> history(
             @RequestHeader(USER_HEADER) String userId,
@@ -216,6 +236,10 @@ public class DocumentWorkflowController {
     public WorkflowResponse approve(@RequestHeader(USER_HEADER) String userId,
             @RequestHeader(AUTHORITIES_HEADER) String authorities, @PathVariable UUID id,
             @Valid @RequestBody(required = false) ManagerDecisionRequest request) {
+        if (request != null && request.documentVersion() != null) {
+            return workflowService.decide(userId, parse(authorities), id, ManagerDecision.APPROVED,
+                    request.comment(), request.documentVersion());
+        }
         return workflowService.decide(userId, parse(authorities), id, ManagerDecision.APPROVED,
                 request == null ? null : request.comment());
     }
@@ -224,6 +248,10 @@ public class DocumentWorkflowController {
     public WorkflowResponse reject(@RequestHeader(USER_HEADER) String userId,
             @RequestHeader(AUTHORITIES_HEADER) String authorities, @PathVariable UUID id,
             @Valid @RequestBody(required = false) ManagerDecisionRequest request) {
+        if (request != null && request.documentVersion() != null) {
+            return workflowService.decide(userId, parse(authorities), id, ManagerDecision.REJECTED,
+                    request.comment(), request.documentVersion());
+        }
         return workflowService.decide(userId, parse(authorities), id, ManagerDecision.REJECTED,
                 request == null ? null : request.comment());
     }

@@ -42,19 +42,23 @@ public class DriftAnalysisController {
                     + "and evidence.")
     public ResponseEntity<JsonNode> analyze(
             @RequestHeader(USER_HEADER) String userId,
+            @RequestHeader(value = "X-Verified-Workspace-Id", required = false) String workspace,
+            @RequestHeader(value = "X-Verified-Workspace-Access", required = false) String access,
             @PathVariable UUID id,
             @RequestBody DriftAnalysisRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(driftService.analyzePullRequest(userId, id, request));
+                .body(driftService.analyzePullRequest(userId, id, request, workspace, access));
     }
 
     @GetMapping(path = "/api/repositories/{id}/drift/reports", produces = MediaType.APPLICATION_JSON_VALUE)
     @Operation(summary = "Drift reports of a repository, newest first")
     public JsonNode listReports(
             @RequestHeader(USER_HEADER) String userId,
+            @RequestHeader(value = "X-Verified-Workspace-Id", required = false) String workspace,
+            @RequestHeader(value = "X-Verified-Workspace-Access", required = false) String access,
             @PathVariable UUID id,
             @RequestParam(name = "pullRequest", required = false) Integer pullRequest) {
-        return driftService.listReports(userId, id, pullRequest);
+        return driftService.listReports(userId, id, pullRequest, workspace, access);
     }
 
     @GetMapping(path = "/api/drift/reports/{reportId}", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -68,21 +72,25 @@ public class DriftAnalysisController {
     @Operation(summary = "One drift report of a repository; minSeverity keeps findings at or above a level")
     public JsonNode getRepositoryReport(
             @RequestHeader(USER_HEADER) String userId,
+            @RequestHeader(value = "X-Verified-Workspace-Id", required = false) String workspace,
+            @RequestHeader(value = "X-Verified-Workspace-Access", required = false) String access,
             @PathVariable UUID id,
             @PathVariable String reportId,
             @RequestParam(name = "minSeverity", required = false) String minSeverity) {
-        return driftService.getReport(userId, id, reportId, minSeverity);
+        return driftService.getReport(userId, id, reportId, minSeverity, workspace, access);
     }
 
     @GetMapping(path = "/api/repositories/{id}/drift/reports/{reportId}/markdown", produces = "text/markdown")
     @Operation(summary = "The drift report as Markdown grouped by severity (pull request comment)")
     public ResponseEntity<String> getRepositoryReportMarkdown(
             @RequestHeader(USER_HEADER) String userId,
+            @RequestHeader(value = "X-Verified-Workspace-Id", required = false) String workspace,
+            @RequestHeader(value = "X-Verified-Workspace-Access", required = false) String access,
             @PathVariable UUID id,
             @PathVariable String reportId,
             @RequestParam(name = "minSeverity", required = false) String minSeverity) {
         return ResponseEntity.ok().contentType(MediaType.parseMediaType("text/markdown"))
-                .body(driftService.getReportMarkdown(userId, id, reportId, minSeverity));
+                .body(driftService.getReportMarkdown(userId, id, reportId, minSeverity, workspace, access));
     }
 
     /** LD-346: acknowledge, resolve, dismiss (with a reason) or reopen one finding. */
@@ -92,11 +100,13 @@ public class DriftAnalysisController {
             description = "status: open | acknowledged | resolved | dismissed; dismissing needs a note.")
     public JsonNode resolveFinding(
             @RequestHeader(USER_HEADER) String userId,
+            @RequestHeader(value = "X-Verified-Workspace-Id", required = false) String workspace,
+            @RequestHeader(value = "X-Verified-Workspace-Access", required = false) String access,
             @PathVariable UUID id,
             @PathVariable String reportId,
             @PathVariable String findingId,
             @RequestBody DriftResolutionRequest request) {
-        return driftService.resolveFinding(userId, id, reportId, findingId, request);
+        return driftService.resolveFinding(userId, id, reportId, findingId, request, workspace, access);
     }
 
     @GetMapping(path = "/api/documentation/drift/severity-rules", produces = MediaType.APPLICATION_JSON_VALUE)
