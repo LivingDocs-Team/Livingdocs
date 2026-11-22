@@ -9,6 +9,7 @@ export default Object.freeze({
   modules: Object.freeze([
     module('account', 'Account Management', [
       profileSettings(),
+      implemented('github-connection', 'GitHub Connection', '/github/connection', 'githubConnection', 'GitHubConnection'),
     ]),
     module('final-approval', 'Final Approval', [
       implemented('approval-queue', 'Approval Queue', '/approval/queue', 'managerApproval', 'ManagerApprovalQueue', [

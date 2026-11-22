@@ -10,7 +10,7 @@ const OFFICIAL_MENUS = {
   DEVELOPER: {
     'Account Management': ['Profile & Settings', ['Profile', 'Notification Preferences'], 'Notifications', ['Notification Details']],
     'GitHub Integration': ['GitHub Connection', 'Repository List',
-      ['Repository Selection', 'Repository Details', 'Repository Synchronization'], 'PR & Commit List'],
+      ['Repository Selection', 'Repository Details', 'Repository Synchronization'], 'PR & Commit List', 'Drift Alerts'],
     'Documentation Generation': ['Coverage Gaps', 'Generated Documents',
       ['Preview & Editor', 'Grounding Evidence', 'Submit for Review', 'Review Feedback']],
     'Versions & Change Log': ['Version History', ['Version Comparison', 'Document Rollback'], 'Change Log'],
@@ -22,7 +22,7 @@ const OFFICIAL_MENUS = {
       'Template & Code Check', 'Comments & Change Requests', 'Document Editor', 'Review Decision'], 'Review History'],
   },
   MANAGER: {
-    'Account Management': ['Profile & Settings', ['Profile', 'Notification Preferences']],
+    'Account Management': ['Profile & Settings', ['Profile', 'Notification Preferences'], 'GitHub Connection'],
     'Final Approval': ['Approval Queue', ['Approval Workspace', 'Staff Comments & Evidence', 'Audit Trail',
       'Approval Decision', 'Version Rollback'], 'Approval History', 'Approval Delegation'],
     'Approval Policies': ['Approval Policy', 'Merge Policy'],
