@@ -21,7 +21,7 @@ concurrency:
 jobs:
   backend-build-test:
     name: Backend Build and Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     services:
@@ -73,7 +73,7 @@ jobs:
 
   frontend-build:
     name: Frontend Build and Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -165,7 +165,7 @@ jobs:
 
   github-integration-test:
     name: GitHub Integration Service Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     # PostgreSQL thật cho các test Documentation Collections (cần khóa hàng FOR UPDATE, H2 không đủ).
@@ -199,6 +199,10 @@ jobs:
       - name: Build and test (H2 database, mocked GitHub)
         run: mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml verify
 
+      - name: Verify webhook secret, signature and duplicate-delivery handling (LD-275)
+        run: >-
+          mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml test
+          -Dtest=WebhookSignatureVerifierTest,GitHubWebhookControllerTest,GitHubWebhookIngestionTest
       - name: Documentation Collections tests (PostgreSQL)
         env:
           COLLECTIONS_TEST_DB_URL: "jdbc:postgresql://localhost:5432/collections_test"
@@ -352,6 +356,11 @@ jobs:
 
       - name: Validate Docker Compose configuration
         run: docker compose -f compose.yaml config --quiet
+
+      - name: Verify the GitHub webhook secret is passed to the github-integration service (LD-275)
+        run: |
+          docker compose -f compose.yaml config > "$RUNNER_TEMP/compose.rendered.yaml"
+          grep -q GITHUB_WEBHOOK_SECRET "$RUNNER_TEMP/compose.rendered.yaml"
 
       - name: Build application images
         run: docker compose -f compose.yaml build backend ai-service code-analyzer github-integration frontend
