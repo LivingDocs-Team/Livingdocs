@@ -309,6 +309,22 @@ public class DocumentationGenerationService {
         }
     }
 
+    public JsonNode getExactDocumentVersion(String userId, String documentId, int version) {
+        try {
+            JsonNode result = aiServiceClient.get().uri("/internal/documents/{id}/versions/{version}", documentId, version)
+                    .header("X-User-Id", userId).retrieve().body(JsonNode.class);
+            if (result == null || !result.isObject() || result.path("number").asInt() != version) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid version.");
+            }
+            return result;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) throw ApiException.notFound("Document version not found.");
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not return the document version.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not return the document version.");
+        }
+    }
+
     public JsonNode getDocumentReviewEvidence(String userId, String documentId, int version) {
         try {
             JsonNode evidence = aiServiceClient.get()
@@ -406,6 +422,70 @@ public class DocumentationGenerationService {
 
         result.set("source_verification", verification);
         return result;
+    }
+
+    /** LD-184: every version of a saved document, newest first. */
+    public JsonNode getDocumentVersions(String userId, String documentId) {
+        try {
+            JsonNode versions = aiServiceClient.get()
+                    .uri("/internal/documents/{id}/versions", documentId)
+                    .header("X-User-Id", userId)
+                    .retrieve()
+                    .body(JsonNode.class);
+            if (versions == null || !versions.isArray()) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE",
+                        "The AI service returned an invalid version list.");
+            }
+            return versions;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) throw ApiException.notFound("Document not found.");
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not list the document versions.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not list the document versions.");
+        }
+    }
+
+    /**
+     * LD-183: added, removed and modified lines between two versions of a saved document.
+     * {@code from} / {@code to} may be null: the current version is then compared with the
+     * previous one.
+     */
+    public JsonNode compareDocumentVersions(String userId, String documentId, Integer from, Integer to) {
+        try {
+            JsonNode diff = aiServiceClient.get()
+                    .uri(uri -> {
+                        uri.path("/internal/documents/{id}/compare");
+                        if (from != null) uri.queryParam("from", from);
+                        if (to != null) uri.queryParam("to", to);
+                        return uri.build(documentId);
+                    })
+                    .header("X-User-Id", userId)
+                    .retrieve()
+                    .body(JsonNode.class);
+            if (diff == null || !diff.isObject() || !diff.path("rows").isArray()
+                    || !diff.path("from_version").isObject() || !diff.path("to_version").isObject()) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE",
+                        "The AI service returned an invalid version comparison.");
+            }
+            return diff;
+        } catch (RestClientResponseException e) {
+            String detail = DocumentationTemplateService.detail(e);
+            int status = e.getStatusCode().value();
+            if (status == 404) {
+                throw ApiException.notFound(detail != null ? detail : "Document version not found.");
+            }
+            if (status == 409) {
+                throw new ApiException(HttpStatus.CONFLICT, "DOCUMENT_COMPARISON_UNAVAILABLE",
+                        detail != null ? detail : "Create a version first to enable comparison.");
+            }
+            if (status == 400 || status == 422) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "DOCUMENT_COMPARISON_INVALID",
+                        detail != null ? detail : "Select two different versions to compare.");
+            }
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not compare the document versions.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not compare the document versions.");
+        }
     }
 
     public JsonNode getDocumentReviewComparison(String userId, String documentId) {
@@ -527,8 +607,40 @@ public class DocumentationGenerationService {
         }
     }
 
+    public int editStaffDraft(String actor, String owner, String documentId, int expected,
+            String content, String reason) {
+        try {
+            ObjectNode body = JsonNodeFactory.instance.objectNode().put("expected_version", expected)
+                    .put("content", content).put("note", reason);
+            JsonNode response = aiServiceClient.put().uri("/internal/documents/{id}/staff-draft", documentId)
+                    .header("X-User-Id", actor).header("X-Document-Owner-Id", owner)
+                    .contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(JsonNode.class);
+            if (response == null || response.path("number").asInt() != expected + 1
+                    || response.path("evidence_from_version").asInt() != expected) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid Staff draft.");
+            }
+            return response.path("number").asInt();
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 409) {
+                throw new ApiException(HttpStatus.CONFLICT, "STAFF_DRAFT_CONFLICT",
+                        DocumentationTemplateService.detail(e));
+            }
+            if (e.getStatusCode().value() == 422) {
+                throw ApiException.badRequest(DocumentationTemplateService.detail(e));
+            }
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not save the Staff draft.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not save the Staff draft.");
+        }
+    }
+
     public void resolveDocumentVersion(String actorUserId, String ownerUserId, String documentId,
             int version, String decision, String note) {
+        resolveDocumentVersion(actorUserId, ownerUserId, documentId, version, decision, note, false);
+    }
+
+    public void resolveDocumentVersion(String actorUserId, String ownerUserId, String documentId,
+            int version, String decision, String note, boolean replay) {
         ChangeLogOverride override = CHANGE_LOG_OVERRIDE.get();
         Set<String> authorities = override != null ? override.authorities() : Set.of();
         boolean suppressLog = override != null && override.suppressChangeLog();
@@ -536,6 +648,7 @@ public class DocumentationGenerationService {
         try {
             ObjectNode request = JsonNodeFactory.instance.objectNode()
                     .put("version", version).put("decision", decision);
+            if (replay) request.put("replay", true);
             if (note != null) request.put("note", note);
             aiServiceClient.post().uri("/internal/documents/{id}/review-decision", documentId)
                     .header("X-User-Id", actorUserId)
@@ -545,7 +658,8 @@ public class DocumentationGenerationService {
                     .contentType(MediaType.APPLICATION_JSON).body(request)
                     .retrieve().toBodilessEntity();
 
-            if (!suppressLog && changeLogService != null) {
+            // Replay is an idempotent retry: the original decision already logged.
+            if (!suppressLog && !replay && changeLogService != null) {
                 String summary = (note != null && !note.isBlank())
                         ? note
                         : "Version " + version + " marked as " + decision;

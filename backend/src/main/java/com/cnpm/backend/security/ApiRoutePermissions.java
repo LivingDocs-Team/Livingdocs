@@ -67,6 +67,8 @@ public final class ApiRoutePermissions {
         rule("POST", "/api/repositories/{}/sync", need("repositories", 'U'));
         rule("GET", "/api/repositories/{}/sync/latest", need("repositories", 'R'));
         rule("GET", "/api/repositories/{}/sync/latest/analysis-input", need("repositories", 'R'));
+        rule("GET", "/api/repositories/{}/auto-update-policies", need("repositories", 'R'));
+        rule("PUT", "/api/repositories/{}/auto-update-policies", need("repositories", 'U'));
 
         // ---- Pull requests, commits and source changes (#7) ----
         rule("GET", "/api/repositories/{}/pull-requests", need("pullRequests", 'R'));
@@ -111,12 +113,11 @@ public final class ApiRoutePermissions {
 
         // ---- Drift (#16 was removed for every role; thresholds #17 stay for Technical Lead) ----
         rule("GET", "/api/documentation/drift/severity-rules", need("driftPolicies", 'R'));
-        // No screen of the matrix covers drift analysis any more: these routes are refused for every role.
-        rule("POST", "/api/repositories/{}/drift/analyze");
-        rule("GET", "/api/repositories/{}/drift/reports");
-        rule("GET", "/api/repositories/{}/drift/reports/{}");
-        rule("GET", "/api/repositories/{}/drift/reports/{}/markdown");
-        rule("PUT", "/api/repositories/{}/drift/reports/{}/findings/{}/resolution");
+        rule("POST", "/api/repositories/{}/drift/analyze", need("driftAlerts", 'C'));
+        rule("GET", "/api/repositories/{}/drift/reports", need("driftAlerts", 'R'));
+        rule("GET", "/api/repositories/{}/drift/reports/{}", need("driftAlerts", 'R'));
+        rule("GET", "/api/repositories/{}/drift/reports/{}/markdown", need("driftAlerts", 'R'));
+        rule("PUT", "/api/repositories/{}/drift/reports/{}/findings/{}/resolution", need("driftAlerts", 'U'));
 
         // ---- One saved document and its code links (#8, #20) ----
         rule("GET", "/api/documentation/{}", need("documentation", 'R'), need("knowledgeBase", 'R'));
@@ -130,8 +131,10 @@ public final class ApiRoutePermissions {
         rule("GET", "/api/document-workflows/manager/queue", need("managerApproval", 'R'));
         rule("GET", "/api/document-workflows/history-accessible", need("workflowSubmission", 'R'),
                 need("staffReview", 'R'), need("managerApproval", 'R'), need("approvalAudit", 'R'));
+        // "/versions" and "/comparison" (LD-183): compare two versions of the workflow's document. They are read
+        // views like "/history"; GitHub Integration still checks that the user may read this workflow.
         for (String view : new String[] {"", "/document", "/evidence", "/review-evidence", "/review-comparison",
-                "/history", "/comments", "/change-requests"}) {
+                "/history", "/comments", "/change-requests", "/versions", "/comparison"}) {
             rule("GET", "/api/document-workflows/{}" + view, need("workflowSubmission", 'R'),
                     need("staffReview", 'R'), need("managerApproval", 'R'), need("approvalAudit", 'R'));
         }
@@ -142,6 +145,7 @@ public final class ApiRoutePermissions {
         rule("POST", "/api/document-workflows/{}/comments", need("staffReview", 'A'));
         rule("PUT", "/api/document-workflows/{}/document", need("documentation", 'U'));
         rule("POST", "/api/document-workflows/{}/approve", need("managerApproval", 'A'));
+        rule("POST", "/api/document-workflows/{}/versions/{}/github-commit", need("managerApproval", 'A'));
         rule("POST", "/api/document-workflows/{}/reject", need("managerApproval", 'A'));
         rule("POST", "/api/document-workflows/{}/rollback", need("documentRollback", 'U'));
         // Reassigning a review to another Staff member is an administration task (also needs DOCUMENT_REASSIGN).

@@ -285,7 +285,7 @@ class DocumentWorkflowServiceTest {
         assertThat(approvalEvent.getNewStatus()).isEqualTo("APPROVED");
         assertThat(approvalEvent.getComment()).isEqualTo("Approved");
         assertThat(approvalEvent.getCreatedAt()).isNotNull();
-        verify(documents, never()).resolveDocumentVersion(any(), any(), any(), any(Integer.class), any(), any());
+        verify(documents).resolveDocumentVersion(MANAGER, "73", "doc-1", 1, "APPROVED", "Approved");
     }
 
     @Test
@@ -586,6 +586,24 @@ class DocumentWorkflowServiceTest {
     }
 
     @Test
+    void committedManagerRetryRepairsAiWithoutCreatingAnotherAuditRow() {
+        DocumentWorkflow workflow = pendingStaffWorkflow();
+        workflow.review(StaffReviewResult.PASSED, "Checks passed");
+        workflow.decide(MANAGER, ManagerDecision.REJECTED, "Original reason");
+        when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
+        Set<String> permissions = Set.of("ROLE_MANAGER", "DOCUMENT_REJECT");
+
+        assertThatThrownBy(() -> service.decide(MANAGER, permissions, ID,
+                ManagerDecision.REJECTED, "Changed reason", 1)).isInstanceOf(ApiException.class);
+        service.decide(MANAGER, permissions, ID, ManagerDecision.REJECTED, " Original reason ", 1);
+
+        verify(documents).resolveDocumentVersion(MANAGER, OWNER, "doc-1", 1,
+                "REJECTED", "Original reason", true);
+        verify(audit, never()).save(any(DocumentWorkflowAudit.class));
+        verify(workflows, never()).saveAndFlush(workflow);
+    }
+
+    @Test
     void ownerAndRolePermissionsAreRequiredToReadOrAct() {
         DocumentWorkflow workflow = submittedWorkflow();
         when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
@@ -689,6 +707,63 @@ class DocumentWorkflowServiceTest {
 
         assertThat(result).isEqualTo(comparison);
         verify(documents).getDocumentReviewComparison(REVIEWER, "doc-1");
+    }
+
+    @Test
+    void ownerCanListAndCompareAnyTwoVersionsOfTheirDocument() throws Exception {
+        // LD-183 / LD-184: the owner of a draft compares version 1 with version 3.
+        DocumentWorkflow workflow = new DocumentWorkflow("doc-1", "Document", OWNER);
+        ReflectionTestUtils.setField(workflow, "id", ID);
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+        when(documents.getDocument(OWNER, "doc-1")).thenReturn(new ObjectMapper().readTree(
+                "{\"id\":\"doc-1\",\"owner_user_id\":\"73\",\"current_version\":0,\"pending_version\":3}"));
+        var versions = new ObjectMapper().readTree("[{\"number\":3},{\"number\":2},{\"number\":1}]");
+        var diff = new ObjectMapper().readTree(
+                "{\"from_version\":{\"number\":1},\"to_version\":{\"number\":3},\"rows\":[]}");
+        when(documents.getDocumentVersions(OWNER, "doc-1")).thenReturn(versions);
+        when(documents.compareDocumentVersions(OWNER, "doc-1", 1, 3)).thenReturn(diff);
+        Set<String> owner = Set.of("ROLE_DEVELOPER", "DOCUMENT_VIEW");
+
+        assertThat(service.versions(OWNER, owner, ID)).isEqualTo(versions);
+        assertThat(service.compareVersions(OWNER, owner, ID, 1, 3)).isEqualTo(diff);
+        verify(documents).compareDocumentVersions(OWNER, "doc-1", 1, 3);
+    }
+
+    @Test
+    void comparisonDefaultsToCurrentAgainstPreviousAndValidatesTheChoice() throws Exception {
+        DocumentWorkflow workflow = new DocumentWorkflow("doc-1", "Document", OWNER);
+        ReflectionTestUtils.setField(workflow, "id", ID);
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+        when(documents.getDocument(OWNER, "doc-1")).thenReturn(new ObjectMapper().readTree(
+                "{\"id\":\"doc-1\",\"owner_user_id\":\"73\",\"current_version\":2}"));
+        var diff = new ObjectMapper().readTree("{\"rows\":[]}");
+        when(documents.compareDocumentVersions(OWNER, "doc-1", null, null)).thenReturn(diff);
+        Set<String> owner = Set.of("ROLE_DEVELOPER", "DOCUMENT_VIEW");
+
+        assertThat(service.compareVersions(OWNER, owner, ID, null, null)).isEqualTo(diff);
+        assertThatThrownBy(() -> service.compareVersions(OWNER, owner, ID, 2, 2))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> {
+                    assertThat(((ApiException) error).getStatus().value()).isEqualTo(400);
+                    assertThat(((ApiException) error).getCode()).isEqualTo("DOCUMENT_COMPARISON_INVALID");
+                });
+        assertThatThrownBy(() -> service.compareVersions(OWNER, owner, ID, 0, 2))
+                .isInstanceOf(ApiException.class);
+        verify(documents, never()).compareDocumentVersions(OWNER, "doc-1", 2, 2);
+    }
+
+    @Test
+    void userWhoCannotReadTheWorkflowCannotCompareItsVersions() {
+        DocumentWorkflow workflow = new DocumentWorkflow("doc-1", "Document", OWNER);
+        ReflectionTestUtils.setField(workflow, "id", ID);
+        when(workflows.findById(ID)).thenReturn(Optional.of(workflow));
+
+        assertThatThrownBy(() -> service.compareVersions("99", Set.of("ROLE_DEVELOPER", "DOCUMENT_VIEW"), ID, 1, 2))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(404));
+        assertThatThrownBy(() -> service.versions("99", Set.of("ROLE_DEVELOPER", "DOCUMENT_VIEW"), ID))
+                .isInstanceOf(ApiException.class);
+        verify(documents, never()).getDocument(any(), any());
     }
 
     @Test

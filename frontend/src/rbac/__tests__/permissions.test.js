@@ -1,8 +1,8 @@
-// can() against the whole Screen Authorization matrix (24 rows x 5 roles x 6 actions).
+// can() against the whole Screen Authorization matrix.
 // The expected table is copied from the team's specification in its original notation, so it is an
 // independent oracle for permissions.js. Cells changed by the team decision of 2026-11-17 (rows without
 // a screen in the role's flow removed; #8 gains E for Developer) are marked `// decided`; rows #4, #14,
-// #15 and #16 were removed from the web for every role and are listed in REMOVED.
+// #15 were removed from the web. P0-06 restores #16 for Developer.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ACTIONS, allowedActions, can, canAccess, PERMISSIONS, SCREEN_KEYS } from '../permissions.js';
@@ -13,7 +13,7 @@ const SPEC = [
   [1, 'authentication', 'R', '✓', '✓', '✓', '✓', '✓'],
   [2, 'profile', 'R-U', '✓', '✓', '✓', '✓', '✓'],
   [3, 'notifications', 'R', 'R', '-', '-', '-', '-'],
-  [5, 'githubConnection', 'C-R-D', 'C-R-D', '-', '-', '-', '-'],
+  [5, 'githubConnection', 'C-R-D', 'C-R-D', '-', 'C-R-D', '-', '-'],
   [6, 'repositories', 'C-R-U-D', 'C-R-U-D', '-', '-', '-', 'C-R-U-D'],
   [7, 'pullRequests', 'R', 'R', '-', '-', 'R', '-'], // decided
   [8, 'documentation', 'C-R-U-E', 'C-R-U-E', 'R-U', '-', 'R', '-'], // decided
@@ -22,6 +22,7 @@ const SPEC = [
   [11, 'managerApproval', 'R-U-A', '-', '-', 'R-U-A', 'R', '-'], // decided
   [12, 'approvalPolicies', 'C-R-U', '-', '-', 'C-R-U', '-', '-'],
   [13, 'approvalAudit', 'R', '-', 'R', 'R', 'R', 'R'],
+  [16, 'driftAlerts', 'C-R-U', 'C-R-U', '-', '-', '-', '-'],
   [17, 'driftPolicies', 'C-R-U', '-', '-', '-', 'C-R-U', '-'],
   [18, 'versionHistory', 'R', 'R', 'R', '-', 'R', '-'], // decided
   [19, 'documentRollback', 'U', 'U', '-', 'U', 'U', '-'],
@@ -41,15 +42,15 @@ function parse(cell, typical) {
   return (cell === '✓' ? typical : cell).split('-');
 }
 
-const REMOVED = ['dashboard', 'autoUpdateSettings', 'autoUpdateReview', 'driftAlerts'];
+const REMOVED = ['dashboard', 'autoUpdateSettings', 'autoUpdateReview'];
 
 test('the matrix has the specified rows in order, keeping their original numbers', () => {
-  assert.equal(SCREEN_KEYS.length, 24);
+  assert.equal(SCREEN_KEYS.length, 25);
   assert.deepEqual(SCREEN_KEYS, SPEC.map(([, key]) => key));
   SPEC.forEach(([row, key]) => assert.equal(PERMISSIONS[key].row, row));
 });
 
-test('rows #4, #14, #15 and #16 are not available to any role', () => {
+test('rows #4, #14 and #15 are not available to any role', () => {
   for (const key of REMOVED) {
     assert.equal(PERMISSIONS[key], undefined);
     for (const role of ROLE_ORDER) assert.equal(canAccess(role, key), false, `${role} ${key}`);

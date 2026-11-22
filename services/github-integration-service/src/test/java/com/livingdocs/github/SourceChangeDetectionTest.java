@@ -1,6 +1,17 @@
 package com.livingdocs.github;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Set;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.web.client.RestClient;
+import com.livingdocs.github.service.DocumentWorkflowService;
+import com.livingdocs.github.service.DocumentationGenerationService;
+import com.livingdocs.github.repository.DocumentWorkflowRepository;
+import com.livingdocs.github.entity.StaffReviewResult;
+import com.livingdocs.github.entity.ManagerDecision;
+import com.livingdocs.github.dto.WorkflowDtos.StaffReviewRequest;
+import com.livingdocs.github.client.GitHubCommit;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.livingdocs.github.change.AffectedDocumentsClient;
 import com.livingdocs.github.change.CodeAnalyzerClient;
 import com.livingdocs.github.change.CodeEntity;
@@ -9,12 +20,14 @@ import com.livingdocs.github.change.SourceChangeRequest;
 import com.livingdocs.github.client.GitHubBlob;
 import com.livingdocs.github.client.GitHubChangedFile;
 import com.livingdocs.github.client.GitHubClient;
+import com.livingdocs.github.client.GitHubPullRequest;
 import com.livingdocs.github.client.GitHubRepo;
 import com.livingdocs.github.entity.ConnectionStatus;
 import com.livingdocs.github.entity.GitHubConnection;
 import com.livingdocs.github.entity.SourceChange;
 import com.livingdocs.github.exception.GitHubApiException;
 import com.livingdocs.github.repository.GitHubConnectionRepository;
+import com.livingdocs.github.repository.SourceChangeRepository;
 import com.livingdocs.github.service.SourceChangeService;
 import com.livingdocs.github.sync.AnalysisInput;
 import org.junit.jupiter.api.Test;
@@ -39,27 +52,33 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.contains;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.after;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
  * LD-121: phát hiện thay đổi mã nguồn (LD-116) với database H2, GitHub và Code Analyzer giả.
- * Mỗi test dùng user và workspace riêng vì database được dùng chung giữa các class test.
+ * Mỗi test dùng user và workspace riêng để tách kết quả trong cùng database.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -90,10 +109,181 @@ class SourceChangeDetectionTest {
     @Autowired ObjectMapper json;
     @Autowired GitHubConnectionRepository connectionRepository;
     @Autowired SourceChangeService sourceChangeService;
+    @Autowired SourceChangeRepository sourceChangeRepository;
 
     @MockitoBean GitHubClient gitHubClient;
     @MockitoBean CodeAnalyzerClient analyzerClient;
     @MockitoBean AffectedDocumentsClient documentsClient;  // trả danh sách rỗng nếu test không cấu hình
+
+    @Autowired DocumentWorkflowService workflows;
+    @Autowired DocumentWorkflowRepository workflowRows;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate revisionJdbc;
+    @Autowired com.livingdocs.github.repository.ConnectedRepositoryRepository revisionRepositories;
+    @Autowired com.livingdocs.github.change.RevisionJobWorker revisionWorker;
+
+    @MockitoBean(name = "aiServiceRestClient", answers = org.mockito.Answers.RETURNS_DEEP_STUBS)
+    RestClient revisionAi;
+    @MockitoBean(name = "codeAnalyzerRestClient", answers = org.mockito.Answers.RETURNS_DEEP_STUBS)
+    RestClient revisionAnalyzer;
+    @MockitoBean(name = "revisionAiRestClient", answers = org.mockito.Answers.RETURNS_DEEP_STUBS)
+    RestClient revisionPreparation;
+    @MockitoBean DocumentationGenerationService workflowDocuments;
+
+    @Test
+    void draftOperationsUseCommitEvidenceAndRejectWrongDependentBlob() throws Exception {
+        var repo = connectAndAddRepo("revision-operations-owner");
+        var request = commit(repo.id(), newSha());
+        String sha = request.commitSha();
+        String dependent = "src/Checkout.java";
+        String treeSha = newSha();
+        String dependentSha = newSha();
+        var exact = new GitHubCommit(sha, null,
+                new GitHubCommit.Detail(null, null, null, new GitHubCommit.TreeRef(treeSha)), null);
+        when(gitHubClient.getCommit(TOKEN, "acme", "docs", "main")).thenReturn(exact);
+        when(gitHubClient.getCommit(TOKEN, "acme", "docs", sha)).thenReturn(exact);
+        when(gitHubClient.getCommitFiles(TOKEN, "acme", "docs", sha)).thenReturn(List.of(invoiceFile(PATCH)));
+        mockInvoiceContentAndAnalyzer();
+        when(documentsClient.find(eq("acme/docs"), anyList())).thenReturn(List.of(
+                new AffectedDocumentsClient.Affected("checkout-doc", "Checkout", 4, dependent, dependent,
+                        "dependent", List.of("mentions Invoice"), List.of(
+                                new AffectedDocumentsClient.Match("Invoice", "name", 1, "uses Invoice")))));
+        sourceChangeService.detect(request);
+        var change = sourceChangeRepository.findByRepositoryIdAndTriggerTypeAndCommitSha(
+                request.repositoryId(), request.trigger(), sha).orElseThrow();
+
+        var tree = new com.livingdocs.github.client.GitHubTree(treeSha, false, List.of(
+                new com.livingdocs.github.client.GitHubTree.Entry(dependent, "100644", "blob", dependentSha, 24L)));
+        when(gitHubClient.getTree(TOKEN, "acme", "docs", treeSha)).thenReturn(tree);
+        when(gitHubClient.getCommitFiles(TOKEN, "acme", "docs", sha)).thenReturn(List.of(
+                new GitHubChangedFile("src/New.java", "added", null, BLOB, 1, 0, null),
+                new GitHubChangedFile("src/Old.java", "removed", null, null, 0, 1, null),
+                new GitHubChangedFile("src/Renamed.java", "renamed", PATH, BLOB, 0, 0, null)));
+        var connected = revisionRepositories.findById(request.repositoryId()).orElseThrow();
+        when(gitHubClient.getBlob(TOKEN, "acme", "docs", dependentSha)).thenReturn(blob(AFTER));
+        assertThatThrownBy(() -> sourceChangeService.draftSource(connected, request, change.getId()))
+                .hasMessageContaining("Cannot verify source blob");
+        when(gitHubClient.getBlob(TOKEN, "acme", "docs", dependentSha))
+                .thenReturn(new GitHubBlob(dependentSha, 24L, "utf-8", "class Checkout {}"));
+
+        var draft = sourceChangeService.draftSource(connected, request, change.getId());
+        assertThat(draft.operations()).extracting(SourceChangeService.DraftFile::action)
+                .containsExactly("added", "removed", "renamed", "dependent");
+        assertThat(draft.operations().get(2).previousPath()).isEqualTo(PATH);
+        assertThat(draft.operations().get(3)).isEqualTo(new SourceChangeService.DraftFile(
+                dependent, "dependent", null, dependentSha, "checkout-doc", 4));
+        assertThat(draft.files()).extracting(AnalysisInput.FileInput::path)
+                .containsExactly("src/New.java", "src/Renamed.java", dependent);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void signedWebhookDraftNeedsStaffAndExactCurrentManagerApproval(boolean replaceWorker) throws Exception {
+        String owner = "revision-owner-" + replaceWorker;
+        String manager = "revision-manager";
+        String staff = "revision-staff";
+        String document = "revision-e2e-" + replaceWorker;
+        var repo = connectAndAddRepo(owner);
+        UUID repositoryId = UUID.fromString(repo.id());
+        String sha = newSha();
+        var commit = new GitHubCommit(sha, null, null, null);
+        when(gitHubClient.getCommit(TOKEN, "acme", "docs", "main")).thenReturn(commit);
+        when(gitHubClient.getCommitFiles(TOKEN, "acme", "docs", sha)).thenReturn(List.of(invoiceFile(PATCH)));
+        mockInvoiceContentAndAnalyzer();
+        when(revisionAi.get().uri("/internal/revision-draft-candidates/{id}", repositoryId)
+                .retrieve().body(JsonNode.class)).thenReturn(
+                        json.createArrayNode().add(json.createObjectNode().put("id", document)
+                                .put("owner_user_id", owner).put("current_version", 1)));
+        var analysis = json.createObjectNode();
+        analysis.putArray("files").addObject().put("path", PATH);
+        when(revisionAnalyzer.post().uri("/api/v1/analyze-repo")
+                .body(org.mockito.ArgumentMatchers.any(AnalysisInput.class)).retrieve()
+                .body(JsonNode.class)).thenReturn(analysis);
+        var preparationRequest = mock(RestClient.RequestBodySpec.class, org.mockito.Answers.RETURNS_SELF);
+        var preparationResponse = mock(RestClient.ResponseSpec.class);
+        when(revisionPreparation.post().uri("/internal/documents/{id}/revision-drafts/prepare", document))
+                .thenReturn(preparationRequest);
+        when(preparationRequest.retrieve()).thenReturn(preparationResponse);
+        var preparing = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var preparations = new java.util.concurrent.atomic.AtomicInteger();
+        when(preparationResponse.body(JsonNode.class)).thenAnswer(invocation -> {
+            if (preparations.incrementAndGet() == 1 && replaceWorker) {
+                preparing.countDown();
+                assertThat(release.await(20, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                return json.createObjectNode().put("worker", "expired");
+            }
+            return json.createObjectNode().put("worker", "current");
+        });
+        var draftRequest = mock(RestClient.RequestBodySpec.class, org.mockito.Answers.RETURNS_SELF);
+        var draftResponse = mock(RestClient.ResponseSpec.class);
+        when(revisionAi.post().uri("/internal/documents/{id}/revision-drafts/commit", document)).thenReturn(draftRequest);
+        when(draftRequest.body(org.mockito.ArgumentMatchers.any(Object.class))).thenAnswer(invocation -> {
+            JsonNode body = invocation.getArgument(0);
+            assertThat(body.path("prepared").path("worker").asText()).isEqualTo("current");
+            return draftRequest;
+        });
+        when(draftRequest.retrieve()).thenReturn(draftResponse);
+        when(draftResponse.body(JsonNode.class)).thenReturn(
+                json.createObjectNode().put("status", "proposed").put("number", 2));
+
+        sendWebhook("push", pushPayload(repo.githubId(), "refs/heads/main", sha)).andExpect(status().isAccepted());
+        if (replaceWorker) {
+            try {
+                assertThat(preparing.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                assertThat(workflowRows.findByOwnerUserIdOrderByCreatedAtDesc(owner, PageRequest.of(0, 10)))
+                        .isEmpty();
+                assertThat(revisionJdbc.update("UPDATE revision_jobs SET available_at = ? WHERE repository_id = ?",
+                        java.time.OffsetDateTime.now().minusSeconds(1), repositoryId)).isEqualTo(1);
+                revisionWorker.poll();
+                assertThat(preparations.get()).isEqualTo(2);
+            } finally {
+                release.countDown();
+            }
+        }
+        var page = PageRequest.of(0, 10);
+        UUID workflowId = null;
+        for (int attempt = 0; attempt < 100 && workflowId == null; attempt++) {
+            workflowId = workflowRows.findByOwnerUserIdOrderByCreatedAtDesc(owner, page).stream()
+                    .findFirst().map(row -> row.getId()).orElse(null);
+            if (workflowId == null) {
+                Thread.sleep(50);
+            }
+        }
+        assertThat(workflowId).as("webhook revision job entered Staff queue").isNotNull();
+        verify(draftRequest, times(1)).retrieve();
+        UUID id = workflowId;
+        var draft = json.createObjectNode().put("owner_user_id", owner)
+                .put("pending_version", 2).put("current_version", 1);
+        draft.putObject("pending_revision").put("repository_id", repo.id()).put("commit_sha", sha);
+        when(workflowDocuments.getDocument(staff, document)).thenReturn(draft);
+        when(workflowDocuments.getDocument(manager, document)).thenReturn(draft);
+
+        var staffPermissions = Set.of("ROLE_STAFF", "DOCUMENT_CLAIM", "DOCUMENT_REVIEW");
+        var managerPermissions = Set.of("ROLE_MANAGER", "DOCUMENT_APPROVE");
+        var approved = ManagerDecision.APPROVED;
+        assertThatThrownBy(
+                () -> workflows.decide(manager, managerPermissions, id, approved, null, 2))
+                .hasMessageContaining("successful staff review");
+        workflows.claim(staff, staffPermissions, id);
+        workflows.staffReview(staff, staffPermissions, id, new StaffReviewRequest(
+                StaffReviewResult.PASSED, "Verified against source"));
+
+        assertThatThrownBy(
+                () -> workflows.decide(manager, managerPermissions, id, approved, null, 1))
+                .hasMessageContaining("Reload the submitted document version");
+        when(gitHubClient.getCommit(TOKEN, "acme", "docs", "main")).thenReturn(
+                new GitHubCommit(newSha(), null, null, null));
+        assertThatThrownBy(
+                () -> workflows.decide(manager, managerPermissions, id, approved, null, 2))
+                .hasMessageContaining("could not be verified as current");
+        verify(workflowDocuments, never()).resolveDocumentVersion(manager, owner, document, 2, "APPROVED", null);
+        when(gitHubClient.getCommit(TOKEN, "acme", "docs", "main")).thenReturn(commit);
+        assertThat(workflows.decide(manager, managerPermissions, id, approved, null, 2).submittedDocumentVersion())
+                .isEqualTo(2);
+        verify(workflowDocuments).resolveDocumentVersion(manager, owner, document, 2, "APPROVED", null);
+        sendWebhook("push", pushPayload(repo.githubId(), "refs/heads/main", sha)).andExpect(status().isAccepted());
+        assertThat(workflowRows.findByOwnerUserIdOrderByCreatedAtDesc(owner, page)).hasSize(1);
+    }
 
     // ------------------------------------------------------------------ LD-118: commit trên nhánh mặc định
 
@@ -147,6 +337,8 @@ class SourceChangeDetectionTest {
         String user = "change-pull-request";
         Repo repo = connectAndAddRepo(user);
         String head = newSha();
+        when(gitHubClient.getPullRequest(TOKEN, "acme", "docs", 12))
+                .thenReturn(pullRequestRevision(12, head, newSha()));
         when(gitHubClient.listPullRequestChangedFiles(TOKEN, "acme", "docs", 12)).thenReturn(List.of(invoiceFile(PATCH)));
         mockInvoiceContentAndAnalyzer();
 
@@ -163,6 +355,137 @@ class SourceChangeDetectionTest {
                 .andExpect(jsonPath("$[0].pullRequestNumber").value(12))
                 .andExpect(jsonPath("$[0].commitSha").value(head))
                 .andExpect(jsonPath("$[0].files[0].entities[?(@.name == 'Invoice.tax')].change", contains("ADDED")));
+    }
+
+    @Test
+    void headChangingDuringFileFetch_isRejectedBeforeAnalyzing() throws Exception {
+        String user = "change-stale-head";
+        Repo repo = connectAndAddRepo(user);
+        String head = newSha();
+        String base = newSha();
+        when(gitHubClient.getPullRequest(TOKEN, "acme", "docs", 12))
+                .thenReturn(pullRequestRevision(12, head, base), pullRequestRevision(12, newSha(), base));
+        when(gitHubClient.listPullRequestChangedFiles(TOKEN, "acme", "docs", 12))
+                .thenReturn(List.of(invoiceFile(PATCH)));
+
+        sourceChangeService.detect(
+                new SourceChangeRequest(UUID.fromString(repo.id()), SourceChange.Trigger.PULL_REQUEST, head, 12));
+
+        mvc.perform(get(sourceChangesUrl(repo.id())).header(USER_HEADER, user))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].status").value("FAILED"))
+                .andExpect(jsonPath("$[0].errorCode").value("PULL_REQUEST_HEAD_CHANGED"))
+                .andExpect(jsonPath("$[0].files.length()").value(0));
+        verify(analyzerClient, never()).analyze(eq("acme/docs"), anyList());
+        verify(documentsClient, never()).find(eq("acme/docs"), anyList());
+    }
+
+    @Test
+    void baseChangingDuringFileFetch_isRejectedAndCanBeRetried() throws Exception {
+        String user = "change-stale-base";
+        Repo repo = connectAndAddRepo(user);
+        String head = newSha();
+        var newBase = pullRequestRevision(12, head, newSha());
+        when(gitHubClient.getPullRequest(TOKEN, "acme", "docs", 12))
+                .thenReturn(pullRequestRevision(12, head, newSha()), newBase);
+        when(gitHubClient.listPullRequestChangedFiles(TOKEN, "acme", "docs", 12))
+                .thenReturn(List.of(invoiceFile(PATCH)));
+        mockInvoiceContentAndAnalyzer();
+
+        UUID repositoryId = UUID.fromString(repo.id());
+        sourceChangeService.detect(new SourceChangeRequest(repositoryId, SourceChange.Trigger.PULL_REQUEST, head, 12));
+
+        var failed = sourceChangeRepository.findByRepositoryIdAndTriggerTypeAndCommitSha(
+                repositoryId, SourceChange.Trigger.PULL_REQUEST, head).orElseThrow();
+        assertThat(failed.getStatus()).isEqualTo(SourceChange.Status.FAILED);
+        assertThat(failed.getErrorCode()).isEqualTo("PULL_REQUEST_BASE_CHANGED");
+        verify(analyzerClient, never()).analyze(eq("acme/docs"), anyList());
+        verify(documentsClient, never()).find(eq("acme/docs"), anyList());
+
+        mvc.perform(post(sourceChangesUrl(repo.id()) + "/" + failed.getId() + "/retry").header(USER_HEADER, user))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(failed.getId().toString()))
+                .andExpect(jsonPath("$.documentsStatus").value("FOUND"));
+    }
+
+    @Test
+    void concurrentProcessingOfSameEvent_persistsOneCompletedAnalysis() throws Exception {
+        String user = "change-concurrent";
+        Repo repo = connectAndAddRepo(user);
+        String sha = newSha();
+        var bothFetching = new CyclicBarrier(2);
+        when(gitHubClient.getCommitFiles(TOKEN, "acme", "docs", sha)).thenAnswer(call -> {
+            bothFetching.await(5, TimeUnit.SECONDS);
+            return List.of(invoiceFile(PATCH));
+        });
+        mockInvoiceContentAndAnalyzer();
+
+        SourceChangeRequest request = commit(repo.id(), sha);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(() -> sourceChangeService.detect(request));
+            var second = executor.submit(() -> sourceChangeService.detect(request));
+            first.get(10, TimeUnit.SECONDS);
+            second.get(10, TimeUnit.SECONDS);
+        }
+
+        mvc.perform(get(sourceChangesUrl(repo.id())).header(USER_HEADER, user))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].commitSha").value(sha))
+                .andExpect(jsonPath("$[0].documentsStatus").value("FOUND"))
+                .andExpect(jsonPath("$[0].files[0].entities.length()").value(4));
+    }
+
+    @Test
+    void repositoryDisconnectedDuringDocumentLookup_doesNotRecreateSourceChange() throws Exception {
+        String user = "change-disconnected";
+        Repo repo = connectAndAddRepo(user);
+        String sha = newSha();
+        SourceChangeRequest request = commit(repo.id(), sha);
+        when(gitHubClient.getCommitFiles(TOKEN, "acme", "docs", sha)).thenReturn(List.of(invoiceFile(PATCH)));
+        mockInvoiceContentAndAnalyzer();
+        when(documentsClient.find(eq("acme/docs"), anyList())).thenAnswer(call -> {
+            assertThat(sourceChangeRepository.findByRepositoryIdAndTriggerTypeAndCommitSha(
+                    request.repositoryId(), request.trigger(), sha)).isPresent();
+            mvc.perform(delete("/api/repositories/" + repo.id()).header(USER_HEADER, user))
+                    .andExpect(status().isNoContent());
+            return List.of();
+        });
+
+        sourceChangeService.detect(request);
+
+        assertThat(sourceChangeRepository.findByRepositoryIdAndTriggerTypeAndCommitSha(
+                request.repositoryId(), request.trigger(), sha)).isEmpty();
+        mvc.perform(get(sourceChangesUrl(repo.id())).header(USER_HEADER, user))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void replay_skipsGitHubAndKeepsPreviouslyCompletedAnalysis() throws Exception {
+        String user = "change-replay";
+        Repo repo = connectAndAddRepo(user);
+        String sha = newSha();
+        when(gitHubClient.getCommitFiles(TOKEN, "acme", "docs", sha))
+                .thenReturn(List.of(invoiceFile(PATCH)));
+        mockInvoiceContentAndAnalyzer();
+
+        sourceChangeService.detect(commit(repo.id(), sha));
+        sourceChangeService.detect(commit(repo.id(), sha));
+
+        mvc.perform(get(sourceChangesUrl(repo.id())).header(USER_HEADER, user))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].status").value("PENDING"))
+                .andExpect(jsonPath("$[0].documentsStatus").value("FOUND"))
+                .andExpect(jsonPath("$[0].files[0].entities.length()").value(4));
+        verify(documentsClient, times(1)).find(eq("acme/docs"), anyList());
+        verify(gitHubClient, times(1)).getCommitFiles(TOKEN, "acme", "docs", sha);
+    }
+
+    private static GitHubPullRequest pullRequestRevision(int number, String head, String base) {
+        return new GitHubPullRequest(number, null, null, "open", null, null,
+                new GitHubPullRequest.Ref("feature", head), new GitHubPullRequest.Ref("main", base),
+                null, null, null, null);
     }
 
     // ------------------------------------------------------------------ Không có mã nguồn, lỗi, thử lại

@@ -37,6 +37,9 @@ const MESSAGES_BY_CODE = {
   DRIFT_REQUEST_INVALID: 'The pull request could not be checked for documentation drift.',
   DRIFT_RESOLUTION_INVALID: 'The finding could not be updated. A reason is required to dismiss it.',
   GITHUB_INVALID_RESPONSE: 'GitHub returned an incomplete pull request. Please try again later.',
+  // Documentation diff & comparison (LD-183)
+  DOCUMENT_COMPARISON_INVALID: 'Select two different versions to compare.',
+  DOCUMENT_COMPARISON_UNAVAILABLE: 'Create a version first to enable comparison.',
 };
 
 const MESSAGES_BY_STATUS = {

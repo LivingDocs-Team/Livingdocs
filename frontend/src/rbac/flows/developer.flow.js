@@ -1,4 +1,4 @@
-// Developer screen flow (team's official flow; Dashboard, Automatic Update and Drift Review removed 2026-11-17).
+// Developer screen flow.
 // section() sub-screens are parts of their parent's existing page and open that page.
 import { implemented, module, placeholder, profileSettings, section } from './nodes.js';
 
@@ -22,6 +22,7 @@ export default Object.freeze({
       ]),
       // Pull requests and commits are shown per repository inside Repository Management (RepositoryActivity).
       implemented('pr-commit-list', 'PR & Commit List', '/github/activity', 'pullRequests', 'RepositoryManagement'),
+      implemented('drift-alerts', 'Drift Alerts', '/drift/alerts', 'driftAlerts', 'DeveloperDriftAlerts'),
     ]),
     module('documentation', 'Documentation Generation', [
       placeholder('coverage-gaps', 'Coverage Gaps', '/documentation/coverage-gaps', 'documentation'),

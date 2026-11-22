@@ -1,777 +1,808 @@
 package com.livingdocs.github.service;
 
-import java.util.List;
+import java.time.Instant;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.function.Supplier;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
-import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.livingdocs.github.dto.WorkflowDtos.AuditResponse;
-import com.livingdocs.github.dto.WorkflowDtos.ReviewCommentRequest;
-import com.livingdocs.github.dto.WorkflowDtos.SectionFeedback;
-import com.livingdocs.github.dto.WorkflowDtos.ChangeRequestResponse;
-import com.livingdocs.github.dto.WorkflowDtos.ReviewCommentResponse;
-import com.livingdocs.github.dto.WorkflowDtos.ContentResponse;
-import com.livingdocs.github.dto.WorkflowDtos.EditDocumentRequest;
-import com.livingdocs.github.dto.WorkflowDtos.PageResponse;
-import com.livingdocs.github.dto.WorkflowDtos.ReassignRequest;
-import com.livingdocs.github.dto.WorkflowDtos.StaffReviewRequest;
-import com.livingdocs.github.dto.WorkflowDtos.WorkflowResponse;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.livingdocs.github.dto.DocumentationGenerationRequest;
 import com.livingdocs.github.entity.ChangeTriggerSource;
-import com.livingdocs.github.entity.DocumentWorkflow;
-import com.livingdocs.github.entity.DocumentWorkflowAudit;
-import com.livingdocs.github.entity.DocumentWorkflowStatus;
-import com.livingdocs.github.entity.ManagerDecision;
-import com.livingdocs.github.entity.StaffReviewResult;
 import com.livingdocs.github.exception.ApiException;
-import com.livingdocs.github.repository.DocumentWorkflowAuditRepository;
-import com.livingdocs.github.repository.DocumentWorkflowRepository;
+import com.livingdocs.github.sync.AnalysisInput;
+import com.livingdocs.github.sync.RepositorySnapshot;
+import com.livingdocs.github.sync.RepositorySyncException;
+import com.livingdocs.github.sync.SyncOptions;
 
 @Service
-public class DocumentWorkflowService {
-    private final DocumentWorkflowRepository workflows;
-    private final DocumentWorkflowAuditRepository audit;
-    private final DocumentationGenerationService documents;
-    private final DocumentationChangeLogService changeLogService;
+public class DocumentationGenerationService {
 
-    public DocumentWorkflowService(DocumentWorkflowRepository workflows,
-            DocumentWorkflowAuditRepository audit, DocumentationGenerationService documents) {
-        this(workflows, audit, documents, null);
+    record ChangeLogOverride(Set<String> authorities, boolean suppressChangeLog) {}
+
+    private static final ThreadLocal<ChangeLogOverride> CHANGE_LOG_OVERRIDE = new ThreadLocal<>();
+
+    private final RepositorySyncService repositorySyncService;
+    private final RestClient analyzerClient;
+    private final RestClient aiServiceClient;
+    private final DocumentationCodeRelationshipService relationshipService;
+    private final DocumentationChangeLogService changeLogService;
+    private final ConcurrentMap<String, String> jobOwners = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, UUID> jobRepositories = new ConcurrentHashMap<>();
+
+    public DocumentationGenerationService(
+            RepositorySyncService repositorySyncService,
+            @Qualifier("codeAnalyzerRestClient") RestClient analyzerClient,
+            @Qualifier("aiServiceRestClient") RestClient aiServiceClient,
+            DocumentationCodeRelationshipService relationshipService) {
+        this(repositorySyncService, analyzerClient, aiServiceClient, relationshipService, null);
     }
 
     @Autowired
-    public DocumentWorkflowService(DocumentWorkflowRepository workflows,
-            DocumentWorkflowAuditRepository audit, DocumentationGenerationService documents,
+    public DocumentationGenerationService(
+            RepositorySyncService repositorySyncService,
+            @Qualifier("codeAnalyzerRestClient") RestClient analyzerClient,
+            @Qualifier("aiServiceRestClient") RestClient aiServiceClient,
+            DocumentationCodeRelationshipService relationshipService,
             DocumentationChangeLogService changeLogService) {
-        this.workflows = workflows;
-        this.audit = audit;
-        this.documents = documents;
+        this.repositorySyncService = repositorySyncService;
+        this.analyzerClient = analyzerClient;
+        this.aiServiceClient = aiServiceClient;
+        this.relationshipService = relationshipService;
         this.changeLogService = changeLogService;
     }
 
-    @Transactional
-    public WorkflowResponse create(String actor, Set<String> authorities, String documentId) {
-        require(authorities, "DOCUMENT_CREATE");
-        JsonNode document = documents.getDocument(actor, documentId);
-        requireDocumentOwner(document, actor);
-        if (workflows.existsByDocumentId(documentId)) {
-            throw conflict("This document already has a review workflow.");
-        }
-        DocumentWorkflow workflow = workflows.saveAndFlush(
-                new DocumentWorkflow(documentId, document.path("title").asText("Untitled"), actor));
-        record(workflow, actor, "CREATED", null, workflow.getStatus(), null);
-        recordTimeline(workflow.getDocumentId(), null, "WORKFLOW_CREATED",
-                "Initialized review workflow for \"" + workflow.getDocumentTitle() + "\"",
-                actor, authorities, ChangeTriggerSource.REVIEW_WORKFLOW,
-                workflow.getStatus().name(), workflow.getId().toString());
-        return toResponse(workflow);
-    }
-
-    @Transactional(readOnly = true)
-    public PageResponse<WorkflowResponse> mine(String actor, Set<String> authorities, int page, int size) {
-        require(authorities, "DOCUMENT_VIEW");
-        Page<DocumentWorkflow> result = workflows.findByOwnerUserIdOrderByCreatedAtDesc(actor, page(page, size));
-        return page(result.map(DocumentWorkflowService::toResponse));
-    }
-
-    @Transactional(readOnly = true)
-    public PageResponse<WorkflowResponse> historyAccessible(String actor, Set<String> authorities,
-            int page, int size) {
-        boolean includeOwned = authorities.contains("DOCUMENT_VIEW");
-        boolean includeStaffQueue = authorities.contains("DOCUMENT_REVIEW_QUEUE_VIEW");
-        boolean includeAssignedReviews = authorities.contains("DOCUMENT_REVIEW");
-        boolean includeManagerDecisions = authorities.contains("DOCUMENT_APPROVAL_QUEUE_VIEW");
-        if (!includeOwned && !includeStaffQueue && !includeAssignedReviews && !includeManagerDecisions) {
-            throw ApiException.forbidden("Missing permission to discover accessible workflow history.");
-        }
-
-        PageRequest validated = page(page, size);
-        PageRequest stableOrder = PageRequest.of(validated.getPageNumber(), validated.getPageSize(),
-                Sort.by(Sort.Order.desc("createdAt"), Sort.Order.asc("id")));
-        Page<DocumentWorkflow> result = workflows.findHistoryAccessible(actor, includeOwned,
-                includeStaffQueue, includeAssignedReviews, includeManagerDecisions,
-                DocumentWorkflowStatus.PENDING_STAFF_REVIEW, DocumentWorkflowStatus.STAFF_REVIEWING,
-                List.of(DocumentWorkflowStatus.PENDING_MANAGER_APPROVAL,
-                        DocumentWorkflowStatus.APPROVED, DocumentWorkflowStatus.REJECTED), stableOrder);
-        return page(result.map(DocumentWorkflowService::toResponse));
-    }
-
-    @Transactional(readOnly = true)
-    public PageResponse<WorkflowResponse> staffQueue(String actor, Set<String> authorities, int page, int size) {
-        require(authorities, "DOCUMENT_REVIEW_QUEUE_VIEW");
-        requireRole(authorities, "STAFF");
-        Page<DocumentWorkflow> result = workflows.staffQueue(DocumentWorkflowStatus.PENDING_STAFF_REVIEW,
-                DocumentWorkflowStatus.STAFF_REVIEWING, actor, page(page, size));
-        return page(result.map(DocumentWorkflowService::toResponse));
-    }
-
-    @Transactional(readOnly = true)
-    public PageResponse<WorkflowResponse> managerQueue(Set<String> authorities, int page, int size) {
-        require(authorities, "DOCUMENT_APPROVAL_QUEUE_VIEW");
-        requireAnyRole(authorities, "MANAGER");
-        Page<DocumentWorkflow> result = workflows.findByStatusOrderBySubmittedAtAsc(
-                DocumentWorkflowStatus.PENDING_MANAGER_APPROVAL, page(page, size));
-        return page(result.map(DocumentWorkflowService::toResponse));
-    }
-
-    @Transactional(readOnly = true)
-    public WorkflowResponse get(String actor, Set<String> authorities, UUID workflowId) {
-        DocumentWorkflow workflow = find(workflowId);
-        requireReadable(workflow, actor, authorities);
-        return toResponse(workflow);
-    }
-
-    @Transactional(readOnly = true)
-    public ContentResponse content(String actor, Set<String> authorities, UUID workflowId) {
-        DocumentWorkflow workflow = find(workflowId);
-        requireReadable(workflow, actor, authorities);
-        JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
-        requireDocumentOwner(document, workflow.getOwnerUserId());
-        int version = visibleDocumentVersion(workflow, document);
-        return new ContentResponse(workflow.getDocumentId(), version,
-                documents.getDocumentContent(actor, workflow.getDocumentId(), version));
-    }
-
-    @Transactional(readOnly = true)
-    public JsonNode reviewEvidence(String actor, Set<String> authorities, UUID workflowId) {
-        require(authorities, "DOCUMENT_REVIEW");
-        requireRole(authorities, "STAFF");
-
-        DocumentWorkflow workflow = find(workflowId);
-
-        if (workflow.getStatus() != DocumentWorkflowStatus.STAFF_REVIEWING
-                || !actor.equals(workflow.getReviewerUserId())) {
-            throw ApiException.forbidden(
-                    "Only the assigned staff reviewer can view review evidence.");
-        }
-
-        JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
-        requireDocumentOwner(document, workflow.getOwnerUserId());
-
-        Integer submittedVersion = workflow.getSubmittedDocumentVersion();
-
-        if (submittedVersion == null || submittedVersion < 1) {
-            throw conflict("The workflow has no submitted document version.");
-        }
-
-        JsonNode evidence = documents.getDocumentReviewEvidence(
-                actor, workflow.getDocumentId(), submittedVersion);
-
-        return documents.verifySourceSnapshot(workflow.getOwnerUserId(), evidence);
-    }
-
-    @Transactional(readOnly = true)
-    public JsonNode reviewComparison(String actor, Set<String> authorities, UUID workflowId) {
-        require(authorities, "DOCUMENT_REVIEW");
-        requireRole(authorities, "STAFF");
-
-        DocumentWorkflow workflow = find(workflowId);
-
-        if (workflow.getStatus() != DocumentWorkflowStatus.STAFF_REVIEWING
-                || !actor.equals(workflow.getReviewerUserId())) {
-            throw ApiException.forbidden(
-                    "Only the assigned staff reviewer can compare document versions.");
-        }
-
-        JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
-        requireDocumentOwner(document, workflow.getOwnerUserId());
-
-        Integer submittedVersion = workflow.getSubmittedDocumentVersion();
-
-        if (submittedVersion == null || submittedVersion < 1) {
-            throw conflict("The workflow has no submitted document version.");
-        }
-
-        JsonNode comparison = documents.getDocumentReviewComparison(
-                actor, workflow.getDocumentId());
-
-        int comparedPendingVersion = comparison.path("pending_version")
-                .path("number").asInt(-1);
-
-        if (comparedPendingVersion != submittedVersion) {
-            throw conflict("The pending document version does not match the submitted workflow version.");
-        }
-
-        return comparison;
-    }
-
-    @Transactional(readOnly = true)
-    public JsonNode evidence(String actor, Set<String> authorities, UUID workflowId) {
-        require(authorities, "DOCUMENT_APPROVAL_QUEUE_VIEW");
-        requireRole(authorities, "MANAGER");
-
-        DocumentWorkflow workflow = find(workflowId);
-        requireReadable(workflow, actor, authorities);
-
-        if (workflow.getStaffReviewResult() != StaffReviewResult.PASSED) {
-            throw ApiException.forbidden(
-                    "Grounding evidence is available only after a successful staff review.");
-        }
-
-        JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
-        requireDocumentOwner(document, workflow.getOwnerUserId());
-
-        int version = workflow.getSubmittedDocumentVersion() == null
-                ? visibleDocumentVersion(workflow, document)
-                : workflow.getSubmittedDocumentVersion();
-
-        return documents.getDocumentEvidence(actor, workflow.getDocumentId(), version);
-    }
-
-    @Transactional(readOnly = true)
-    public List<AuditResponse> history(String actor, Set<String> authorities, UUID workflowId) {
-        DocumentWorkflow workflow = find(workflowId);
-        requireReadable(workflow, actor, authorities);
-        return audit.findByWorkflowIdOrderByCreatedAtAsc(workflowId).stream()
-                .map(e -> new AuditResponse(e.getId(), e.getWorkflowId(), e.getActorUserId(), e.getActorRole(), e.getAction(),
-                        e.getPreviousStatus(), e.getNewStatus(), e.getPreviousReviewerUserId(),
-                        e.getNewReviewerUserId(), e.getComment(), e.getCreatedAt()))
-                .toList();
-    }
-
-    @Transactional
-    public WorkflowResponse submit(String actor, Set<String> authorities, UUID workflowId) {
-        return submit(actor, authorities, workflowId, null);
-    }
-
-    @Transactional
-    public WorkflowResponse submit(String actor, Set<String> authorities, UUID workflowId, Integer expectedVersion) {
-        require(authorities, "DOCUMENT_SUBMIT");
-        DocumentWorkflow workflow = lock(workflowId);
-        requireOwner(workflow, actor);
-        DocumentWorkflowStatus previous = workflow.getStatus();
-        if (previous != DocumentWorkflowStatus.DRAFT && previous != DocumentWorkflowStatus.CHANGES_REQUESTED) {
-            throw conflict("Only a draft or a changes-requested workflow can be submitted.");
-        }
-        JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
-        requireDocumentOwner(document, actor);
-        int version = documentVersionForSubmit(workflow, document);
-        if (expectedVersion != null && expectedVersion != version) {
-            throw conflict("The document version changed. Reload before submitting.");
-        }
-        workflow.submit(version);
-        workflows.saveAndFlush(workflow);
-        record(workflow, actor, "SUBMITTED", previous, workflow.getStatus(), null);
-        recordTimeline(workflow.getDocumentId(), version, "SUBMITTED_FOR_REVIEW",
-                "Submitted version " + version + " for staff review",
-                actor, authorities, ChangeTriggerSource.REVIEW_WORKFLOW,
-                workflow.getStatus().name(), workflow.getId().toString());
-        return toResponse(workflow);
-    }
-
-    @Transactional
-    public WorkflowResponse claim(String actor, Set<String> authorities, UUID workflowId) {
-        require(authorities, "DOCUMENT_CLAIM");
-        requireRole(authorities, "STAFF");
-        DocumentWorkflow workflow = lock(workflowId);
-        if (workflow.getStatus() != DocumentWorkflowStatus.PENDING_STAFF_REVIEW) {
-            throw conflict("Only a document pending staff review can be claimed.");
-        }
-        DocumentWorkflowStatus previous = workflow.getStatus();
-        workflow.claim(actor);
-        workflows.saveAndFlush(workflow);
-        record(workflow, actor, "CLAIMED", previous, workflow.getStatus(), null, null, actor);
-        recordTimeline(workflow.getDocumentId(), workflow.getSubmittedDocumentVersion(), "STAFF_CLAIMED",
-                "Staff reviewer claimed version " + workflow.getSubmittedDocumentVersion() + " for review",
-                actor, authorities, ChangeTriggerSource.REVIEW_WORKFLOW,
-                workflow.getStatus().name(), workflow.getId().toString());
-        return toResponse(workflow);
-    }
-
-    @Transactional
-    public WorkflowResponse release(String actor, Set<String> authorities, UUID workflowId) {
-        require(authorities, "DOCUMENT_RELEASE");
-        requireRole(authorities, "STAFF");
-        DocumentWorkflow workflow = lock(workflowId);
-        if (workflow.getStatus() != DocumentWorkflowStatus.STAFF_REVIEWING) {
-            throw conflict("Only an active staff review can be released.");
-        }
-        if (!actor.equals(workflow.getReviewerUserId())) {
-            throw ApiException.forbidden("Only the assigned STAFF reviewer can release this claim.");
-        }
-        DocumentWorkflowStatus previous = workflow.getStatus();
-        workflow.releaseClaim();
-        workflows.saveAndFlush(workflow);
-        record(workflow, actor, "STAFF_RELEASE", previous, workflow.getStatus(), null, actor, null);
-        recordTimeline(workflow.getDocumentId(), workflow.getSubmittedDocumentVersion(), "STAFF_RELEASED",
-                "Staff reviewer released review claim",
-                actor, authorities, ChangeTriggerSource.REVIEW_WORKFLOW,
-                workflow.getStatus().name(), workflow.getId().toString());
-        return toResponse(workflow);
-    }
-
-    @Transactional
-    public WorkflowResponse reassign(String actor, Set<String> authorities, UUID workflowId,
-            String verifiedStaffUserId, ReassignRequest request) {
-        require(authorities, "DOCUMENT_REASSIGN");
-        requireAdministrator(authorities);
-        String targetId = Long.toString(request.targetStaffUserId());
-        if (!targetId.equals(verifiedStaffUserId)) {
-            throw ApiException.forbidden("The target STAFF identity was not verified by the backend.");
-        }
-        DocumentWorkflow workflow = lock(workflowId);
-        if (workflow.getStatus() != DocumentWorkflowStatus.STAFF_REVIEWING) {
-            throw conflict("Only an active staff review can be reassigned.");
-        }
-        String previousReviewer = workflow.getReviewerUserId();
-        if (targetId.equals(previousReviewer)) {
-            throw conflict("The workflow is already assigned to this STAFF member.");
-        }
-        DocumentWorkflowStatus previous = workflow.getStatus();
-        workflow.reassignClaim(targetId);
-        workflows.saveAndFlush(workflow);
-        record(workflow, actor, "STAFF_REASSIGN", previous, workflow.getStatus(), request.reason(),
-                previousReviewer, targetId);
-        String reason = normalizeComment(request.reason());
-        recordTimeline(workflow.getDocumentId(), workflow.getSubmittedDocumentVersion(), "STAFF_REASSIGNED",
-                "Reassigned review from " + previousReviewer + " to " + targetId
-                        + (reason != null ? ": " + reason : ""),
-                actor, authorities, ChangeTriggerSource.REVIEW_WORKFLOW,
-                workflow.getStatus().name(), workflow.getId().toString());
-        return toResponse(workflow);
-    }
-
-    @Transactional
-    public ReviewCommentResponse addComment(String actor, Set<String> authorities, UUID workflowId,
-            ReviewCommentRequest request) {
-        require(authorities, "DOCUMENT_REVIEW");
-        requireRole(authorities, "STAFF");
-        DocumentWorkflow workflow = lock(workflowId);
-        if (workflow.getStatus() != DocumentWorkflowStatus.STAFF_REVIEWING
-                || !actor.equals(workflow.getReviewerUserId())) {
-            throw ApiException.forbidden("Only the assigned staff reviewer can comment.");
-        }
-        if (!request.documentVersion().equals(workflow.getSubmittedDocumentVersion())) {
-            throw conflict("The submitted document version changed. Reload before commenting.");
-        }
-        DocumentWorkflowAudit entry = new DocumentWorkflowAudit(workflowId, actor, "REVIEW_COMMENT",
-                workflow.getStatus().name(), workflow.getStatus().name(),
-                normalizeComment(request.comment()), null, null, "STAFF");
-        entry.setDocumentVersion(workflow.getSubmittedDocumentVersion());
-        if (request.section() != null) {
-            SectionFeedback section = request.section();
-            String content = documents.getDocumentContent(actor, workflow.getDocumentId(),
-                    workflow.getSubmittedDocumentVersion());
-            if (section.startOffset() < 0 || section.endOffset() <= section.startOffset()
-                    || section.endOffset() > content.length()
-                    || !content.substring(section.startOffset(), section.endOffset()).equals(section.quote())) {
-                throw ApiException.badRequest("The selected passage does not match the submitted document.");
-            }
-            entry.setSectionFeedback(section.startOffset(), section.endOffset(), section.quote());
-        }
-        return toCommentResponse(audit.saveAndFlush(entry));
-    }
-
-    @Transactional(readOnly = true)
-    public List<ReviewCommentResponse> comments(String actor, Set<String> authorities, UUID workflowId) {
-        DocumentWorkflow workflow = find(workflowId);
-        requireReadable(workflow, actor, authorities);
-        return audit.findByWorkflowIdOrderByCreatedAtAsc(workflowId).stream()
-                .filter(entry -> "REVIEW_COMMENT".equals(entry.getAction()))
-                .map(DocumentWorkflowService::toCommentResponse)
-                .toList();
-    }
-
-    private static ReviewCommentResponse toCommentResponse(DocumentWorkflowAudit entry) {
-        return new ReviewCommentResponse(entry.getId(), entry.getWorkflowId(), entry.getActorUserId(),
-                entry.getDocumentVersion(), entry.getComment(), entry.getCreatedAt(),
-                entry.getSectionQuote() == null ? null : new SectionFeedback(
-                        entry.getSectionStartOffset(), entry.getSectionEndOffset(), entry.getSectionQuote()));
-    }
-
-    @Transactional(readOnly = true)
-    public List<ChangeRequestResponse> changeRequests(String actor, Set<String> authorities, UUID workflowId) {
-        DocumentWorkflow workflow = find(workflowId);
-        requireReadable(workflow, actor, authorities);
-        List<DocumentWorkflowAudit> history = audit.findByWorkflowIdOrderByCreatedAtAsc(workflowId);
-        return history.stream()
-                .filter(entry -> "CHANGES_REQUESTED".equals(entry.getAction()))
-                .map(request -> new ChangeRequestResponse(request.getId(), request.getActorUserId(),
-                        request.getDocumentVersion(), request.getComment(), request.getCreatedAt(),
-                        history.stream()
-                                .filter(comment -> "REVIEW_COMMENT".equals(comment.getAction()))
-                                .filter(comment -> request.getDocumentVersion() != null
-                                        && request.getDocumentVersion().equals(comment.getDocumentVersion()))
-                                .filter(comment -> !comment.getCreatedAt().isAfter(request.getCreatedAt()))
-                                .map(DocumentWorkflowService::toCommentResponse).toList()))
-                .toList();
-    }
-
-    @Transactional
-    public WorkflowResponse staffReview(String actor, Set<String> authorities, UUID workflowId,
-            StaffReviewRequest request) {
-        require(authorities, "DOCUMENT_REVIEW");
-        String actorRole = requireRole(authorities, "STAFF");
-        DocumentWorkflow workflow = lock(workflowId);
-        if (workflow.getStatus() != DocumentWorkflowStatus.STAFF_REVIEWING
-                || !actor.equals(workflow.getReviewerUserId())) {
-            throw ApiException.forbidden("Only the assigned staff reviewer can review this document.");
-        }
-        StaffReviewResult result = request.result();
-        if (result == StaffReviewResult.CHANGES_REQUESTED
-                && (request.comment() == null || request.comment().isBlank())) {
-            throw ApiException.badRequest("A comment is required when requesting changes.");
-        }
-        DocumentWorkflowStatus previous = workflow.getStatus();
-        String comment = normalizeComment(request.comment());
-        workflow.review(result, comment);
-        workflows.saveAndFlush(workflow);
-        record(workflow, actor, result.name(), previous, workflow.getStatus(), request.comment(),
-                null, null, actorRole);
-        recordTimeline(workflow.getDocumentId(), workflow.getSubmittedDocumentVersion(),
-                "STAFF_" + result.name(),
-                comment != null ? comment : "Staff review completed: " + result.name(),
-                actor, authorities, ChangeTriggerSource.REVIEW_WORKFLOW,
-                workflow.getStatus().name(), workflow.getId().toString());
-        return toResponse(workflow);
-    }
-
-    @Transactional
-    public WorkflowResponse editAfterChanges(String actor, Set<String> authorities, UUID workflowId,
-            EditDocumentRequest request) {
-        require(authorities, "DOCUMENT_UPDATE");
-        DocumentWorkflow workflow = lock(workflowId);
-        requireOwner(workflow, actor);
-        if (workflow.getStatus() != DocumentWorkflowStatus.CHANGES_REQUESTED) {
-            throw conflict("A document can only be edited after staff requests changes.");
-        }
-        String comment = normalizeComment(request.note());
-        DocumentWorkflowStatus current = workflow.getStatus();
-        JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
-        requireDocumentOwner(document, workflow.getOwnerUserId());
-        int pendingVersion = document.path("pending_version").asInt(0);
-        int expectedVersion = pendingVersion > 0
-                ? pendingVersion
-                : document.path("current_version").asInt(0);
-        if (expectedVersion <= 0) {
-            throw conflict("The document has no editable version.");
-        }
-        if (request.expectedVersion() != null && request.expectedVersion() != expectedVersion) {
-            throw conflict("The document version changed. Reload before saving.");
-        }
-        JsonNode editedVersion = DocumentationGenerationService.callWithChangeLogOverride(
-                authorities, true,
-                () -> documents.editOwnedDocument(actor, workflow.getDocumentId(),
-                        expectedVersion, request.content(), comment));
-        int newVersion = editedVersion != null
-                ? editedVersion.path("number").asInt(expectedVersion + 1)
-                : expectedVersion + 1;
-        record(workflow, actor, "DOCUMENT_EDITED", current, current, comment);
-        recordTimeline(workflow.getDocumentId(), newVersion, "CONTENT_UPDATED",
-                comment != null ? comment : "Updated documentation content to version " + newVersion,
-                actor, authorities, ChangeTriggerSource.MANUAL_EDIT,
-                current.name(), workflow.getId().toString());
-        return toResponse(workflow);
-    }
-
-    @Transactional
-    public WorkflowResponse decide(String actor, Set<String> authorities, UUID workflowId,
-            ManagerDecision decision, String comment) {
-        require(authorities, decision == ManagerDecision.APPROVED ? "DOCUMENT_APPROVE" : "DOCUMENT_REJECT");
-        String actorRole = requireRole(authorities, "MANAGER");
-        DocumentWorkflow workflow = lock(workflowId);
-        if (workflow.getStatus() != DocumentWorkflowStatus.PENDING_MANAGER_APPROVAL
-                || workflow.getStaffReviewResult() != StaffReviewResult.PASSED) {
-            throw conflict("Manager decisions require a successful staff review.");
-        }
-        if (actor.equals(workflow.getReviewerUserId())) {
-            throw ApiException.forbidden("The staff reviewer cannot make the final manager decision.");
-        }
-        if (decision == ManagerDecision.REJECTED && (comment == null || comment.isBlank())) {
-            throw ApiException.badRequest("A rejection reason is required.");
-        }
-        DocumentWorkflowStatus previous = workflow.getStatus();
-        JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
-        requireDocumentOwner(document, workflow.getOwnerUserId());
-        int pendingVersion = document.path("pending_version").asInt(0);
-        String normalizedComment = normalizeComment(comment);
-        if (pendingVersion == workflow.getSubmittedDocumentVersion()) {
-            DocumentationGenerationService.runWithChangeLogOverride(authorities, true, () ->
-                    documents.resolveDocumentVersion(actor, workflow.getOwnerUserId(), workflow.getDocumentId(),
-                            pendingVersion, decision.name(), normalizedComment));
-        } else if (pendingVersion == 0) {
-            int currentVersion = document.path("current_version").asInt(0);
-            int totalVersions = document.path("versions_total").asInt(0);
-            boolean approvalAlreadyApplied = decision == ManagerDecision.APPROVED
-                    && currentVersion == workflow.getSubmittedDocumentVersion();
-            boolean rejectionMayNeedRetry = decision == ManagerDecision.REJECTED
-                    && totalVersions >= workflow.getSubmittedDocumentVersion();
-            if (rejectionMayNeedRetry) {
-                DocumentationGenerationService.runWithChangeLogOverride(authorities, true, () ->
-                        documents.resolveDocumentVersion(actor, workflow.getOwnerUserId(), workflow.getDocumentId(),
-                                workflow.getSubmittedDocumentVersion(), decision.name(), normalizedComment));
-            } else if (!approvalAlreadyApplied) {
-                throw conflict("The document version changed during review.");
-            }
-        } else {
-            throw conflict("The document version changed during review.");
-        }
-        workflow.decide(actor, decision, normalizedComment);
-        workflows.saveAndFlush(workflow);
-        record(workflow, actor, decision.name(), previous, workflow.getStatus(), comment,
-                null, null, actorRole);
-        recordTimeline(workflow.getDocumentId(), workflow.getSubmittedDocumentVersion(),
-                "MANAGER_" + decision.name(),
-                normalizedComment != null ? normalizedComment : "Manager decision: " + decision.name(),
-                actor, authorities, ChangeTriggerSource.REVIEW_WORKFLOW,
-                workflow.getStatus().name(), workflow.getId().toString());
-        return toResponse(workflow);
-    }
-
-    @Transactional
-    public WorkflowResponse rollback(
-            String actor,
-            Set<String> authorities,
-            UUID workflowId,
-            Integer sourceVersion,
-            String reason) {
-
-        require(authorities, "DOCUMENT_ROLLBACK");
-        requireRole(authorities, "MANAGER");
-
-        DocumentWorkflow workflow = lock(workflowId);
-
-        if (workflow.getStatus() != DocumentWorkflowStatus.APPROVED) {
-            throw conflict("Only an approved document can be rolled back.");
-        }
-
-        if (sourceVersion == null || sourceVersion <= 0) {
-            throw ApiException.badRequest("A valid source version is required.");
-        }
-
-        String comment = normalizeComment(reason);
-
-        if (comment == null) {
-            throw ApiException.badRequest("A rollback reason is required.");
-        }
-
-        if (workflow.getSubmittedDocumentVersion() != null
-                && sourceVersion.equals(workflow.getSubmittedDocumentVersion())) {
-            throw ApiException.badRequest(
-                    "The source version must be different from the currently approved version.");
-        }
-
-        JsonNode document = documents.getDocument(actor, workflow.getDocumentId());
-        requireDocumentOwner(document, workflow.getOwnerUserId());
-
-        int pendingVersion = document.path("pending_version").asInt(0);
-        int currentVersion = document.path("current_version").asInt(0);
-
-        if (pendingVersion != 0
-                || currentVersion != workflow.getSubmittedDocumentVersion()) {
-            throw conflict("The document version changed. Reload and retry.");
-        }
-
-        JsonNode rollbackVersion = DocumentationGenerationService.callWithChangeLogOverride(
-                authorities, true,
-                () -> documents.rollbackDocumentVersion(
-                        actor,
-                        workflow.getOwnerUserId(),
-                        workflow.getDocumentId(),
-                        sourceVersion,
-                        comment
-                ));
-
-        int newVersion = rollbackVersion != null ? rollbackVersion.path("number").asInt(0) : 0;
-
-        if (newVersion <= 0) {
-            throw conflict("The rollback service returned an invalid version.");
-        }
-
-        DocumentWorkflowStatus previous = workflow.getStatus();
-
-        workflow.startRollbackReview(newVersion);
-
-        workflows.saveAndFlush(workflow);
-
-        String rollbackSummary = "Restored from version " + sourceVersion + ". Reason: " + comment;
-        record(
-                workflow,
-                actor,
-                "ROLLBACK_REQUESTED",
-                previous,
-                workflow.getStatus(),
-                rollbackSummary
-        );
-        recordTimeline(
-                workflow.getDocumentId(),
-                newVersion,
-                "ROLLED_BACK",
-                rollbackSummary,
-                actor,
-                authorities,
-                ChangeTriggerSource.ROLLBACK,
-                workflow.getStatus().name(),
-                "v" + sourceVersion
-        );
-
-        return toResponse(workflow);
-    }
-
-    private void recordTimeline(
-            String documentId,
-            Integer versionNumber,
-            String action,
-            String summary,
-            String actorId,
-            Set<String> authorities,
-            ChangeTriggerSource triggerSource,
-            String status,
-            String referenceId
-    ) {
-        if (changeLogService == null) {
-            return;
-        }
-        changeLogService.recordChange(
-                documentId,
-                null,
-                versionNumber,
-                action,
-                summary,
-                actorId,
-                null,
-                authorities,
-                triggerSource,
-                status,
-                referenceId
-        );
-    }
-
-    private DocumentWorkflow lock(UUID id) {
+    static void runWithChangeLogOverride(Set<String> authorities, boolean suppressChangeLog, Runnable action) {
+        ChangeLogOverride previous = CHANGE_LOG_OVERRIDE.get();
+        CHANGE_LOG_OVERRIDE.set(new ChangeLogOverride(authorities, suppressChangeLog));
         try {
-            return workflows.lockById(id).orElseThrow(() -> ApiException.notFound("Document workflow not found."));
-        } catch (ObjectOptimisticLockingFailureException e) {
-            throw conflict("The workflow changed concurrently. Reload and retry.");
-        }
-    }
-
-    private DocumentWorkflow find(UUID id) {
-        return workflows.findById(id).orElseThrow(() -> ApiException.notFound("Document workflow not found."));
-    }
-
-    private void requireReadable(DocumentWorkflow w, String actor, Set<String> authorities) {
-        if (w.getOwnerUserId().equals(actor) && authorities.contains("DOCUMENT_VIEW")) return;
-        if (authorities.contains("DOCUMENT_REVIEW_QUEUE_VIEW")
-                && (w.getStatus() == DocumentWorkflowStatus.PENDING_STAFF_REVIEW
-                || w.getStatus() == DocumentWorkflowStatus.STAFF_REVIEWING)
-                && (w.getReviewerUserId() == null || w.getReviewerUserId().equals(actor))) return;
-        if (authorities.contains("DOCUMENT_REVIEW") && actor.equals(w.getReviewerUserId())) return;
-        if (authorities.contains("DOCUMENT_APPROVAL_QUEUE_VIEW")
-                && (w.getStatus() == DocumentWorkflowStatus.PENDING_MANAGER_APPROVAL
-                || w.getStatus() == DocumentWorkflowStatus.APPROVED
-                || w.getStatus() == DocumentWorkflowStatus.REJECTED)) return;
-        throw ApiException.notFound("Document workflow not found.");
-    }
-
-    private void requireOwner(DocumentWorkflow w, String actor) {
-        if (!w.getOwnerUserId().equals(actor)) throw ApiException.notFound("Document workflow not found.");
-    }
-
-    private void requireDocumentOwner(JsonNode document, String ownerId) {
-        if (!ownerId.equals(document.path("owner_user_id").asText(null))) {
-            throw ApiException.notFound("Owned document not found.");
-        }
-    }
-
-    private int documentVersionForSubmit(DocumentWorkflow workflow, JsonNode document) {
-        int pending = document.path("pending_version").asInt(0);
-        if (workflow.getStatus() == DocumentWorkflowStatus.CHANGES_REQUESTED) {
-            Integer prior = workflow.getSubmittedDocumentVersion();
-            if (pending <= 0 || prior == null || pending <= prior) {
-                throw conflict("Update the document version before resubmitting.");
+            action.run();
+        } finally {
+            if (previous == null) {
+                CHANGE_LOG_OVERRIDE.remove();
+            } else {
+                CHANGE_LOG_OVERRIDE.set(previous);
             }
-            return pending;
-        }
-        if (pending > 0) return pending;
-        int current = document.path("current_version").asInt(0);
-        if (current < 1) throw conflict("The document has no readable version.");
-        return current;
-    }
-
-    private int visibleDocumentVersion(DocumentWorkflow workflow, JsonNode document) {
-        if (workflow.getStatus() == DocumentWorkflowStatus.DRAFT
-                || workflow.getStatus() == DocumentWorkflowStatus.CHANGES_REQUESTED) {
-            int pending = document.path("pending_version").asInt(0);
-            return pending > 0 ? pending : document.path("current_version").asInt(1);
-        }
-        return workflow.getSubmittedDocumentVersion() == null ? 1 : workflow.getSubmittedDocumentVersion();
-    }
-
-    private void require(Set<String> authorities, String permission) {
-        if (!authorities.contains(permission)) throw ApiException.forbidden("Missing permission: " + permission);
-    }
-
-    private void requireAnyRole(Set<String> authorities, String role) {
-        if (!authorities.contains("ROLE_" + role) && !authorities.contains("ROLE_ADMINISTRATOR")
-                && !authorities.contains("ROLE_ADMIN")) {
-            throw ApiException.forbidden("The authenticated primary role cannot perform this workflow action.");
         }
     }
 
-    private String requireRole(Set<String> authorities, String role) {
-        if (!authorities.contains("ROLE_" + role)) {
-            throw ApiException.forbidden("The authenticated primary role cannot perform this workflow action.");
+    static <T> T callWithChangeLogOverride(Set<String> authorities, boolean suppressChangeLog, Supplier<T> action) {
+        ChangeLogOverride previous = CHANGE_LOG_OVERRIDE.get();
+        CHANGE_LOG_OVERRIDE.set(new ChangeLogOverride(authorities, suppressChangeLog));
+        try {
+            return action.get();
+        } finally {
+            if (previous == null) {
+                CHANGE_LOG_OVERRIDE.remove();
+            } else {
+                CHANGE_LOG_OVERRIDE.set(previous);
+            }
         }
-        return role;
     }
 
-    private void requireAdministrator(Set<String> authorities) {
-        if (!authorities.contains("ROLE_ADMINISTRATOR") && !authorities.contains("ROLE_ADMIN")) {
-            throw ApiException.forbidden("Only an administrator can reassign a review.");
+    public JsonNode generate(String userId, UUID repositoryId,
+            DocumentationGenerationRequest request) {
+        return generate(userId, repositoryId, request, null);
+    }
+
+    public JsonNode generate(String userId, UUID repositoryId,
+            DocumentationGenerationRequest request, String verifiedWorkspaceId) {
+        RepositorySnapshot snapshot = verifiedWorkspaceId == null
+                ? repositorySyncService.latestOrSync(userId, repositoryId)
+                : repositorySyncService.latestOrSync(userId, repositoryId, verifiedWorkspaceId);
+        AnalysisInput input = AnalysisInput.from(snapshot);
+        if (input.files().isEmpty()) {
+            throw ApiException.badRequest("The latest repository sync contains no source files with content.");
+        }
+
+        JsonNode analysis;
+        try {
+            ResponseEntity<JsonNode> response = analyzerClient.post()
+                    .uri("/api/v1/analyze-repo")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(input)
+                    .retrieve()
+                    .toEntity(JsonNode.class);
+            if (response.getStatusCode().value() != 200) {
+                throw integrationFailure("ANALYZER_INVALID_RESPONSE",
+                        "The code analyzer returned an unexpected HTTP status.");
+            }
+            analysis = response.getBody();
+        } catch (RestClientException e) {
+            throw integrationFailure("ANALYZER_FAILED",
+                    "The code analyzer could not analyze the synchronized repository.");
+        }
+
+        if (analysis == null || !analysis.isObject() || !analysis.path("files").isArray()
+                || analysis.path("files").isEmpty()) {
+            throw integrationFailure("ANALYZER_INVALID_RESPONSE",
+                    "The code analyzer returned an invalid or empty analysis response.");
+        }
+
+        ObjectNode generationRequest = (ObjectNode) analysis.deepCopy();
+        if (request != null && request.templateId() != null && !request.templateId().isBlank()) {
+            generationRequest.put("template_id", request.templateId());
+        }
+        if (request != null && request.outputLanguage() != null && !request.outputLanguage().isBlank()) {
+            generationRequest.put("output_language", request.outputLanguage());
+        }
+        ObjectNode sourceSnapshot = generationRequest.putObject("source_snapshot");
+
+        sourceSnapshot.put("repository_id", repositoryId.toString());
+        sourceSnapshot.put("repository_full_name", snapshot.repository().fullName());
+        sourceSnapshot.put("branch", snapshot.branch());
+        sourceSnapshot.put("commit_sha", snapshot.headCommit().sha());
+        sourceSnapshot.put("fetched_at", snapshot.fetchedAt().toString());
+        JsonNode job;
+        try {
+            ResponseEntity<JsonNode> response = aiServiceClient.post()
+                    .uri("/generate")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(generationRequest)
+                    .retrieve()
+                    .toEntity(JsonNode.class);
+            if (response.getStatusCode().value() != 202) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE",
+                        "The AI service returned an unexpected HTTP status.");
+            }
+            job = response.getBody();
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "TEMPLATE_NOT_FOUND",
+                        "The selected documentation template does not exist. Choose another template.");
+            }
+            if (e.getStatusCode().value() == 422) {
+                String detail = DocumentationTemplateService.detail(e);
+                throw new ApiException(HttpStatus.BAD_REQUEST, "GENERATION_REQUEST_INVALID",
+                        detail != null ? detail : "The documentation generation settings are not valid.");
+            }
+            throw integrationFailure("AI_SERVICE_FAILED",
+                    "The AI service could not start documentation generation.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED",
+                    "The AI service could not start documentation generation.");
+        }
+
+        if (job == null || !job.isObject() || !job.path("id").isTextual()
+                || !job.path("status").isTextual()) {
+            throw integrationFailure("AI_SERVICE_INVALID_RESPONSE",
+                    "The AI service returned an invalid job response.");
+        }
+        String jobId = job.path("id").asText();
+        jobOwners.put(jobId, userId);
+        jobRepositories.put(jobId, repositoryId);
+        UUID documentId = relationshipService.recordGeneration(userId, repositoryId,
+                jobId, analysis, snapshot);
+        if (job instanceof ObjectNode jobObject) jobObject.put("documentId", documentId.toString());
+        return job;
+    }
+
+    public JsonNode getJob(String userId, String jobId) {
+        requireJobOwner(userId, jobId);
+        return getAiJson("/jobs/" + jobId, "AI_SERVICE_FAILED",
+                "The AI service could not return the documentation job.");
+    }
+
+    public String getResult(String userId, String jobId) {
+        requireJobOwner(userId, jobId);
+        try {
+            String result = aiServiceClient.get().uri("/jobs/{id}/result", jobId)
+                    .retrieve().body(String.class);
+            if (result == null || result.isBlank()) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE",
+                        "The AI service returned an empty documentation result.");
+            }
+            relationshipService.saveGeneratedMarkdown(userId, jobId, result);
+            return result;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                throw ApiException.notFound("Documentation job or result not found in the AI service.");
+            }
+            if (e.getStatusCode().value() == 409) {
+                throw new ApiException(HttpStatus.CONFLICT, "DOCUMENTATION_NOT_READY",
+                        "The documentation result is not ready yet.");
+            }
+            throw integrationFailure("AI_SERVICE_FAILED",
+                    "The AI service could not return the generated documentation.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED",
+                    "The AI service could not return the generated documentation.");
         }
     }
 
-    private void record(DocumentWorkflow w, String actor, String action,
-            DocumentWorkflowStatus previous, DocumentWorkflowStatus next, String comment) {
-        record(w, actor, action, previous, next, comment, null, null);
+    public JsonNode getReport(String userId, String jobId) {
+        requireJobOwner(userId, jobId);
+        return getAiJson("/jobs/" + jobId + "/report", "AI_SERVICE_FAILED",
+                "The AI service could not return the documentation report.");
     }
 
-    private void record(DocumentWorkflow w, String actor, String action,
-            DocumentWorkflowStatus previous, DocumentWorkflowStatus next, String comment,
-            String previousReviewer, String newReviewer) {
-        record(w, actor, action, previous, next, comment, previousReviewer, newReviewer, null);
+    public JsonNode saveOwnedDocument(String userId, Set<String> authorities,
+            String jobId, String title) {
+        if (authorities == null || !authorities.contains("DOCUMENT_CREATE")) {
+            throw ApiException.forbidden("Missing permission: DOCUMENT_CREATE");
+        }
+        requireJobOwner(userId, jobId);
+        String primaryRole = resolvePrimaryRole(authorities);
+        try {
+            JsonNode document = aiServiceClient.post().uri("/internal/documents/from-job")
+                    .header("X-User-Id", userId)
+                    .header("X-User-Roles", primaryRole)
+                    .header("X-Trigger-Source", ChangeTriggerSource.AI_GENERATION.name())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(java.util.Map.of("job_id", jobId, "title", title == null ? "" : title))
+                    .retrieve().body(JsonNode.class);
+            if (document == null || !document.path("id").isTextual()
+                    || !userId.equals(document.path("owner_user_id").asText())) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE",
+                        "The AI service did not return a document owned by the authenticated user.");
+            }
+            if (changeLogService != null) {
+                String docId = document.path("id").asText();
+                String docTitle = document.path("title").asText(title == null ? docId : title);
+                changeLogService.recordChange(
+                        docId,
+                        jobRepositories.get(jobId),
+                        1,
+                        "CREATED",
+                        "Saved generated documentation \"" + docTitle + "\" from job " + jobId,
+                        userId,
+                        null,
+                        authorities,
+                        ChangeTriggerSource.AI_GENERATION,
+                        "DRAFT",
+                        jobId
+                );
+            }
+            return document;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) throw ApiException.notFound("Documentation job not found.");
+            if (e.getStatusCode().value() == 409) throw new ApiException(HttpStatus.CONFLICT,
+                    "DOCUMENTATION_NOT_READY", "The documentation job is not complete yet.");
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not save the document.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not save the document.");
+        }
     }
 
-    private void record(DocumentWorkflow w, String actor, String action,
-            DocumentWorkflowStatus previous, DocumentWorkflowStatus next, String comment,
-            String previousReviewer, String newReviewer, String actorRole) {
-        DocumentWorkflowAudit entry = new DocumentWorkflowAudit(w.getId(), actor, action,
-                previous == null ? null : previous.name(), next.name(), normalizeComment(comment),
-                previousReviewer, newReviewer, actorRole);
-        entry.setDocumentVersion(w.getSubmittedDocumentVersion());
-        audit.save(entry);
+    public JsonNode getDocument(String userId, String documentId) {
+        try {
+            JsonNode document = aiServiceClient.get().uri("/internal/documents/{id}", documentId)
+                    .header("X-User-Id", userId).retrieve().body(JsonNode.class);
+            if (document == null || !document.isObject()) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid document.");
+            }
+            return document;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) throw ApiException.notFound("Document not found.");
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not return the document.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not return the document.");
+        }
     }
 
-    private static String normalizeComment(String comment) {
-        return comment == null || comment.isBlank() ? null : comment.trim();
+    public String getDocumentContent(String userId, String documentId, int version) {
+        try {
+            String content = aiServiceClient.get().uri(uri -> uri.path("/internal/documents/{id}/content")
+                            .queryParam("version", version).build(documentId))
+                    .header("X-User-Id", userId).retrieve().body(String.class);
+            if (content == null) throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned no document content.");
+            return content;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) throw ApiException.notFound("Document version not found.");
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not return document content.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not return document content.");
+        }
     }
 
-    private static PageRequest page(int number, int size) {
-        if (number < 0 || size < 1 || size > 100) throw ApiException.badRequest("page must be non-negative; size must be 1 to 100.");
-        return PageRequest.of(number, size, Sort.by(Sort.Direction.ASC, "createdAt"));
+    public JsonNode getExactDocumentVersion(String userId, String documentId, int version) {
+        try {
+            JsonNode result = aiServiceClient.get().uri("/internal/documents/{id}/versions/{version}", documentId, version)
+                    .header("X-User-Id", userId).retrieve().body(JsonNode.class);
+            if (result == null || !result.isObject() || result.path("number").asInt() != version) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid version.");
+            }
+            return result;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) throw ApiException.notFound("Document version not found.");
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not return the document version.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not return the document version.");
+        }
     }
 
-    private static <T> PageResponse<T> page(Page<T> p) {
-        return new PageResponse<>(p.getContent(), p.getNumber(), p.getSize(), p.getTotalElements(),
-                p.getTotalPages(), p.isFirst(), p.isLast());
+    public JsonNode getDocumentReviewEvidence(String userId, String documentId, int version) {
+        try {
+            JsonNode evidence = aiServiceClient.get()
+                    .uri(uri -> uri.path("/internal/documents/{id}/review-evidence")
+                            .queryParam("version", version)
+                            .build(documentId))
+                    .header("X-User-Id", userId)
+                    .retrieve()
+                    .body(JsonNode.class);
+
+            if (evidence == null || !evidence.isObject()) {
+                throw integrationFailure(
+                        "AI_SERVICE_INVALID_RESPONSE",
+                        "The AI service returned invalid review evidence.");
+            }
+
+            return evidence;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                throw ApiException.notFound(
+                        "Review evidence not found for this document version.");
+            }
+
+            throw integrationFailure(
+                    "AI_SERVICE_FAILED",
+                    "The AI service could not return document review evidence.");
+        } catch (RestClientException e) {
+            throw integrationFailure(
+                    "AI_SERVICE_FAILED",
+                    "The AI service could not return document review evidence.");
+        }
     }
 
-    private static WorkflowResponse toResponse(DocumentWorkflow w) {
-        return new WorkflowResponse(w.getId(), w.getDocumentId(), w.getDocumentTitle(), w.getOwnerUserId(),
-                w.getStatus(), w.getSubmittedDocumentVersion(), w.getReviewerUserId(), w.getStaffReviewResult(),
-                w.getStaffComment(), w.getManagerUserId(), w.getManagerDecision(), w.getManagerComment(),
-                w.getCreatedAt(), w.getUpdatedAt(), w.getSubmittedAt(), w.getReviewedAt(), w.getDecidedAt(),
-                w.getOptimisticVersion());
+    public JsonNode verifySourceSnapshot(String ownerUserId, JsonNode evidence) {
+        ObjectNode result = evidence.deepCopy();
+        ObjectNode verification = JsonNodeFactory.instance.objectNode();
+
+        verification.put("checked_at", Instant.now().toString());
+
+        JsonNode sourceSnapshot = evidence.path("source_snapshot");
+        String repositoryId = sourceSnapshot.path("repository_id").asText("");
+        String expectedSha = sourceSnapshot.path("commit_sha").asText("");
+
+        verification.put("expected_commit_sha", expectedSha);
+
+        if (repositoryId.isBlank() || !expectedSha.matches("(?i)[0-9a-f]{40}")) {
+            verification.put("status", "UNVERIFIABLE");
+            verification.put("current_commit_sha", (String) null);
+            verification.put("message", "The original source snapshot is missing or invalid.");
+            result.set("source_verification", verification);
+            return result;
+        }
+
+        final UUID parsedRepositoryId;
+        try {
+            parsedRepositoryId = UUID.fromString(repositoryId);
+        } catch (IllegalArgumentException e) {
+            verification.put("status", "UNVERIFIABLE");
+            verification.put("current_commit_sha", (String) null);
+            verification.put("message", "The original repository identifier is invalid.");
+            result.set("source_verification", verification);
+            return result;
+        }
+
+        try {
+            RepositorySnapshot currentSnapshot = repositorySyncService.sync(
+                    ownerUserId,
+                    parsedRepositoryId,
+                    SyncOptions.defaults());
+
+            String currentSha = currentSnapshot == null || currentSnapshot.headCommit() == null
+                    ? null
+                    : currentSnapshot.headCommit().sha();
+
+            if (currentSha == null || !currentSha.matches("(?i)[0-9a-f]{40}")) {
+                verification.put("status", "UNVERIFIABLE");
+                verification.put("current_commit_sha", (String) null);
+                verification.put("message", "The current repository snapshot has no valid commit SHA.");
+            } else {
+                verification.put("current_commit_sha", currentSha);
+
+                if (expectedSha.equalsIgnoreCase(currentSha)) {
+                    verification.put("status", "MATCH");
+                    verification.put("message", "The repository source has not changed.");
+                } else {
+                    verification.put("status", "CHANGED");
+                    verification.put("message", "The repository source has changed since document generation.");
+                }
+            }
+        } catch (RepositorySyncException | ApiException e) {
+            verification.put("status", "UNVERIFIABLE");
+            verification.put("current_commit_sha", (String) null);
+            verification.put("message", "The current repository source could not be verified.");
+        }
+
+        result.set("source_verification", verification);
+        return result;
     }
 
-    private static ApiException conflict(String message) {
-        return new ApiException(org.springframework.http.HttpStatus.CONFLICT, "WORKFLOW_CONFLICT", message);
+    /** LD-184: every version of a saved document, newest first. */
+    public JsonNode getDocumentVersions(String userId, String documentId) {
+        try {
+            JsonNode versions = aiServiceClient.get()
+                    .uri("/internal/documents/{id}/versions", documentId)
+                    .header("X-User-Id", userId)
+                    .retrieve()
+                    .body(JsonNode.class);
+            if (versions == null || !versions.isArray()) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE",
+                        "The AI service returned an invalid version list.");
+            }
+            return versions;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) throw ApiException.notFound("Document not found.");
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not list the document versions.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not list the document versions.");
+        }
+    }
+
+    /**
+     * LD-183: added, removed and modified lines between two versions of a saved document.
+     * {@code from} / {@code to} may be null: the current version is then compared with the
+     * previous one.
+     */
+    public JsonNode compareDocumentVersions(String userId, String documentId, Integer from, Integer to) {
+        try {
+            JsonNode diff = aiServiceClient.get()
+                    .uri(uri -> {
+                        uri.path("/internal/documents/{id}/compare");
+                        if (from != null) uri.queryParam("from", from);
+                        if (to != null) uri.queryParam("to", to);
+                        return uri.build(documentId);
+                    })
+                    .header("X-User-Id", userId)
+                    .retrieve()
+                    .body(JsonNode.class);
+            if (diff == null || !diff.isObject() || !diff.path("rows").isArray()
+                    || !diff.path("from_version").isObject() || !diff.path("to_version").isObject()) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE",
+                        "The AI service returned an invalid version comparison.");
+            }
+            return diff;
+        } catch (RestClientResponseException e) {
+            String detail = DocumentationTemplateService.detail(e);
+            int status = e.getStatusCode().value();
+            if (status == 404) {
+                throw ApiException.notFound(detail != null ? detail : "Document version not found.");
+            }
+            if (status == 409) {
+                throw new ApiException(HttpStatus.CONFLICT, "DOCUMENT_COMPARISON_UNAVAILABLE",
+                        detail != null ? detail : "Create a version first to enable comparison.");
+            }
+            if (status == 400 || status == 422) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "DOCUMENT_COMPARISON_INVALID",
+                        detail != null ? detail : "Select two different versions to compare.");
+            }
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not compare the document versions.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not compare the document versions.");
+        }
+    }
+
+    public JsonNode getDocumentReviewComparison(String userId, String documentId) {
+        try {
+            JsonNode comparison = aiServiceClient.get()
+                    .uri("/internal/documents/{id}/review-comparison", documentId)
+                    .header("X-User-Id", userId)
+                    .retrieve()
+                    .body(JsonNode.class);
+
+            if (comparison == null || !comparison.isObject()
+                    || !comparison.path("pending_version").isObject()) {
+                throw integrationFailure(
+                        "AI_SERVICE_INVALID_RESPONSE",
+                        "The AI service returned invalid review comparison.");
+            }
+
+            return comparison;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                throw ApiException.notFound("Document not found.");
+            }
+            if (e.getStatusCode().value() == 409) {
+                throw new ApiException(
+                        HttpStatus.CONFLICT,
+                        "DOCUMENT_VERSION_NOT_PENDING",
+                        "No document version is awaiting review.");
+            }
+
+            throw integrationFailure(
+                    "AI_SERVICE_FAILED",
+                    "The AI service could not return document version comparison.");
+        } catch (RestClientException e) {
+            throw integrationFailure(
+                    "AI_SERVICE_FAILED",
+                    "The AI service could not return document version comparison.");
+        }
+    }
+
+    public JsonNode getDocumentEvidence(String userId, String documentId, int version) {
+        try {
+            JsonNode evidence = aiServiceClient.get()
+                    .uri(uri -> uri.path("/internal/documents/{id}/evidence")
+                            .queryParam("version", version)
+                            .build(documentId))
+                    .header("X-User-Id", userId)
+                    .retrieve()
+                    .body(JsonNode.class);
+
+            if (evidence == null || !evidence.isObject()) {
+                throw integrationFailure(
+                        "AI_SERVICE_INVALID_RESPONSE",
+                        "The AI service returned invalid grounding evidence.");
+            }
+
+            return evidence;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                throw ApiException.notFound(
+                        "Grounding evidence not found for this document version.");
+            }
+
+            throw integrationFailure(
+                    "AI_SERVICE_FAILED",
+                    "The AI service could not return grounding evidence.");
+        } catch (RestClientException e) {
+            throw integrationFailure(
+                    "AI_SERVICE_FAILED",
+                    "The AI service could not return grounding evidence.");
+        }
+    }
+
+    public JsonNode editOwnedDocument(String userId, String documentId, int expectedVersion,
+            String content, String note) {
+        ChangeLogOverride override = CHANGE_LOG_OVERRIDE.get();
+        Set<String> authorities = override != null ? override.authorities() : Set.of();
+        boolean suppressLog = override != null && override.suppressChangeLog();
+        String primaryRole = resolvePrimaryRole(authorities);
+        try {
+            ObjectNode request = JsonNodeFactory.instance.objectNode().put("content", content)
+                    .put("expected_version", expectedVersion);
+            if (note != null) request.put("note", note);
+            JsonNode version = aiServiceClient.put().uri("/internal/documents/{id}/content", documentId)
+                    .header("X-User-Id", userId)
+                    .header("X-User-Roles", primaryRole)
+                    .header("X-Trigger-Source", ChangeTriggerSource.MANUAL_EDIT.name())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(request).retrieve().body(JsonNode.class);
+            if (version == null || !version.isObject()) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid version.");
+            }
+            if (!suppressLog && changeLogService != null) {
+                int newVersion = version.path("number").asInt(expectedVersion + 1);
+                String summary = (note != null && !note.isBlank())
+                        ? note
+                        : "Updated documentation content to version " + newVersion;
+                changeLogService.recordChange(
+                        documentId,
+                        null,
+                        newVersion,
+                        "CONTENT_UPDATED",
+                        summary,
+                        userId,
+                        null,
+                        authorities,
+                        ChangeTriggerSource.MANUAL_EDIT,
+                        "DRAFT",
+                        null
+                );
+            }
+            return version;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) throw ApiException.notFound("Owned document not found.");
+            if (e.getStatusCode().value() == 409) throw new ApiException(HttpStatus.CONFLICT,
+                    "DOCUMENT_VERSION_PENDING", "A document version is already awaiting review.");
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not save the edited version.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not save the edited version.");
+        }
+    }
+
+    public int editStaffDraft(String actor, String owner, String documentId, int expected,
+            String content, String reason) {
+        try {
+            ObjectNode body = JsonNodeFactory.instance.objectNode().put("expected_version", expected)
+                    .put("content", content).put("note", reason);
+            JsonNode response = aiServiceClient.put().uri("/internal/documents/{id}/staff-draft", documentId)
+                    .header("X-User-Id", actor).header("X-Document-Owner-Id", owner)
+                    .contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(JsonNode.class);
+            if (response == null || response.path("number").asInt() != expected + 1
+                    || response.path("evidence_from_version").asInt() != expected) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE", "The AI service returned an invalid Staff draft.");
+            }
+            return response.path("number").asInt();
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 409) {
+                throw new ApiException(HttpStatus.CONFLICT, "STAFF_DRAFT_CONFLICT",
+                        DocumentationTemplateService.detail(e));
+            }
+            if (e.getStatusCode().value() == 422) {
+                throw ApiException.badRequest(DocumentationTemplateService.detail(e));
+            }
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not save the Staff draft.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not save the Staff draft.");
+        }
+    }
+
+    public void resolveDocumentVersion(String actorUserId, String ownerUserId, String documentId,
+            int version, String decision, String note) {
+        resolveDocumentVersion(actorUserId, ownerUserId, documentId, version, decision, note, false);
+    }
+
+    public void resolveDocumentVersion(String actorUserId, String ownerUserId, String documentId,
+            int version, String decision, String note, boolean replay) {
+        ChangeLogOverride override = CHANGE_LOG_OVERRIDE.get();
+        Set<String> authorities = override != null ? override.authorities() : Set.of();
+        boolean suppressLog = override != null && override.suppressChangeLog();
+        String primaryRole = resolvePrimaryRole(authorities);
+        try {
+            ObjectNode request = JsonNodeFactory.instance.objectNode()
+                    .put("version", version).put("decision", decision);
+            if (replay) request.put("replay", true);
+            if (note != null) request.put("note", note);
+            aiServiceClient.post().uri("/internal/documents/{id}/review-decision", documentId)
+                    .header("X-User-Id", actorUserId)
+                    .header("X-Document-Owner-Id", ownerUserId)
+                    .header("X-User-Roles", primaryRole)
+                    .header("X-Trigger-Source", ChangeTriggerSource.REVIEW_WORKFLOW.name())
+                    .contentType(MediaType.APPLICATION_JSON).body(request)
+                    .retrieve().toBodilessEntity();
+
+            // Replay is an idempotent retry: the original decision already logged.
+            if (!suppressLog && !replay && changeLogService != null) {
+                String summary = (note != null && !note.isBlank())
+                        ? note
+                        : "Version " + version + " marked as " + decision;
+                changeLogService.recordChange(
+                        documentId,
+                        null,
+                        version,
+                        "WORKFLOW_" + decision,
+                        summary,
+                        actorUserId,
+                        null,
+                        authorities,
+                        ChangeTriggerSource.REVIEW_WORKFLOW,
+                        decision,
+                        "v" + version
+                );
+            }
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) throw ApiException.notFound("Owned document version not found.");
+            if (e.getStatusCode().value() == 409) throw new ApiException(HttpStatus.CONFLICT,
+                    "DOCUMENT_VERSION_CONFLICT", "The document version changed during review.");
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not record the document decision.");
+        } catch (RestClientException e) {
+            throw integrationFailure("AI_SERVICE_FAILED", "The AI service could not record the document decision.");
+        }
+    }
+
+    public JsonNode rollbackDocumentVersion(
+            String actorUserId,
+            String ownerUserId,
+            String documentId,
+            int sourceVersion,
+            String reason) {
+        ChangeLogOverride override = CHANGE_LOG_OVERRIDE.get();
+        Set<String> authorities = override != null ? override.authorities() : Set.of();
+        boolean suppressLog = override != null && override.suppressChangeLog();
+        String primaryRole = resolvePrimaryRole(authorities);
+        try {
+            ObjectNode request = JsonNodeFactory.instance.objectNode()
+                    .put("source_version", sourceVersion)
+                    .put("note", reason);
+
+            JsonNode version = aiServiceClient.post()
+                    .uri("/internal/documents/{id}/rollback", documentId)
+                    .header("X-User-Id", actorUserId)
+                    .header("X-Document-Owner-Id", ownerUserId)
+                    .header("X-User-Roles", primaryRole)
+                    .header("X-Trigger-Source", ChangeTriggerSource.ROLLBACK.name())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(request)
+                    .retrieve()
+                    .body(JsonNode.class);
+
+            if (version == null || !version.isObject()
+                    || !version.hasNonNull("number")) {
+                throw integrationFailure(
+                        "AI_SERVICE_INVALID_RESPONSE",
+                        "The AI service returned an invalid rollback version.");
+            }
+
+            if (!suppressLog && changeLogService != null) {
+                int newVersion = version.path("number").asInt(0);
+                changeLogService.recordChange(
+                        documentId,
+                        null,
+                        newVersion > 0 ? newVersion : null,
+                        "ROLLED_BACK",
+                        "Rolled back to version " + sourceVersion + (reason != null ? ": " + reason : ""),
+                        actorUserId,
+                        null,
+                        authorities,
+                        ChangeTriggerSource.ROLLBACK,
+                        "PENDING_STAFF_REVIEW",
+                        "v" + sourceVersion
+                );
+            }
+
+            return version;
+
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                throw ApiException.notFound(
+                        "Owned document or source version not found.");
+            }
+
+            if (e.getStatusCode().value() == 409) {
+                throw new ApiException(
+                        HttpStatus.CONFLICT,
+                        "DOCUMENT_ROLLBACK_CONFLICT",
+                        "The document cannot be rolled back while another version is awaiting review, or the source version is not approved.");
+            }
+
+            throw integrationFailure(
+                    "AI_SERVICE_FAILED",
+                    "The AI service could not create the rollback version.");
+
+        } catch (RestClientException e) {
+            throw integrationFailure(
+                    "AI_SERVICE_FAILED",
+                    "The AI service could not create the rollback version.");
+        }
+    }
+
+    private String resolvePrimaryRole(Set<String> authorities) {
+        if (changeLogService != null) {
+            return changeLogService.resolvePrimaryRole(authorities);
+        }
+        return "DEVELOPER";
+    }
+
+    private JsonNode getAiJson(String path, String code, String message) {
+        try {
+            JsonNode result = aiServiceClient.get().uri(path).retrieve().body(JsonNode.class);
+            if (result == null || !result.isObject()) {
+                throw integrationFailure("AI_SERVICE_INVALID_RESPONSE",
+                        "The AI service returned an invalid response.");
+            }
+            return result;
+        } catch (RestClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                throw ApiException.notFound("Documentation job or report not found in the AI service.");
+            }
+            if (e.getStatusCode().value() == 409) {
+                throw new ApiException(HttpStatus.CONFLICT, "DOCUMENTATION_NOT_READY",
+                        "The documentation job or report is not ready yet.");
+            }
+            throw integrationFailure(code, message);
+        } catch (RestClientException e) {
+            throw integrationFailure(code, message);
+        }
+    }
+
+    private void requireJobOwner(String userId, String jobId) {
+        String owner = jobOwners.get(jobId);
+        if (owner == null) {
+            throw ApiException.notFound("Documentation job not found or the service was restarted.");
+        }
+        if (!Objects.equals(owner, userId)) {
+            throw ApiException.forbidden("This documentation job belongs to another user.");
+        }
+    }
+
+    private ApiException integrationFailure(String code, String message) {
+        return new ApiException(HttpStatus.BAD_GATEWAY, code, message);
     }
 }
