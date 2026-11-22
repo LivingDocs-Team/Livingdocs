@@ -150,8 +150,8 @@ jobs:
           done
           echo "Frontend did not start"; cat "$RUNNER_TEMP/frontend.log"; exit 1
 
-      - name: Run documentation preview, editing (LD-105), template (LD-96) and RBAC screen-flow UI tests
-        run: python -m pytest -v tests/test_documentation_preview_editing.py tests/test_frontend_templates.py tests/test_repository_activity.py tests/test_profile_preferences.py tests/test_rbac_screen_flow.py tests/test_frontend_admin.py
+      - name: Run documentation, Manager approval and RBAC UI tests
+        run: python -m pytest -v tests/test_documentation_preview_editing.py tests/test_frontend_templates.py tests/test_repository_activity.py tests/test_profile_preferences.py tests/test_rbac_screen_flow.py tests/test_frontend_admin.py tests/test_manager_approval.py
 
       - name: Upload test report
         if: always()
@@ -392,20 +392,25 @@ jobs:
           docker compose -f compose.yaml config > "$RUNNER_TEMP/compose.rendered.yaml"
           grep -q GITHUB_WEBHOOK_SECRET "$RUNNER_TEMP/compose.rendered.yaml"
 
-      - name: Build application images
-        run: docker compose -f compose.yaml build backend ai-service code-analyzer github-integration frontend
+      - name: Verify Maven build retry behavior
+        run: sh scripts/test-docker-maven-retry.sh
 
   release-smoke-test:
     name: Release Smoke Test (LD-404)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: [docker-compose-validation]
+    env:
+      TOKEN_ENCRYPTION_KEY: "ci-validation-placeholder-only"
+      GITHUB_INTEGRATION_INTERNAL_SECRET: "ci-validation-placeholder-only"
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID: "ci-validation-placeholder-only"
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_SECRET: "ci-validation-placeholder-only"
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Build application images for all smoke runs
+        run: docker --context default compose --env-file /dev/null -f compose.yaml build backend ai-service code-analyzer github-integration frontend
 
       - name: Make scripts executable
         run: |
@@ -428,16 +433,16 @@ jobs:
             done
           }
 
-          if SMOKE_REPORT_DIR=artifacts/failure VERIFY_TIMEOUT=0 ./scripts/verify-compose.sh; then
+          if SMOKE_REPORT_DIR=artifacts/failure VERIFY_TIMEOUT=0 ./scripts/verify-compose.sh --no-build; then
             echo "Expected a failure after application startup" >&2
             exit 1
           fi
           grep -F 'backend-db did not become healthy within 0s' artifacts/failure/ld-404-smoke-report.log
           assert_clean artifacts/failure
 
-          SMOKE_REPORT_DIR=artifacts/first VERIFY_LEGACY_RESTORE=1 ./scripts/verify-compose.sh
+          SMOKE_REPORT_DIR=artifacts/first VERIFY_LEGACY_RESTORE=1 ./scripts/verify-compose.sh --no-build
           assert_clean artifacts/first
-          SMOKE_REPORT_DIR=artifacts/second ./scripts/verify-compose.sh
+          SMOKE_REPORT_DIR=artifacts/second ./scripts/verify-compose.sh --no-build
           assert_clean artifacts/second
 
       - name: Upload smoke artifacts

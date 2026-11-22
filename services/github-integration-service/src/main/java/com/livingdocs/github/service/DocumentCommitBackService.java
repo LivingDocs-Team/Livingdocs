@@ -50,12 +50,12 @@ public class DocumentCommitBackService {
             throw ApiException.forbidden("Manager approval permission is required.");
         }
         var workflow = workflows.lockById(workflowId).orElseThrow(() -> ApiException.notFound("Workflow not found."));
+        if (!actor.equals(workflow.getManagerUserId())) {
+            throw ApiException.notFound("Workflow not found.");
+        }
         if (workflow.getStatus() != DocumentWorkflowStatus.APPROVED
                 || !Objects.equals(workflow.getSubmittedDocumentVersion(), version)) {
             throw conflict("The requested document version is not approved.");
-        }
-        if (!actor.equals(workflow.getManagerUserId())) {
-            throw ApiException.forbidden("Only the approving manager can commit this version.");
         }
         String documentId = workflow.getDocumentId();
         if (!documentId.matches("[0-9a-f]{32}")) {
