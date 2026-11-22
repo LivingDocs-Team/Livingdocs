@@ -372,19 +372,16 @@ def test_signed_in_user_opening_login_goes_to_the_landing_page(page: Page):
 # ---------- placeholders ----------
 
 def test_placeholder_screen_keeps_its_place_in_the_flow(page: Page):
-    start(page, Api("DEVELOPER"))
-    link = menu_link(page, "Coverage Gaps")
-    expect(link).to_have_attribute("data-status", "placeholder")
-    expect(link).to_have_class(re.compile(r"\bis-placeholder\b"))          # dimmed
-    expect(link).to_have_attribute("title", "Chưa triển khai")
-    expect(menu_link(page, "Generated Documents")).not_to_have_class(re.compile(r"\bis-placeholder\b"))
-
-    link.click()
-    expect(page.get_by_role("heading", name="Coverage Gaps")).to_be_visible()
+    # Staff > Review Queue > Change Log is the one sub-screen of the official flows that is still unbuilt
+    start(page, Api("STAFF"), f"{FRONTEND}/#/review/queue/change-log")
+    expect(page.get_by_role("heading", name="Change Log")).to_be_visible()
     expect(page.get_by_text("Chưa triển khai")).to_be_visible()
     breadcrumb = page.get_by_role("navigation", name="Breadcrumb")
-    expect(breadcrumb.get_by_role("listitem")).to_have_text(["Documentation Generation", "Coverage Gaps"])
-    expect(page.get_by_text("#8 Documentation Generation & Editing")).to_be_visible()
+    expect(breadcrumb.get_by_role("listitem")).to_have_text(["Document Review", "Review Queue", "Change Log"])
+    expect(page.get_by_text("#18 Version History, Change Log & Comparison")).to_be_visible()
+    # the parent stays highlighted and implemented screens are not dimmed
+    expect(menu_link(page, "Review Queue")).to_have_attribute("aria-current", "page")
+    expect(menu_link(page, "Review Queue")).not_to_have_attribute("data-status", "placeholder")
 
 
 def test_menu_lists_main_screens_only_and_the_parent_stays_highlighted_on_a_sub_screen(page: Page):

@@ -1,0 +1,164 @@
+/* Coverage Gaps, Change Log, Notifications and the read-only Template Library share these small helpers. */
+.insight-page label {
+  display: block;
+  margin-top: 1rem;
+}
+
+.insight-tag {
+  display: inline-block;
+  margin-inline: 0.4rem;
+  padding: 0.05rem 0.5rem;
+  border: 1px solid var(--border, currentColor);
+  border-radius: 999px;
+  font-size: 0.75em;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.insight-summary {
+  margin-block: 1rem;
+}
+
+.insight-summary progress {
+  width: 100%;
+  height: 0.75rem;
+}
+
+.insight-figure strong {
+  font-size: 2rem;
+}
+
+.insight-group {
+  margin-block: 1rem;
+}
+
+.insight-group h3,
+.changelog-entry h3 {
+  overflow-wrap: anywhere;
+}
+
+.insight-group ul,
+.changelog,
+.notification-list,
+.template-catalog {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.insight-group li,
+.changelog-entry li {
+  padding-block: 0.25rem;
+  overflow-wrap: anywhere;
+}
+
+.changelog-entry,
+.template-catalog-item {
+  padding-block: 1rem;
+  border-top: 1px solid var(--border, currentColor);
+}
+
+.changelog-entry blockquote {
+  margin-inline: 0;
+  padding-inline-start: 0.75rem;
+  border-inline-start: 3px solid var(--border, currentColor);
+}
+
+.template-catalog-item pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.insight-toolbar,
+.insight-pager {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-block: 0.75rem;
+}
+
+.insight-page .insight-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.notification {
+  border-top: 1px solid var(--border, currentColor);
+}
+
+.notification > button {
+  display: grid;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.75rem;
+  text-align: left;
+  background: transparent;
+  color: inherit;
+  font-weight: 400;
+}
+
+.notification.is-unread > button strong::before {
+  content: '';
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.5rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.notification > button[aria-pressed='true'] {
+  outline: 2px solid currentColor;
+}
+
+.notification-details {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border, currentColor);
+}
+
+.notification-details dl {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.notification-details dt {
+  font-weight: 700;
+}
+
+.notification-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.insight-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  margin: 0.75rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.insight-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.insight-rows li {
+  display: grid;
+  gap: 0.15rem;
+  padding-block: 0.6rem;
+  border-top: 1px solid var(--border, currentColor);
+  overflow-wrap: anywhere;
+}
+
+.oversight-document {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 32rem;
+  overflow: auto;
+}

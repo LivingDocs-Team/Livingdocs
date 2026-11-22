@@ -67,21 +67,21 @@ Sub-screen ghi "(phần của …)" là một phần của trang có sẵn; mở
 | Module | Screen | Dòng | Trạng thái |
 |---|---|---|---|
 | Account Management | Profile & Settings → Profile, Notification Preferences | #2 | implemented (Profile, NotificationPreferences) |
-| | Notifications → Notification Details | #3 | placeholder |
+| | Notifications → Notification Details | #3 | implemented (`Notifications`; chi tiết là phần của trang) |
 | GitHub Integration | GitHub Connection | #5 | implemented |
 | | Repository List → Repository Selection, Repository Details, Repository Synchronization | #6 | implemented (RepositoryManagement) |
 | | PR & Commit List | #7 | implemented (phần RepositoryActivity trong Repository Management) |
 | Documentation Generation | (đã bỏ mục Generation Request và Template Selection 2026-11-18: trang tạo tài liệu mở từ Generated Documents) | | |
-| | Coverage Gaps | #8 | placeholder |
+| | Coverage Gaps | #8 | implemented (`CoverageGaps`, API `GET /api/repositories/{id}/coverage-gaps`) |
 | | Generated Documents → Preview & Editor, Grounding Evidence | #8 | implemented (DocumentationManagement) |
 | | → Submit for Review | #9 | implemented |
 | | → Review Feedback | #10 | implemented (Approval History trong DocumentationManagement) |
 | Versions & Change Log | Version History → Version Comparison | #18 | implemented (phần của DocumentationManagement) |
 | | → Document Rollback | #19 | implemented (Restore this version) |
-| | Change Log | #18 | placeholder |
+| | Change Log | #18 | implemented (`ChangeLog`) |
 | Knowledge Base | Documentation Collections | #21 | implemented (DocumentationCollections, đọc) |
 | | Knowledge Search → Search Results, Doc-to-Code Relationships | #20 | implemented (DocumentationSearch) |
-| | Template Library | #22 | placeholder |
+| | Template Library | #22 | implemented (`TemplateLibrary`; Developer chỉ xem) |
 
 ### Staff (flow chính thức)
 | Module | Screen | Dòng | Trạng thái |
@@ -92,7 +92,7 @@ Sub-screen ghi "(phần của …)" là một phần của trang có sẵn; mở
 | | → Change Log | #18 | placeholder |
 | | → Template & Code Check | #22 | placeholder |
 | | → Document Editor | #8 | implemented (DocumentationManagement: AI Suggestion Review, chỉnh sửa đề xuất) |
-| | Review History | #13 | placeholder |
+| | Review History | #13 | implemented (`ApprovalAudit`) |
 
 ### Manager (flow chính thức)
 | Module | Screen | Dòng | Trạng thái |
@@ -103,8 +103,8 @@ Sub-screen ghi "(phần của …)" là một phần của trang có sẵn; mở
 | | → Audit Trail | #13 | implemented (phần của ManagerApprovalQueue) |
 | | → Version Rollback | #19 | implemented (Request rollback) |
 | | Approval History | #13 | implemented (Manager decision history) |
-| | Approval Delegation | #11 | placeholder |
-| Approval Policies | Approval Policy, Merge Policy | #12 | placeholder |
+| | Approval Delegation | #11 | implemented (`ApprovalDelegation`) |
+| Approval Policies | Approval Policy, Merge Policy | #12 | implemented (`ApprovalPolicies`) |
 
 ### Technical Lead và Administrator — **flow TẠM (provisional)**
 Nhóm chưa có screen flow cho 2 role này. `technicalLead.flow.js` và `administrator.flow.js` có `provisional: true` và comment `// TODO: thay bằng screen flow chính thức của nhóm`. Hai flow được dựng **chỉ** từ các dòng ma trận mà role có quyền (mỗi dòng một màn hình, gom theo module), giao diện hiển thị badge "Provisional flow".
@@ -194,3 +194,55 @@ Mọi request của trình duyệt tới `/api/github|workspaces|repositories|do
 - **Chưa theo ma trận (cố ý):** `/api/managed-workspaces/**` (`WorkspaceController`) và `/api/profile/**` kiểm tra theo chủ sở hữu/thành viên, không theo role. Dòng #25 chỉ cho Administrator, nhưng Developer đang dùng workspace tự quản trong trang Repository; áp dụng #25 sẽ làm hỏng chức năng đó nên cần nhóm quyết định. Các quyền đọc của Technical Lead (#7–#11, #13) đã được BFF cho phép nhưng GitHub Integration chưa cấp quyền `DOCUMENT_*` tương ứng cho role này; sẽ nối khi màn hình của Technical Lead được xây.
 - **Giữ ma trận hai nơi đồng bộ:** `ScreenPermissionsParityTest` đọc `frontend/src/rbac/permissions.js` và `roles.js` rồi so với bản Java; đổi quyền ở một nơi mà quên nơi kia sẽ làm test fail. `ApiRoutePermissionsTest` kiểm tra các route đại diện với cả 5 role theo bảng viết tay từ ma trận.
 - Frontend: khung "Staff Review Queue" nhúng trong trang Documentation chỉ hiện cho role có #10 U (Staff); Developer chỉ đọc phản hồi duyệt (#10 R) nên không còn thấy khung này (trước đó bấm vào sẽ báo 403).
+
+## 10. Bốn màn hình Developer đã triển khai (nhánh `LD-Developer-remaining-screens`)
+
+Flow Developer không còn màn hình placeholder. Các màn hình dùng dữ liệu thật, không mock, không đổi schema hay migration.
+
+| Màn hình | Nguồn dữ liệu | Hành vi |
+|---|---|---|
+| Notifications (#3) | `GET /api/document-workflows/history-accessible` và `GET /api/profile/notification-preferences` | Backend chưa có bảng thông báo nên danh sách được suy ra từ workflow của người dùng: đã gửi duyệt, Staff nhận duyệt, kết quả Staff, quyết định Manager. Loại thông báo tắt trong Notification Preferences bị ẩn (có ô hiện lại). Trạng thái đã đọc lưu ở `localStorage` của trình duyệt. Chọn một thông báo để xem chi tiết (Notification Details mở cùng trang). |
+| Coverage Gaps (#8) | `GET /api/repositories/{id}/coverage-gaps` (mới, GitHub Integration Service) | Chọn repository; hiển thị % entity code đã có tài liệu liên kết và danh sách entity chưa có, nhóm theo file, lọc theo loại. Mới là một truy vấn đọc (`not exists` trên `documentation_code_relationships`), BFF cần `documentation` R. |
+| Change Log (#18) | `GET /api/document-workflows/history-accessible` và `GET /api/document-workflows/{id}/versions` | Chọn tài liệu, xem từng phiên bản mới nhất trước: nguồn, người tạo, ghi chú, các thay đổi theo phần. Chỉ đọc. |
+| Template Library (#22) | `GET /api/documentation/templates` | Vai trò chỉ có R (Developer) chỉ xem danh sách mẫu; vai trò có C/U/D (Technical Lead) vẫn dùng bộ quản lý mẫu. |
+
+Kiểm thử: `tests/test_developer_screens.py` (16 kịch bản), `DocumentationCodeRelationshipApiTest` (kiểm thử coverage gaps), `ApiRoutePermissionsTest` (route mới theo vai trò).
+
+## 11. Review History, Approval Audit Trail và Repository Management (Administrator)
+
+| Màn hình | Vai trò | Cách làm |
+|---|---|---|
+| Review History (#13) | Staff | `ApprovalAudit`: danh sách workflow mà Staff truy cập được (`history-accessible`) và chuỗi sự kiện của từng workflow (`/history`): hành động, người làm và vai trò, trạng thái trước và sau, nhận xét. |
+| Approval Audit Trail & History (#13) | Administrator | Cùng trang `ApprovalAudit`, tên lấy từ node của flow. Chỉ hiện các workflow mà quyền `DOCUMENT_*` của Administrator cho đọc. |
+| Repository Management & Synchronization (#6) | Administrator | Dùng lại `RepositoryManagement`. Nút "PRs & commits" và panel hoạt động được bọc `can('pullRequests','R')` nên Administrator (không có #7) không thấy và không gọi API PR. |
+
+Còn là placeholder: Staff › Review Queue › Change Log và Template & Code Check (màn hình con, mở bằng URL). Kiểm thử: `tests/test_role_screens.py`.
+
+## 12. Manager (chính sách, ủy quyền) và Technical Lead (giám sát)
+
+Mọi màn hình trong flow Manager và Technical Lead đã triển khai. Cần thêm backend (GitHub Integration Service) nên có một migration mới (`db/migration-common/V18__approval_policies_and_delegations.sql`: bảng `approval_policies`, `approval_delegations`), hai nhóm route mới và quy tắc BFF tương ứng.
+
+### Manager
+| Màn hình | API | Hành vi và phần được thi hành |
+|---|---|---|
+| Approval Policy (#12) | `GET/PUT /api/approval/policies/approval` | `requireStaffComment`: Staff phải ghi nhận xét với mọi kết quả duyệt; `requireManagerComment`: Manager phải ghi nhận xét khi phê duyệt. Được thi hành trong `DocumentWorkflowService` (trả 400 nếu thiếu). Mặc định cả hai tắt, đúng hành vi cũ. |
+| Merge Policy (#12) | `GET/PUT /api/approval/policies/merge` | `allowCommitBack`: cho phép hay không việc đưa tài liệu đã duyệt lên GitHub (tắt thì `github-commit` trả 409); `commitMessageTemplate` với `{document}`, `{version}` là nội dung commit khi đưa lên GitHub. Được thi hành trong `DocumentCommitBackService`. |
+| Approval Delegation (#11) | `GET/POST /api/approval/delegations`, `DELETE /api/approval/delegations/{id}` | Manager ghi nhận Manager khác (nhập ID người dùng) thay mình duyệt tối đa 90 ngày, tối đa 10 ủy quyền còn hiệu lực; cả hai bên đều thấy; chỉ người ủy quyền thu hồi được. Hàng đợi duyệt dùng chung cho mọi Manager nên ủy quyền chỉ là bản ghi hiển thị, không đổi ai được quyết định. |
+
+### Technical Lead (đọc, trừ Drift Policies)
+Quyền đọc dựa trên quyền `DOCUMENT_TECHNICAL_REVIEW` mà vai trò này đã có (không thêm quyền mới vào danh mục): `history-accessible` và các route đọc workflow trả mọi workflow (chỉ đọc; duyệt, từ chối, rollback vẫn chỉ Manager). Các route `/api/oversight/**` yêu cầu quyền này (hoặc Administrator).
+
+| Màn hình | API | Hành vi |
+|---|---|---|
+| Pull Requests & Commits (#7) | `GET /api/oversight/repositories`, `.../{id}/pull-requests`, `.../{id}/commits` | Chọn repository bất kỳ, xem PR và commit đã nhận. |
+| Documentation (#8) | `GET /api/oversight/documentation[/{id}]` | Danh sách tối đa 200 tài liệu mới nhất, lọc theo tên, xem nội dung Markdown (chỉ đọc). |
+| Workflow Status (#9), Staff Review (#10), Manager Approval (#11) | `history-accessible`, `/history` | `WorkflowOversight`: danh sách workflow nhóm theo trạng thái (Staff Review: chờ hoặc đang duyệt; Manager Approval: chờ, đã duyệt hoặc từ chối), chi tiết và lịch sử sự kiện. Không có nút thao tác. |
+| Approval Audit Trail & History (#13) | `history-accessible`, `/history` | Trang `ApprovalAudit` dùng chung. |
+| Drift Policies & Thresholds (#17) | `GET/PUT /api/oversight/repositories/{id}/drift-policies` | Sửa quy tắc auto-update (commit hoặc PR nào làm mới tài liệu nào) của bất kỳ repository nào, dùng lại `AutoUpdatePolicyEditor`; đây là chính sách drift đang được thi hành. |
+| Version History & Comparison (#18) | `/versions`, `/comparison` | Dùng lại `DocumentVersionComparison`. |
+| Document Rollback (#19) | `/versions`, `/history` | Danh sách phiên bản và các yêu cầu rollback đã có; không có nút rollback vì rollback là quyết định của Manager (matrix cho Technical Lead U nhưng service chỉ cho Manager). |
+| Health Metrics, Dependency Graph & Reports (#23) | `GET /api/oversight/health` | Số repository, tài liệu, code entity, % phủ tài liệu, workflow theo trạng thái, đồ thị tài liệu → file (tối đa 300 liên kết mạnh nhất, hiển thị dạng danh sách mở rộng được). Export JSON và CSV (nút bọc `<Can healthReports E>`; CSV vô hiệu hóa ô bắt đầu bằng `=`, `+`, `-`, `@`). |
+
+Kiểm thử: `tests/test_governance_screens.py` (19 kịch bản), `ApprovalGovernanceAndOversightApiTest` (11, GitHub Integration Service), `ApiRoutePermissionsTest` (route mới theo vai trò), `FlywayMigrationLineageSelectorTest` (V18).
+
+Giới hạn đã biết: ủy quyền chưa đổi quyền quyết định (xem trên); ô nhập Manager dùng ID người dùng vì chưa có API liệt kê Manager cho vai trò Manager; chưa có phân loại severity/threshold riêng cho drift ngoài quy tắc auto-update.

@@ -22,7 +22,7 @@ export default Object.freeze({
         implemented('document-editor', 'Document Editor', '/review/queue/editor', 'documentation', 'DocumentationManagement'),
         section('review-decision', 'Review Decision', '/review/queue/decision', 'staffReview'),
       ]),
-      placeholder('review-history', 'Review History', '/review/history', 'approvalAudit'),
+      implemented('review-history', 'Review History', '/review/history', 'approvalAudit', 'ApprovalAudit'),
     ]),
   ]),
 });

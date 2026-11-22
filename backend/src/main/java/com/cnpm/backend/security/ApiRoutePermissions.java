@@ -81,6 +81,7 @@ public final class ApiRoutePermissions {
         rule("GET", "/api/repositories/{}/documentation/search", need("knowledgeBase", 'R'));
         rule("GET", "/api/repositories/{}/documentation", need("documentation", 'R'), need("knowledgeBase", 'R'));
         rule("GET", "/api/repositories/{}/code-entities", need("documentation", 'R'), need("knowledgeBase", 'R'));
+        rule("GET", "/api/repositories/{}/coverage-gaps", need("documentation", 'R'));
         rule("GET", "/api/documentation/jobs/{}", need("documentation", 'R'));
         rule("GET", "/api/documentation/jobs/{}/result", need("documentation", 'R'));
         rule("GET", "/api/documentation/jobs/{}/report", need("documentation", 'R'));
@@ -123,6 +124,23 @@ public final class ApiRoutePermissions {
         rule("GET", "/api/documentation/{}", need("documentation", 'R'), need("knowledgeBase", 'R'));
         rule("GET", "/api/documentation/{}/code-entities", need("documentation", 'R'), need("knowledgeBase", 'R'));
         rule("PUT", "/api/documentation/{}/code-entities", need("documentation", 'U'));
+
+        // ---- Oversight views for the Technical Lead (#7, #8, #17, #23); GitHub Integration checks the permission too ----
+        rule("GET", "/api/oversight/repositories", need("driftPolicies", 'R'), need("healthReports", 'R'));
+        rule("GET", "/api/oversight/repositories/{}/pull-requests", need("pullRequests", 'R'));
+        rule("GET", "/api/oversight/repositories/{}/commits", need("pullRequests", 'R'));
+        rule("GET", "/api/oversight/repositories/{}/drift-policies", need("driftPolicies", 'R'));
+        rule("PUT", "/api/oversight/repositories/{}/drift-policies", need("driftPolicies", 'U'));
+        rule("GET", "/api/oversight/documentation", need("documentation", 'R'));
+        rule("GET", "/api/oversight/documentation/{}", need("documentation", 'R'));
+        rule("GET", "/api/oversight/health", need("healthReports", 'R'));
+
+        // ---- Approval and merge policies (#12) and Manager delegation (#11) ----
+        rule("GET", "/api/approval/policies/{}", need("approvalPolicies", 'R'));
+        rule("PUT", "/api/approval/policies/{}", need("approvalPolicies", 'U'));
+        rule("GET", "/api/approval/delegations", need("managerApproval", 'R'));
+        rule("POST", "/api/approval/delegations", need("managerApproval", 'U'));
+        rule("DELETE", "/api/approval/delegations/{}", need("managerApproval", 'U'));
 
         // ---- Review and approval workflow (#9, #10, #11, #13, #19) ----
         rule("POST", "/api/document-workflows", need("workflowSubmission", 'C'));

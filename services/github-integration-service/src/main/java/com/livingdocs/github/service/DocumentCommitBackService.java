@@ -32,6 +32,13 @@ public class DocumentCommitBackService {
     private final GitHubConnectionService connections;
     private final GitHubClient github;
     private final DocumentWorkflowAuditRepository audit;
+    // Optional so that unit tests can build the service without it; without it the defaults apply.
+    private ApprovalPolicyService policies;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setPolicies(ApprovalPolicyService policies) {
+        this.policies = policies;
+    }
 
     public DocumentCommitBackService(DocumentWorkflowRepository workflows, ConnectedRepositoryRepository repositories,
             DocumentationGenerationService documents, GitHubConnectionService connections, GitHubClient github,
@@ -48,6 +55,10 @@ public class DocumentCommitBackService {
     public Result commit(String actor, Set<String> authorities, UUID workflowId, int version) {
         if (!authorities.containsAll(Set.of("ROLE_MANAGER", "DOCUMENT_APPROVE"))) {
             throw ApiException.forbidden("Manager approval permission is required.");
+        }
+        ApprovalPolicyService.MergeSettings merge = policies == null ? null : policies.merge();
+        if (merge != null && !merge.allowCommitBack()) {
+            throw conflict("The merge policy does not allow publishing approved documents to GitHub.");
         }
         var workflow = workflows.lockById(workflowId).orElseThrow(() -> ApiException.notFound("Workflow not found."));
         if (!actor.equals(workflow.getManagerUserId())) {
@@ -127,7 +138,8 @@ public class DocumentCommitBackService {
                 throw conflict("The source branch advanced. Review a new revision before committing.");
             }
             String committed = github.commitFileOnBranch(token, remote.refId(), sha, path, content,
-                    "Publish LivingDocs document " + documentId + " v" + version);
+                    merge == null ? "Publish LivingDocs document " + documentId + " v" + version
+                            : merge.message(documentId, version));
             return confirmPublication(workflowId, version, actor, sha, new Result(path, committed, false));
         } catch (GitHubApiException e) {
             if (e.isUnauthorized() || e.isNotFound() || e.getStatusCode() == 403 && !e.isRateLimited()) {

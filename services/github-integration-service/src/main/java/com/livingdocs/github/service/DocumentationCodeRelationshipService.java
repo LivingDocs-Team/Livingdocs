@@ -2,6 +2,7 @@ package com.livingdocs.github.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.livingdocs.github.dto.CodeEntityResponse;
+import com.livingdocs.github.dto.CoverageGapsResponse;
 import com.livingdocs.github.dto.DocumentationArtifactResponse;
 import com.livingdocs.github.entity.CodeEntity;
 import com.livingdocs.github.entity.ConnectedRepository;
@@ -131,6 +132,15 @@ public class DocumentationCodeRelationshipService {
         repositorySyncService.requireOwnedRepository(userId, repositoryId);
         return codeEntityRepository.findByRepositoryIdAndActiveTrueOrderByPathAscLineStartAsc(repositoryId)
                 .stream().map(CodeEntityResponse::from).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public CoverageGapsResponse coverageGaps(String userId, UUID repositoryId) {
+        repositorySyncService.requireOwnedRepository(userId, repositoryId);
+        List<CodeEntityResponse> gaps = codeEntityRepository.findUndocumented(repositoryId)
+                .stream().map(CodeEntityResponse::from).toList();
+        long total = codeEntityRepository.countByRepositoryIdAndActiveTrue(repositoryId);
+        return new CoverageGapsResponse(repositoryId, total, total - gaps.size(), gaps);
     }
 
     @Transactional(readOnly = true)

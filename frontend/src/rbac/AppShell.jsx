@@ -1,17 +1,28 @@
 // Screen 2 (signed in): sidebar and breadcrumb rendered from the role's screen flow, and the
 // current screen rendered from the registry below. No role-specific if/else lives here.
 import AdminDashboard from '../AdminDashboard';
+import ApprovalAudit from '../ApprovalAudit';
+import ApprovalDelegation from '../ApprovalDelegation';
+import ApprovalPolicies from '../ApprovalPolicies';
+import ChangeLog from '../ChangeLog';
+import CoverageGaps from '../CoverageGaps';
 import DocumentationCollections from '../DocumentationCollections';
 import DocumentationManagement from '../DocumentationManagement';
 import DocumentationSearch from '../DocumentationSearch';
 import DeveloperDriftAlerts from '../DeveloperDriftAlerts';
 import GitHubConnection from '../GitHubConnection';
+import HealthReports from '../HealthReports';
 import ManagerApprovalQueue from '../ManagerApprovalQueue';
 import NotificationPreferences from '../NotificationPreferences';
+import OversightDocumentation from '../OversightDocumentation';
+import OversightRepositories from '../OversightRepositories';
+import Notifications from '../Notifications';
 import Profile from '../Profile';
 import RepositoryManagement from '../RepositoryManagement';
 import StaffReviewQueue from '../StaffReviewQueue';
 import TemplateLibrary from '../TemplateLibrary';
+import VersionExplorer from '../VersionExplorer';
+import WorkflowOversight from '../WorkflowOversight';
 import Icon from '../icons';
 import { RBAC_UI } from './config.js';
 import { getFlow } from './flows/index.js';
@@ -51,6 +62,17 @@ const SCREENS = {
   Profile: { Component: Profile },
   AdminDashboard: { Component: AdminDashboard },
   NotificationPreferences: { Component: NotificationPreferences },
+  Notifications: { Component: Notifications },
+  CoverageGaps: { Component: CoverageGaps },
+  ChangeLog: { Component: ChangeLog },
+  ApprovalAudit: { Component: ApprovalAudit },
+  ApprovalDelegation: { Component: ApprovalDelegation },
+  ApprovalPolicies: { Component: ApprovalPolicies },
+  HealthReports: { Component: HealthReports },
+  OversightDocumentation: { Component: OversightDocumentation },
+  OversightRepositories: { Component: OversightRepositories },
+  VersionExplorer: { Component: VersionExplorer },
+  WorkflowOversight: { Component: WorkflowOversight },
   GitHubConnection: { Component: GitHubConnection },
   RepositoryManagement: { Component: RepositoryManagement },
   DocumentationCollections: { Component: DocumentationCollections },
