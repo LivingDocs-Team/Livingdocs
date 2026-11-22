@@ -13,7 +13,7 @@
     healthcheck:
       test:
         - CMD-SHELL
-        - PGPASSWORD="$${POSTGRES_PASSWORD}" psql -X -w -h 127.0.0.1 -U livingdocs -d cnpm -Atqc "SELECT 1"
+        - PGPASSWORD="$${POSTGRES_PASSWORD}" psql -X -w -h backend-db -U livingdocs -d cnpm -Atqc "SELECT 1"
       interval: 5s
       timeout: 3s
       retries: 20
