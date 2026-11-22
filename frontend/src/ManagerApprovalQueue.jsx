@@ -76,8 +76,6 @@ export default function ManagerApprovalQueue({ userId }) {
   const [lastOutcome, setLastOutcome] = useState(null);
   const [rejectComment, setRejectComment] = useState('');
   const [approveComment, setApproveComment] = useState('');
-  const [rollbackVersion, setRollbackVersion] = useState('');
-  const [rollbackReason, setRollbackReason] = useState('');
 
   const queue = queueData.content;
   const managerHistory = historyData.content.filter((item) => ['APPROVED', 'REJECTED'].includes(item.status));
@@ -214,7 +212,7 @@ export default function ManagerApprovalQueue({ userId }) {
   const canDecide = workflow?.status === 'PENDING_MANAGER_APPROVAL'
     && workflow.staffReviewResult === 'PASSED'
     && visibleDetail.document?.version === workflow.submittedDocumentVersion;
-  const canRollback = workflow?.status === 'APPROVED';
+  const canRollback = workflow?.status === 'APPROVED' && workflow.submittedDocumentVersion > 1;
   const canCommitToGitHub = workflow?.status === 'APPROVED'
     && String(workflow.managerUserId) === String(userId)
     && history.some((event) => event.action === 'REVISION_DRAFT_SUBMITTED'
@@ -266,12 +264,15 @@ export default function ManagerApprovalQueue({ userId }) {
   async function submitRollback(event) {
     event.preventDefault();
     if (!workflow || !canRollback || action) return;
-    const version = Number(rollbackVersion);
-    if (!Number.isInteger(version) || version < 1 || version === workflow.submittedDocumentVersion) {
-      setActionMessage({ type: 'error', text: 'Choose a positive source version different from the currently approved version.' });
+    const form = event.currentTarget;
+    const fields = new FormData(form);
+    const version = Number(fields.get('sourceVersion'));
+    const reason = String(fields.get('reason') ?? '').trim();
+    if (!Number.isInteger(version) || version < 1 || version >= workflow.submittedDocumentVersion) {
+      setActionMessage({ type: 'error', text: 'Choose a source version earlier than the currently approved version.' });
       return;
     }
-    if (!rollbackReason.trim()) {
+    if (!reason) {
       setActionMessage({ type: 'error', text: 'A rollback reason is required.' });
       return;
     }
@@ -280,15 +281,14 @@ export default function ManagerApprovalQueue({ userId }) {
     setActionMessage(null);
     try {
       const response = await githubApi(`/api/document-workflows/${encodeURIComponent(workflow.id)}/rollback`, {
-        method: 'POST', userId, body: { sourceVersion: version, reason: rollbackReason.trim() },
+        method: 'POST', userId, body: { sourceVersion: version, reason },
       });
       if (String(response?.id) !== String(workflow.id) || response?.status !== 'PENDING_STAFF_REVIEW'
         || response?.submittedDocumentVersion == null) {
         throw new Error('The Backend did not confirm the rollback workflow transition. Refresh and verify the document.');
       }
       setLastOutcome(response);
-      setRollbackVersion('');
-      setRollbackReason('');
+      form.reset();
       setActionMessage({ type: 'success', text: 'Backend confirmed rollback and returned the document to Staff review.' });
       try {
         const events = await githubApi(`/api/document-workflows/${encodeURIComponent(workflow.id)}/history`, { userId });
@@ -538,15 +538,14 @@ export default function ManagerApprovalQueue({ userId }) {
                       </form>
                     </section>}
 
-                    {canRollback && can('documentRollback', 'U') && <form className="staff-review-form manager-rollback" onSubmit={submitRollback}>
+                    {canRollback && can('documentRollback', 'U') && <form key={`${workflow.id}:${workflow.submittedDocumentVersion}`} className="staff-review-form manager-rollback" onSubmit={submitRollback}>
                       <h5>Rollback approved document</h5>
                       <p className="documentation-hint">Rollback creates a new version and returns the workflow to Staff review. The Backend validates version availability and current document state.</p>
                       <label htmlFor="rollback-source-version">Previous source version number</label>
-                      <input id="rollback-source-version" type="number" min="1" max={Math.max(1, (workflow.submittedDocumentVersion || 1) - 1)}
-                        value={rollbackVersion} required onChange={(event) => setRollbackVersion(event.target.value)} />
+                      <input id="rollback-source-version" name="sourceVersion" type="number" min="1"
+                        max={workflow.submittedDocumentVersion - 1} required />
                       <label htmlFor="rollback-reason">Rollback reason</label>
-                      <textarea id="rollback-reason" value={rollbackReason} maxLength={1000} required
-                        onChange={(event) => setRollbackReason(event.target.value)} />
+                      <textarea id="rollback-reason" name="reason" maxLength={1000} required />
                       <button type="submit" className="documentation-secondary-button" disabled={Boolean(action)}>
                         {action === 'ROLLBACK' ? 'Requesting rollback...' : 'Request rollback'}
                       </button>

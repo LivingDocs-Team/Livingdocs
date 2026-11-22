@@ -133,12 +133,28 @@ class DocumentCommitBackServiceTest {
     @Test
     void validatesManagerIdentityPermissionAndApprovedVersionBeforeCallingGitHub() {
         assertThatThrownBy(() -> service.commit(MANAGER, Set.of("ROLE_MANAGER"), WORKFLOW_ID, 2))
-                .hasMessageContaining("permission");
-        assertThatThrownBy(() -> service.commit("other-manager", PERMISSIONS, WORKFLOW_ID, 2))
-                .hasMessageContaining("approving manager");
+                .isInstanceOfSatisfying(ApiException.class,
+                        e -> assertThat(e.getStatus()).isEqualTo(HttpStatus.FORBIDDEN));
         assertThatThrownBy(() -> service.commit(MANAGER, PERMISSIONS, WORKFLOW_ID, 1))
                 .hasMessageContaining("version is not approved");
         verifyNoInteractions(github);
+    }
+
+    @Test
+    void hidesWorkflowExistenceAndVersionFromOtherManagers() {
+        for (int version : List.of(1, 2)) {
+            assertThatThrownBy(() -> service.commit("other-manager", PERMISSIONS, WORKFLOW_ID, version))
+                    .isInstanceOfSatisfying(ApiException.class, e -> {
+                        assertThat(e.getStatus()).isEqualTo(HttpStatus.NOT_FOUND);
+                        assertThat(e).hasMessage("Workflow not found.");
+                    });
+        }
+        assertThatThrownBy(() -> service.commit("other-manager", PERMISSIONS, UUID.randomUUID(), 2))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.NOT_FOUND);
+                    assertThat(e).hasMessage("Workflow not found.");
+                });
+        verifyNoInteractions(documents, repositories, connections, github);
     }
 
     @Test
