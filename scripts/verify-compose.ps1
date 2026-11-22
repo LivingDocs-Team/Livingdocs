@@ -40,8 +40,8 @@ function Set-DefaultEnv([string]$Name, [string]$Value) {
 # === FIX: Default Env & Secrets ===
 Set-DefaultEnv "TOKEN_ENCRYPTION_KEY" "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 Set-DefaultEnv "GITHUB_INTEGRATION_INTERNAL_SECRET" "smoke-test-internal-secret"
-Set-DefaultEnv "INTERNAL_API_SECRET" "dummy-secret-123"
-Set-DefaultEnv "AI_SERVICE_INTERNAL_SECRET" $env:INTERNAL_API_SECRET
+# AI Service nhận cùng secret với GitHub Integration (compose.yaml: INTERNAL_API_SECRET = GITHUB_INTEGRATION_INTERNAL_SECRET)
+Set-DefaultEnv "AI_SERVICE_INTERNAL_SECRET" $env:GITHUB_INTEGRATION_INTERNAL_SECRET
 
 $ReportDir = "artifacts"
 $ReportFile = Join-Path $ReportDir "ld-404-smoke-report.log"

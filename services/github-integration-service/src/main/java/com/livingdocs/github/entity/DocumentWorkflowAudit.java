@@ -47,6 +47,9 @@ public class DocumentWorkflowAudit {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @Column(name = "trigger_source", length = 40, updatable = false)
+    private String triggerSource;
+
     @Column(name = "document_version")
     private Integer documentVersion;
 
@@ -92,6 +95,13 @@ public class DocumentWorkflowAudit {
     public DocumentWorkflowAudit(UUID workflowId, String actorUserId, String action,
             String previousStatus, String newStatus, String comment,
             String previousReviewerUserId, String newReviewerUserId, String actorRole) {
+        this(workflowId, actorUserId, action, previousStatus, newStatus, comment,
+                previousReviewerUserId, newReviewerUserId, actorRole, Instant.now());
+    }
+
+    public DocumentWorkflowAudit(UUID workflowId, String actorUserId, String action,
+            String previousStatus, String newStatus, String comment,
+            String previousReviewerUserId, String newReviewerUserId, String actorRole, Instant createdAt) {
         this.workflowId = workflowId;
         this.actorUserId = actorUserId;
         this.actorRole = actorRole;
@@ -101,13 +111,15 @@ public class DocumentWorkflowAudit {
         this.comment = comment;
         this.previousReviewerUserId = previousReviewerUserId;
         this.newReviewerUserId = newReviewerUserId;
-        this.createdAt = Instant.now();
+        this.createdAt = createdAt;
     }
 
     public UUID getId() { return id; }
     public UUID getWorkflowId() { return workflowId; }
     public String getActorUserId() { return actorUserId; }
     public String getActorRole() { return actorRole; }
+    public String getTriggerSource() { return triggerSource; }
+    public void setTriggerSource(String triggerSource) { this.triggerSource = triggerSource; }
     public String getPreviousReviewerUserId() { return previousReviewerUserId; }
     public String getNewReviewerUserId() { return newReviewerUserId; }
     public String getAction() { return action; }

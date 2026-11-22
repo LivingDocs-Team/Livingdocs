@@ -56,6 +56,8 @@ class DocumentWorkflowAuthenticationTest {
             new String[] {"GET", "/api/document-workflows/" + ID + "/review-evidence"},
             new String[] {"GET", "/api/document-workflows/" + ID + "/review-comparison"},
             new String[] {"GET", "/api/document-workflows/" + ID + "/history"},
+            new String[] {"GET", "/api/document-workflows/" + ID + "/versions"},
+            new String[] {"GET", "/api/document-workflows/" + ID + "/comparison"},
             new String[] {"POST", "/api/document-workflows/" + ID + "/submit"},
             new String[] {"POST", "/api/document-workflows/" + ID + "/claim"},
             new String[] {"POST", "/api/document-workflows/" + ID + "/release"},
