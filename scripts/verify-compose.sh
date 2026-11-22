@@ -199,7 +199,7 @@ verify_fixture() {
   actual="$("${DOCKER[@]}" volume inspect -f '{{ index .Labels "com.docker.compose.project" }}|{{ index .Labels "com.docker.compose.volume" }}|{{ .Driver }}|{{ .Scope }}|{{ len .Options }}' "$volume")"
   [[ "$actual" == "$SMOKE_PROJECT|$service-data|local|local|0" ]] ||
     fail "Unexpected volume identity for $service"
-  actual="$("${COMPOSE[@]}" exec -T -e PGPASSWORD=livingdocs "$service" psql -X -h 127.0.0.1 -U livingdocs -d "$database" -v ON_ERROR_STOP=1 -Atc 'SELECT current_database(), current_user')"
+  actual="$("${COMPOSE[@]}" exec -T -e PGPASSWORD=livingdocs "$service" psql -X -w -h "$service" -U livingdocs -d "$database" -v ON_ERROR_STOP=1 -Atc 'SELECT current_database(), current_user')"
   [[ "$actual" == "$database|livingdocs" ]] || fail "Unexpected SQL identity for $service"
   pass "$service uses $volume and authenticated as livingdocs on $database"
 }
@@ -208,11 +208,11 @@ verify_fixture github-db github_integration
 
 check_restored_data() {
   local value
-  value="$("${COMPOSE[@]}" exec -T -e PGPASSWORD=livingdocs backend-db psql -X -h 127.0.0.1 \
+  value="$("${COMPOSE[@]}" exec -T -e PGPASSWORD=livingdocs backend-db psql -X -h backend-db \
     -U livingdocs -d cnpm -v ON_ERROR_STOP=1 -Atc \
     "SELECT payload || '|' || pg_get_userbyid(relowner) FROM upgrade_probe.records, pg_class WHERE oid = 'upgrade_probe.records'::regclass")"
   [[ "$value" == "legacy PostgreSQL data|livingdocs" ]] || fail "Restored data or owner differs"
-  value="$("${COMPOSE[@]}" exec -T -e PGPASSWORD=livingdocs backend-db psql -X -h 127.0.0.1 \
+  value="$("${COMPOSE[@]}" exec -T -e PGPASSWORD=livingdocs backend-db psql -X -h backend-db \
     -U livingdocs -d cnpm -v ON_ERROR_STOP=1 -Atc \
     "SELECT setting_value FROM public.system_settings WHERE setting_key = 'retention.auditLogDays'")"
   [[ "$value" == 0 ]] || fail "Restored audit policy differs"
@@ -244,13 +244,13 @@ if [[ "${VERIFY_LEGACY_RESTORE:-0}" == 1 ]]; then
   "${DOCKER[@]}" exec -e PGPASSWORD=postgres "$legacy" \
     pg_dump -h 127.0.0.1 -U postgres -d cnpm -Fc > "$scratch/legacy.dump"
   "${COMPOSE[@]}" exec -T -e PGPASSWORD=livingdocs backend-db \
-    pg_restore -h 127.0.0.1 -U livingdocs -d cnpm --no-owner --no-acl --single-transaction \
+    pg_restore -h backend-db -U livingdocs -d cnpm --no-owner --no-acl --single-transaction \
     < "$scratch/legacy.dump"
   check_restored_data
-  "${COMPOSE[@]}" exec -T -e PGPASSWORD=livingdocs backend-db psql -X -h 127.0.0.1 \
+  "${COMPOSE[@]}" exec -T -e PGPASSWORD=livingdocs backend-db psql -X -h backend-db \
     -U livingdocs -d cnpm -v ON_ERROR_STOP=1 -c \
     "BEGIN; INSERT INTO upgrade_probe.records (payload) VALUES ('write probe'); ROLLBACK;"
-  if "${COMPOSE[@]}" exec -T -e PGPASSWORD=incorrect backend-db psql -X -h 127.0.0.1 \
+  if "${COMPOSE[@]}" exec -T -e PGPASSWORD=incorrect backend-db psql -X -h backend-db \
     -U livingdocs -d cnpm -w -Atc 'SELECT 1'; then
     fail "Restored database accepted an incorrect password"
   fi

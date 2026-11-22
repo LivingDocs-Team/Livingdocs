@@ -31,18 +31,18 @@ dc=(docker compose -p livingdocs-upgrade-rehearsal -f compose.yaml -f "$UPGRADE_
 "${dc[@]}" up -d --wait backend-db
 "${dc[@]}" exec -T backend-db sh -ec '
   export PGPASSWORD="$POSTGRES_PASSWORD"
-  pg_restore -h 127.0.0.1 -U livingdocs -d cnpm \
+  pg_restore -h backend-db -U livingdocs -d cnpm \
     --no-owner --no-acl --single-transaction
 ' < "$BACKUP_DIR/cnpm.dump"
 "${dc[@]}" exec -T backend-db sh -ec '
   export PGPASSWORD="$POSTGRES_PASSWORD"
-  psql -X -h 127.0.0.1 -U livingdocs -d cnpm -v ON_ERROR_STOP=1 \
+  psql -X -h backend-db -U livingdocs -d cnpm -v ON_ERROR_STOP=1 \
     -c "SELECT current_database(), current_user, has_schema_privilege(current_user, '\''public'\'', '\''USAGE,CREATE'\'');"
 '
 "${dc[@]}" up -d --build --wait backend
 ```
 
-The destination initializes the `livingdocs` login and password and makes it the database owner. Restoring as that role with `--no-owner --no-acl` gives it ownership of the restored application objects, including tables and sequences. The role must be able to use and create in the app schema, since Hibernate updates the schema at startup. Verify TCP authentication with the correct and a wrong password. Verify the backend health endpoint and an authenticated application read and write. Compare representative row counts and records with the backup snapshot. Restart the database and backend, wait for health, and repeat the reads.
+The destination initializes the `livingdocs` login and password and makes it the database owner. Restoring as that role with `--no-owner --no-acl` gives it ownership of the restored application objects, including tables and sequences. The role must be able to use and create in the app schema, since Hibernate updates the schema at startup. Verify TCP authentication with the correct and a wrong password using the Compose service hostname. The PostgreSQL image can trust loopback connections. Verify the backend health endpoint and an authenticated application read and write. Compare representative row counts and records with the backup snapshot. Restart the database and backend, wait for health, and repeat the reads.
 
 Review the effective audit policy before connecting a restored dataset to a running backend. To hold deletion during rehearsal, set the restored copy's `retention.auditLogDays` override to `0` before starting the backend, if an override exists. Otherwise set `ADMIN_USER_AUDIT_RETENTION_DAYS=0`. Restore the approved policy before opening the deployment for use.
 
