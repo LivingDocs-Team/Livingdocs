@@ -419,6 +419,27 @@ def test_rollback_requires_valid_input_and_confirmation(page: Page):
     expect(page.get_by_label("Last Manager workflow result")).to_contain_text("PENDING_STAFF_REVIEW")
 
 
+def test_rollback_input_belongs_to_selected_document(page: Page):
+    first = workflow("APPROVED", title="First guide")
+    second = workflow("APPROVED", "88888888-8888-4888-8888-000000000002", title="Second guide")
+    initial = workflow("APPROVED", "88888888-8888-4888-8888-000000000003", title="Initial guide")
+    initial["submittedDocumentVersion"] = 1
+    api = FakeApi(history_items=[first, second, initial])
+    open_manager_approval(page, api)
+
+    version = page.get_by_label("Previous source version number")
+    reason = page.get_by_label("Rollback reason")
+    version.fill("2")
+    reason.fill("Restore the first guide.")
+    page.get_by_role("button", name="Second guide").click()
+    expect(version).to_have_value("")
+    expect(reason).to_have_value("")
+    page.get_by_role("button", name="Initial guide").click()
+    expect(page.get_by_role("heading", name="Initial guide", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="Request rollback")).to_have_count(0)
+    assert not any(path.endswith("/rollback") for _, path, _ in api.requests)
+
+
 def test_workflow_conflict_and_missing_workflow_are_reported(page: Page):
     api = FakeApi(workflow(), approve_status=409)
     open_manager_approval(page, api)
