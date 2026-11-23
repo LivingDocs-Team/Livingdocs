@@ -5,12 +5,14 @@ const SCOPES = ['REPOSITORY', 'MODULE', 'DOCUMENT'];
 const LABELS = { REPOSITORY: 'Repository', MODULE: 'Module', DOCUMENT: 'Document' };
 const BASE_RULE = { scope: 'REPOSITORY', target: '', onCommit: true, onPullRequest: true };
 
-export default function AutoUpdatePolicyEditor({ repository }) {
+// pathFor lets the oversight screen use its own route; by default the repository owner's route is used.
+export default function AutoUpdatePolicyEditor({ repository, pathFor }) {
   const [rules, setRules] = useState(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
-  const path = `/api/repositories/${encodeURIComponent(repository.id)}/auto-update-policies`;
+  const path = pathFor ? pathFor(repository.id)
+    : `/api/repositories/${encodeURIComponent(repository.id)}/auto-update-policies`;
 
   useEffect(() => {
     let active = true;

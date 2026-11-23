@@ -41,7 +41,7 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping(path = {
         "/api/github/**", "/api/workspaces/**", "/api/repositories/**", "/api/documentation/**",
-        "/api/document-workflows/**"
+        "/api/document-workflows/**", "/api/oversight/**", "/api/approval/**"
 }, method = {org.springframework.web.bind.annotation.RequestMethod.GET,
         org.springframework.web.bind.annotation.RequestMethod.POST,
         org.springframework.web.bind.annotation.RequestMethod.PUT,

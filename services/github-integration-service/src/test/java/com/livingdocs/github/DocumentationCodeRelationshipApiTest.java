@@ -135,6 +135,34 @@ class DocumentationCodeRelationshipApiTest {
     }
 
     @Test
+    void reportsCodeEntitiesWithoutLinkedDocumentationAsCoverageGaps() throws Exception {
+        List<UUID> entities = codeEntityRepository.findByRepositoryIdAndActiveTrueOrderByPathAscLineStartAsc(repositoryId)
+                .stream().map(entity -> entity.getId()).toList();
+        mvc.perform(put("/api/documentation/{id}/code-entities", documentId)
+                        .header("X-User-Id", USER).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"codeEntityIds\":[]}"))
+                .andExpect(status().isOk());
+
+        mvc.perform(get("/api/repositories/{id}/coverage-gaps", repositoryId).header("X-User-Id", USER))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalEntities").value(entities.size()))
+                .andExpect(jsonPath("$.documentedEntities").value(0))
+                .andExpect(jsonPath("$.gaps.length()").value(entities.size()))
+                .andExpect(jsonPath("$.gaps[0].path").value("src/App.java"));
+
+        mvc.perform(put("/api/documentation/{id}/code-entities", documentId)
+                        .header("X-User-Id", USER).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"codeEntityIds\":[\"" + entities.get(0) + "\"]}"))
+                .andExpect(status().isOk());
+
+        mvc.perform(get("/api/repositories/{id}/coverage-gaps", repositoryId).header("X-User-Id", USER))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalEntities").value(entities.size()))
+                .andExpect(jsonPath("$.documentedEntities").value(1))
+                .andExpect(jsonPath("$.gaps.length()").value(entities.size() - 1));
+    }
+
+    @Test
     void rejectsCrossRepositoryAndMissingCodeEntityReferencesWithoutDroppingExistingLinks() throws Exception {
         relationshipService.replaceLinks(USER, documentId, List.of(entityId));
         UUID unknownEntityId = UUID.randomUUID();
