@@ -262,7 +262,7 @@ def test_editing_shows_unsaved_state_and_save_draft_clears_it(page: Page):
     expect(page.get_by_text("You have unsaved edits.")).to_be_visible()
 
     page.get_by_role("button", name="Save draft").click()
-    expect(notice(page, "Draft saved in this page session.")).to_be_visible()
+    expect(notice(page, "Draft saved in this browser.")).to_be_visible()
     expect(page.get_by_text("All changes saved in the current page session.")).to_be_visible()
     expect(editor(page)).to_have_value(edited)
 
@@ -438,3 +438,38 @@ def test_reset_returns_to_initial_state(page: Page):
     expect(page.get_by_text("Ready to generate")).to_be_visible()
     expect(page.get_by_role("heading", name="Generated Documentation")).to_have_count(0)
     expect(page.get_by_text(re.compile(r"Generation job:"))).to_have_count(0)
+
+
+# ---------- Ngôn ngữ sinh tài liệu và bản nháp còn sau khi tải lại ----------
+
+def test_output_language_is_chosen_by_the_user(page: Page):
+    api = FakeApi(markdown=GENERATED_MARKDOWN)
+    open_documentation_page(page, api)
+    page.get_by_label("Output language").select_option("en")
+    generate(page)
+    expect(page.get_by_role("heading", name="Generated Documentation")).to_be_visible(timeout=10_000)
+
+    bodies = [json.loads(body) for method, path, body in api.requests
+              if method == "POST" and path == f"/api/repositories/{REPOSITORY_ID}/documentation/generate"]
+    assert bodies[-1]["outputLanguage"] == "en"
+
+
+def test_saved_draft_and_versions_survive_a_page_reload(page: Page):
+    open_generated_document(page)
+    edited = GENERATED_MARKDOWN + "\n\n## Ghi chú\n\nĐã chỉnh sửa bằng tay."
+    editor(page).fill(edited)
+    page.get_by_role("button", name="Save draft").click()
+    expect(notice(page, "Draft saved in this browser.")).to_be_visible()
+    page.get_by_role("button", name="Create version").first.click()
+
+    api = FakeApi(markdown=GENERATED_MARKDOWN)
+    page.unroute("**/api/**")
+    page.route("**/api/**", api.handle)
+    page.reload()
+    open_screen(page, "Generated Documents")
+    generate(page)
+    expect(page.get_by_role("heading", name="Generated Documentation")).to_be_visible(timeout=10_000)
+
+    expect(editor(page)).to_have_value(edited)
+    expect(page.get_by_text("Restored your saved draft from this browser.")).to_be_visible()
+    expect(page.get_by_role("tab", name="Versions (1)")).to_be_visible()

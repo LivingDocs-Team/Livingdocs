@@ -1,5 +1,8 @@
 """Generation jobs: run in the background, expose status, progress, warnings and result."""
+import json
 import logging
+import os
+import pathlib
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -48,12 +51,75 @@ class JobOutput:
 
 
 class JobStore:
-    def __init__(self) -> None:
+    """Jobs, their reports and outputs. With a directory (JOBS_DIR) a job is written to <dir>/<id>.json when it
+    is created, changes status, or gets its report or output, and read back at startup, so a restart does not
+    lose a result that was not saved yet. A job that was still running when the process stopped is marked failed
+    because its work is gone."""
+
+    def __init__(self, directory: Optional[str] = None) -> None:
         self._lock = threading.Lock()
         self.observed_since = now()
         self._jobs: Dict[str, Job] = {}
         self._reports: Dict[str, JobReport] = {}
         self._outputs: Dict[str, JobOutput] = {}
+        self._dir = pathlib.Path(directory) if directory else None
+        if self._dir:
+            self._dir.mkdir(parents=True, exist_ok=True)
+            self._load()
+
+    # ----- persistence -----
+    def _persist(self, job_id: str) -> None:
+        if not self._dir or job_id not in self._jobs:
+            return
+        output = self._outputs.get(job_id)
+        report = self._reports.get(job_id)
+        payload = {
+            "job": self._jobs[job_id].model_dump(mode="json"),
+            "report": report.model_dump(mode="json") if report else None,
+            "output": None if output is None else {
+                "scope": output.scope.value, "target": output.target, "template_id": output.template_id,
+                "template_name": output.template_name, "output_language": output.output_language,
+                "template_version": output.template_version, "sections": [list(item) for item in output.sections],
+                "skipped": [list(item) for item in output.skipped], "confidence": output.confidence,
+                "source_snapshot": output.source_snapshot.model_dump(mode="json") if output.source_snapshot else None,
+                "evidence_report": output.evidence_report.model_dump(mode="json") if output.evidence_report else None,
+            },
+        }
+        target = self._dir / f"{job_id}.json"
+        temporary = target.with_suffix(".tmp")
+        try:
+            temporary.write_text(json.dumps(payload), encoding="utf-8")
+            os.replace(temporary, target)
+        except OSError:
+            logger.warning("Could not save documentation job %s", job_id, exc_info=True)
+
+    def _load(self) -> None:
+        for file in sorted(self._dir.glob("*.json")):
+            try:
+                data = json.loads(file.read_text(encoding="utf-8"))
+                job = Job.model_validate(data["job"])
+                if job.status in (JobStatus.pending, JobStatus.running):
+                    job.status = JobStatus.failed
+                    job.message = "Interrupted"
+                    job.error = "The service restarted while this job was running. Generate the documentation again."
+                    job.updated_at = now()
+                self._jobs[job.id] = job
+                if data.get("report"):
+                    self._reports[job.id] = JobReport.model_validate(data["report"])
+                out = data.get("output")
+                if out:
+                    snapshot = out.get("source_snapshot")
+                    evidence = out.get("evidence_report")
+                    self._outputs[job.id] = JobOutput(
+                        scope=Scope(out["scope"]), target=out["target"], template_id=out["template_id"],
+                        template_name=out.get("template_name"), output_language=out["output_language"],
+                        template_version=out.get("template_version"),
+                        sections=[tuple(item) for item in out.get("sections", [])],
+                        skipped=[tuple(item) for item in out.get("skipped", [])], confidence=out.get("confidence"),
+                        source_snapshot=SourceSnapshot.model_validate(snapshot) if snapshot else None,
+                        evidence_report=JobReport.model_validate(evidence) if evidence else None)
+            except Exception:  # one unreadable file must not stop the service from starting
+                logger.warning("Ignoring unreadable job file %s", file, exc_info=True)
 
     def create(self, req: GenerateRequest, tpl: Optional[Template] = None) -> Job:
         job = Job(id=uuid.uuid4().hex, scope=req.scope, target=req.target,
@@ -63,6 +129,7 @@ class JobStore:
                   template_sections=list(tpl.sections) if tpl else [])
         with self._lock:
             self._jobs[job.id] = job
+            self._persist(job.id)
         logger.info("Documentation job %s: %s", job.id, JobStatus.pending.value)
         return job
 
@@ -72,6 +139,7 @@ class JobStore:
     def set_report(self, report: JobReport) -> None:
         with self._lock:
             self._reports[report.job_id] = report
+            self._persist(report.job_id)
 
     def get_report(self, job_id: str) -> Optional[JobReport]:
         return self._reports.get(job_id)
@@ -79,6 +147,7 @@ class JobStore:
     def set_output(self, job_id: str, output: JobOutput) -> None:
         with self._lock:
             self._outputs[job_id] = output
+            self._persist(job_id)
 
     def get_output(self, job_id: str) -> Optional[JobOutput]:
         return self._outputs.get(job_id)
@@ -104,9 +173,10 @@ class JobStore:
             if job.status != previous_status:
                 log = logger.warning if job.status == JobStatus.failed else logger.info
                 log("Documentation job %s: %s", job_id, job.status.value)
+                self._persist(job_id)
 
 
-jobs = JobStore()
+jobs = JobStore(os.getenv("JOBS_DIR") or None)
 
 
 def skip_reason(error: Optional[str], status: str) -> str:

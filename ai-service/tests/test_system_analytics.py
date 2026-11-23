@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta
+import itertools
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
@@ -8,6 +9,13 @@ from app.versions import DocumentStore
 
 
 def test_internal_analytics_counts_real_outcomes_and_saved_document_history(monkeypatch, tmp_path):
+    # The analytics window is built from the jobs' own updated_at values and must be strictly ordered. The system
+    # clock ticks about every 0.5 ms on Windows, so two jobs that finish in the same tick would get equal
+    # timestamps, make "from" equal "to" and be rejected with 400 (KeyError: 'aiJobs' in this test). A clock that
+    # moves forward on every reading makes the order explicit instead of depending on the machine.
+    ticks = itertools.count(1)
+    start = datetime.now(timezone.utc)
+    monkeypatch.setattr("app.jobs.now", lambda: start + timedelta(milliseconds=next(ticks)))
     jobs = JobStore()
     documents_file = tmp_path / "documents.json"
     monkeypatch.setattr(main, "jobs", jobs)

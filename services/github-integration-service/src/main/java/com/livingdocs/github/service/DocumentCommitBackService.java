@@ -34,6 +34,12 @@ public class DocumentCommitBackService {
     private final DocumentWorkflowAuditRepository audit;
     // Optional so that unit tests can build the service without it; without it the defaults apply.
     private ApprovalPolicyService policies;
+    private com.livingdocs.github.repository.DocumentPublicationRepository publications;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setPublications(com.livingdocs.github.repository.DocumentPublicationRepository publications) {
+        this.publications = publications;
+    }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     void setPolicies(ApprovalPolicyService policies) {
@@ -61,7 +67,8 @@ public class DocumentCommitBackService {
             throw conflict("The merge policy does not allow publishing approved documents to GitHub.");
         }
         var workflow = workflows.lockById(workflowId).orElseThrow(() -> ApiException.notFound("Workflow not found."));
-        if (!actor.equals(workflow.getManagerUserId())) {
+        if (!actor.equals(workflow.getManagerUserId())
+                || !WorkspaceScope.allows(authorities, workflow.getWorkspaceId())) {
             throw ApiException.notFound("Workflow not found.");
         }
         if (workflow.getStatus() != DocumentWorkflowStatus.APPROVED
@@ -128,7 +135,7 @@ public class DocumentCommitBackService {
                 if (path.equalsIgnoreCase(entry.path())) {
                     if (!sha.equals(remote.headSha()) && path.equals(entry.path())
                             && "100644".equals(entry.mode()) && blobSha(content).equals(entry.sha())) {
-                        return confirmPublication(workflowId, version, actor, sha,
+                        return confirmPublication(workflow, repositoryId, branch, version, actor, sha,
                                 new Result(path, remote.headSha(), true));
                     }
                     throw conflict("A file already occupies the publication path.");
@@ -140,7 +147,8 @@ public class DocumentCommitBackService {
             String committed = github.commitFileOnBranch(token, remote.refId(), sha, path, content,
                     merge == null ? "Publish LivingDocs document " + documentId + " v" + version
                             : merge.message(documentId, version));
-            return confirmPublication(workflowId, version, actor, sha, new Result(path, committed, false));
+            return confirmPublication(workflow, repositoryId, branch, version, actor, sha,
+                    new Result(path, committed, false));
         } catch (GitHubApiException e) {
             if (e.isUnauthorized() || e.isNotFound() || e.getStatusCode() == 403 && !e.isRateLimited()) {
                 throw ApiException.forbidden("GitHub denied access to the repository.");
@@ -150,8 +158,19 @@ public class DocumentCommitBackService {
         }
     }
 
-    private Result confirmPublication(UUID workflowId, int version, String actor, String sourceSha, Result result) {
-        // commit() holds the workflow row lock across confirmation and persistence.
+    private Result confirmPublication(com.livingdocs.github.entity.DocumentWorkflow workflow, UUID repositoryId,
+            String branch, int version, String actor, String sourceSha, Result result) {
+        // Only reached once GitHub has confirmed the commit (or that the identical file is already there).
+        // commit() holds the workflow row lock across confirmation and persistence, so the check below cannot race.
+        UUID workflowId = workflow.getId();
+        if (publications == null) {
+            throw new IllegalStateException("The publication store is not configured.");
+        }
+        if (!publications.existsByWorkflowIdAndVersion(workflowId, version)) {
+            publications.save(new com.livingdocs.github.entity.DocumentPublication(workflowId,
+                    workflow.getDocumentId(), version, repositoryId, branch, result.path(),
+                    result.observedHeadSha(), actor));
+        }
         if (!audit.existsByWorkflowIdAndDocumentVersionAndAction(workflowId, version, AUDIT_ACTION)) {
             String reason = result.alreadyPresent() ? "Verified existing publication" : "Published approved version";
             var entry = new DocumentWorkflowAudit(workflowId, actor, AUDIT_ACTION, "APPROVED", "APPROVED",

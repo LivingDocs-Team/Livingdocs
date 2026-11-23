@@ -31,6 +31,9 @@ public class DocumentWorkflow {
     @Column(name = "owner_user_id", nullable = false, length = 100, updatable = false)
     private String ownerUserId;
 
+    @Column(name = "workspace_id", length = 100)
+    private String workspaceId;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 40)
     private DocumentWorkflowStatus status;
@@ -83,6 +86,7 @@ public class DocumentWorkflow {
         this.documentId = documentId;
         this.documentTitle = documentTitle;
         this.ownerUserId = ownerUserId;
+        this.workspaceId = "ws-" + ownerUserId;
         this.status = DocumentWorkflowStatus.DRAFT;
     }
 
@@ -100,6 +104,10 @@ public class DocumentWorkflow {
     public String getDocumentId() { return documentId; }
     public String getDocumentTitle() { return documentTitle; }
     public String getOwnerUserId() { return ownerUserId; }
+    public String getWorkspaceId() { return workspaceId; }
+    public void assignWorkspace(String workspaceId) {
+        if (workspaceId != null && !workspaceId.isBlank()) this.workspaceId = workspaceId;
+    }
     public DocumentWorkflowStatus getStatus() { return status; }
     public Integer getSubmittedDocumentVersion() { return submittedDocumentVersion; }
     public String getReviewerUserId() { return reviewerUserId; }

@@ -138,6 +138,8 @@ public class GitHubIntegrationBffController {
         final String verifiedStaffTarget = HttpMethod.POST.matches(incoming.getMethod())
                 && path.matches("/api/document-workflows/[^/]+/reassign")
                         ? verifyReassignmentTarget(body, authorities) : null;
+        final String verifiedDelegate = HttpMethod.POST.matches(incoming.getMethod())
+                && path.equals("/api/approval/delegations") ? verifyDelegate(body) : null;
         Matcher ownerRoute = DOCUMENT_OWNER_ROUTE.matcher(path);
         final String verifiedDocumentOwner = HttpMethod.PUT.matches(incoming.getMethod()) && ownerRoute.matches()
                 ? verifyDocumentOwner(ownerRoute.group(1), ownerRoute.group(2)) : null;
@@ -148,7 +150,7 @@ public class GitHubIntegrationBffController {
         request.headers(headers -> {
             headers.setBearerAuth(integrationSecret);
             headers.set("X-User-Id", user.getId().toString());
-            headers.set("X-User-Authorities", String.join(",", authorities));
+            headers.set("X-User-Authorities", String.join(",", withWorkspaceScope(authorities, user)));
             if (workspaceAuthorization != null) {
                 headers.set("X-Verified-Workspace-Id", workspaceAuthorization.targetWorkspaceId());
                 headers.set("X-Verified-Workspace-Access", workspaceAuthorization.accessLevel());
@@ -159,6 +161,9 @@ public class GitHubIntegrationBffController {
             }
             if (verifiedStaffTarget != null) {
                 headers.set("X-Verified-Staff-User-Id", verifiedStaffTarget);
+            }
+            if (verifiedDelegate != null) {
+                headers.set("X-Verified-Delegate-Id", verifiedDelegate);
             }
             if (verifiedDocumentOwner != null) {
                 headers.set("X-Verified-Document-Owner-Id", verifiedDocumentOwner);
@@ -341,6 +346,48 @@ public class GitHubIntegrationBffController {
     private record WorkspaceAuthorization(String targetWorkspaceId, String sourceWorkspaceId, String accessLevel) {
     }
 
+    /**
+     * The Manager who is to cover someone's approvals must exist, be active and be able to approve. The id is
+     * checked here, where the accounts are, and passed on as X-Verified-Delegate-Id; GitHub Integration refuses
+     * a delegation without it.
+     */
+    private String verifyDelegate(byte[] body) {
+        if (body == null || body.length == 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose the Manager who covers your approvals.");
+        }
+        final JsonNode request;
+        try {
+            request = objectMapper.readTree(body);
+        } catch (tools.jackson.core.JacksonException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The delegation request is invalid.");
+        }
+        JsonNode idNode = request == null ? null : request.get("delegateUserId");
+        String raw = idNode == null || idNode.isNull() ? "" : idNode.asString("").trim();
+        final long id;
+        try {
+            id = Long.parseLong(raw);
+        } catch (NumberFormatException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A valid Manager user id is required.");
+        }
+        if (id < 1 || !raw.equals(Long.toString(id))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A valid Manager user id is required.");
+        }
+        User target = userRepository.findById(id).orElse(null);
+        String roleName = target == null || target.getRole() == null ? "" : target.getRole().trim();
+        if (roleName.startsWith("ROLE_")) roleName = roleName.substring("ROLE_".length());
+        if (target == null || !target.isActive() || !"MANAGER".equals(roleName) || roleRepository == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The delegate must be an active Manager.");
+        }
+        boolean canApprove = roleRepository.findWithPermissionsByName("MANAGER")
+                .map(role -> role.getPermissions().stream().map(permission -> permission.getCode())
+                        .collect(Collectors.toSet()))
+                .map(permissions -> permissions.contains("DOCUMENT_APPROVE")).orElse(false);
+        if (!canApprove) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The Manager role cannot approve documents.");
+        }
+        return Long.toString(id);
+    }
+
     private String verifyReassignmentTarget(byte[] body, Set<String> actorAuthorities) {
         if ((!actorAuthorities.contains("ROLE_ADMINISTRATOR") && !actorAuthorities.contains("ROLE_ADMIN"))
                 || !actorAuthorities.contains("DOCUMENT_REASSIGN")) {
@@ -398,6 +445,22 @@ public class GitHubIntegrationBffController {
         }
         return result.stream().filter(s -> s.matches("[A-Z0-9_]+"))
                 .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    /**
+     * Tells the GitHub Integration service which managed workspaces the caller belongs to
+     * ({@code WORKSPACE:<id>}, or {@code WORKSPACE:*} for an administrator) so that document workflows
+     * of other workspaces stay out of its queues and are not reachable by id.
+     */
+    private Set<String> withWorkspaceScope(Set<String> authorities, User user) {
+        Set<String> result = new LinkedHashSet<>(authorities);
+        if (authorities.contains("ROLE_ADMINISTRATOR") || authorities.contains("ROLE_ADMIN")) {
+            result.add("WORKSPACE:*");
+        } else if (workspaceRepository != null) {
+            workspaceRepository.findAllAccessibleByUserId(user.getId())
+                    .forEach(workspace -> result.add("WORKSPACE:" + workspace.getId()));
+        }
+        return result;
     }
 
     private User authenticatedUser(Authentication authentication) {

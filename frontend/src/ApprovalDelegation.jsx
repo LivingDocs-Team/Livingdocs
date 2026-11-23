@@ -39,8 +39,8 @@ function DelegationList({ title, items, onRevoke, busy }) {
 
 /**
  * Approval Delegation (matrix row #11): a Manager records that another Manager covers their approvals for a
- * period. The record is visible to both Managers and can be revoked. The approval queue is shared by all
- * Managers, so a delegation does not change who may decide a document.
+ * period. The record is visible to both Managers and can be revoked. While it is active the delegator cannot
+ * make final decisions and the delegate's decisions are recorded as covering for them.
  */
 export default function ApprovalDelegation({ userId }) {
   const [state, setState] = useState({ key: '', data: null, error: '' });
@@ -124,7 +124,7 @@ export default function ApprovalDelegation({ userId }) {
             onChange={(event) => setEndsAt(event.target.value)} />
           <label htmlFor="delegate-reason">Reason (optional)</label>
           <input id="delegate-reason" value={reason} maxLength={500} onChange={(event) => setReason(event.target.value)} />
-          <p className="documentation-hint">A delegation lasts at most 90 days and starts now.</p>
+          <p className="documentation-hint">A delegation lasts at most 90 days and starts now. While it is active you cannot decide documents yourself; revoke it to take over again.</p>
           <button type="submit" disabled={busy || !delegate.trim()}>Delegate approvals</button>
         </form>
       </Can>
