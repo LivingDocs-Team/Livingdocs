@@ -1,10 +1,10 @@
-# BE1 — LD-63 Repository Synchronization
+# FR-BE—01 Repository Synchronization
 
 | Mục | Nội dung |
 |---|---|
 | Story Jira | LD-63 Repository Synchronization |
-| Task đã làm | — |
-| Người thực hiện | — |
+| Task đã làm | LD-64 – LD-67 |
+| Người thực hiện | Nguyễn Lê Minh |
 | Thành phần | GitHub Integration Service: `sync/*` (`GitHubRepositoryFetcher`, `SyncOptions`, `RepositorySnapshot`, `PathFilter`, `LanguageDetector`, `AnalysisInput`, `RepositorySyncException`, `SyncErrorCode`, `SyncWarning`), `service/RepositorySyncService`, `controller/RepositorySyncController`, `exception/GlobalExceptionHandler`, `client/GitHubClient`, `entity/ConnectedRepository` |
 | Tác nhân | Frontend gọi API sync; Analyzer gọi `analysis-input` |
 
@@ -16,29 +16,29 @@ Chức năng đồng bộ lấy snapshot của một repository GitHub thuộc w
 
 | ID | Yêu cầu |
 |---|---|
-| LD-63.1 | Nhận yêu cầu `POST /api/repositories/{id}/sync` với header `X-User-Id`; body có thể bỏ trống/rỗng/`{}`. |
-| LD-63.2 | Xác minh repository tồn tại và thuộc người dùng hiện tại; sai quyền trả `403 ACCESS_DENIED`; không tồn tại trả `404 REPOSITORY_NOT_FOUND`. |
-| LD-63.3 | Lấy GitHub access token từ connection service; token hết hạn/bị thu hồi đánh dấu connection `INVALID` và trả `401 TOKEN_INVALID`. Không đưa token vào response. |
-| LD-63.4 | Chuyển trạng thái repository sang `SYNCING` khi bắt đầu; `CONNECTED` khi thành công; `ERROR` với `REPOSITORY_NOT_FOUND`/`ACCESS_DENIED`/`INVALID_REPOSITORY`; lỗi khác giữ nguyên trạng thái trước. |
-| LD-63.5 | Fetcher lấy repository info, commit HEAD của nhánh, recursive tree, nội dung file Java/Python, thống kê ngôn ngữ và recent commits. Mọi dữ liệu snapshot phải cùng commit SHA. |
-| LD-63.6 | Áp dụng `SyncOptions`: `branch` mặc định `null` (nhánh default), `includeContent` mặc định `true`, `maxFiles` mặc định `200` (≤ 1000), `maxFileSizeBytes` mặc định `200000`, `recentCommitLimit` mặc định `20` (0..100), `languages` mặc định `java`, `python`. |
-| LD-63.7 | Lọc file: bỏ qua thư mục sinh tự động/môi trường (`node_modules`, `venv`, `__pycache__`, `.git`, `.idea`, `target`, `build`, `dist` — trừ khi nằm trong `src` theo quy tắc code), `*.min.js`, file nhị phân, file > `maxFileSizeBytes`, đường dẫn không an toàn (`../`, tuyệt đối `/`). Gắn `skipReason` (`NOT_REQUESTED`, `TOO_LARGE`, `BINARY`, `UNAVAILABLE`). |
-| LD-63.8 | Sắp xếp ổn định `files` theo `path`; xử lý BOM khi đọc nội dung. |
-| LD-63.9 | Trả `RepositorySnapshot` gồm `repository` (id, fullName, owner, name, description, private/archived, default branch, URL, primary language, size, pushedAt), `branch`, `headCommit` (SHA, message, author name/login, committedAt, URL), `languages` (map ngôn ngữ→byte), `files` (path, sha, size, language, content, skipReason), `recentCommits`, `stats` (`totalFilesInRepo`, `filesSelected`, `filesWithContent`, `filesIgnored`, `treeTruncated`, `fileLimitReached`), `warnings`, `fetchedAt`. |
-| LD-63.10 | Trả warning không làm thất bại sync: `ARCHIVED_REPOSITORY`, `REPOSITORY_RENAMED`, `TREE_TRUNCATED`, `FILE_LIMIT_REACHED`, `NO_SOURCE_FILES`, `FILE_UNAVAILABLE`/`MORE_FILES_UNAVAILABLE`, `UNSAFE_PATHS_SKIPPED`, `LANGUAGES_UNAVAILABLE`, `COMMITS_UNAVAILABLE`. |
-| LD-63.11 | Khi thành công cập nhật `lastSyncedAt`, `defaultBranch`, và `fullName` nếu repo đã đổi tên. |
-| LD-63.12 | Giữ snapshot mới nhất trong bộ nhớ của service (mất khi restart, phải sync lại). |
-| LD-63.13 | `GET .../sync/latest` trả metadata snapshot (không có `content`); `GET .../sync/latest/analysis-input` trả `AnalysisInput` có nội dung. |
-| LD-63.14 | `AnalysisInput.from(snapshot)` chỉ chọn `analyzableFiles()` (content != null) và tạo `{scope: "repository", target: <full repo name>, files: [{path, language, content}]}`; `language` chữ thường (`java`, `python`). |
-| LD-63.15 | Mọi lỗi đi qua `GlobalExceptionHandler` để chuẩn hóa JSON `{status, code, message, timestamp}`. |
+| FR-BE—01.1 | Nhận yêu cầu `POST /api/repositories/{id}/sync` với header `X-User-Id`; body có thể bỏ trống/rỗng/`{}`. |
+| FR-BE—01.2 | Xác minh repository tồn tại và thuộc người dùng hiện tại; sai quyền trả `403 ACCESS_DENIED`; không tồn tại trả `404 REPOSITORY_NOT_FOUND`. |
+| FR-BE—01.3 | Lấy GitHub access token từ connection service; token hết hạn/bị thu hồi đánh dấu connection `INVALID` và trả `401 TOKEN_INVALID`. Không đưa token vào response. |
+| FR-BE—01.4 | Chuyển trạng thái repository sang `SYNCING` khi bắt đầu; `CONNECTED` khi thành công; `ERROR` với `REPOSITORY_NOT_FOUND`/`ACCESS_DENIED`/`INVALID_REPOSITORY`; lỗi khác giữ nguyên trạng thái trước. |
+| FR-BE—01.5 | Fetcher lấy repository info, commit HEAD của nhánh, recursive tree, nội dung file Java/Python, thống kê ngôn ngữ và recent commits. Mọi dữ liệu snapshot phải cùng commit SHA. |
+| FR-BE—01.6 | Áp dụng `SyncOptions`: `branch` mặc định `null` (nhánh default), `includeContent` mặc định `true`, `maxFiles` mặc định `200` (≤ 1000), `maxFileSizeBytes` mặc định `200000`, `recentCommitLimit` mặc định `20` (0..100), `languages` mặc định `java`, `python`. |
+| FR-BE—01.7 | Lọc file: bỏ qua thư mục sinh tự động/môi trường (`node_modules`, `venv`, `__pycache__`, `.git`, `.idea`, `target`, `build`, `dist` — trừ khi nằm trong `src` theo quy tắc code), `*.min.js`, file nhị phân, file > `maxFileSizeBytes`, đường dẫn không an toàn (`../`, tuyệt đối `/`). Gắn `skipReason` (`NOT_REQUESTED`, `TOO_LARGE`, `BINARY`, `UNAVAILABLE`). |
+| FR-BE—01.8 | Sắp xếp ổn định `files` theo `path`; xử lý BOM khi đọc nội dung. |
+| FR-BE—01.9 | Trả `RepositorySnapshot` gồm `repository` (id, fullName, owner, name, description, private/archived, default branch, URL, primary language, size, pushedAt), `branch`, `headCommit` (SHA, message, author name/login, committedAt, URL), `languages` (map ngôn ngữ→byte), `files` (path, sha, size, language, content, skipReason), `recentCommits`, `stats` (`totalFilesInRepo`, `filesSelected`, `filesWithContent`, `filesIgnored`, `treeTruncated`, `fileLimitReached`), `warnings`, `fetchedAt`. |
+| FR-BE—01.10 | Trả warning không làm thất bại sync: `ARCHIVED_REPOSITORY`, `REPOSITORY_RENAMED`, `TREE_TRUNCATED`, `FILE_LIMIT_REACHED`, `NO_SOURCE_FILES`, `FILE_UNAVAILABLE`/`MORE_FILES_UNAVAILABLE`, `UNSAFE_PATHS_SKIPPED`, `LANGUAGES_UNAVAILABLE`, `COMMITS_UNAVAILABLE`. |
+| FR-BE—01.11 | Khi thành công cập nhật `lastSyncedAt`, `defaultBranch`, và `fullName` nếu repo đã đổi tên. |
+| FR-BE—01.12 | Giữ snapshot mới nhất trong bộ nhớ của service (mất khi restart, phải sync lại). |
+| FR-BE—01.13 | `GET .../sync/latest` trả metadata snapshot (không có `content`); `GET .../sync/latest/analysis-input` trả `AnalysisInput` có nội dung. |
+| FR-BE—01.14 | `AnalysisInput.from(snapshot)` chỉ chọn `analyzableFiles()` (content != null) và tạo `{scope: "repository", target: <full repo name>, files: [{path, language, content}]}`; `language` chữ thường (`java`, `python`). |
+| FR-BE—01.15 | Mọi lỗi đi qua `GlobalExceptionHandler` để chuẩn hóa JSON `{status, code, message, timestamp}`. |
 
 ## 3. API
 
 | Method | Endpoint | Kết quả | Yêu cầu |
 |---|---|---|---|
-| POST | `/api/repositories/{id}/sync` | `SyncResultResponse` (metadata snapshot, không `content`) | LD-63.1 – LD-63.12 |
-| GET | `/api/repositories/{id}/sync/latest` | Metadata snapshot gần nhất | LD-63.12 – LD-63.13 |
-| GET | `/api/repositories/{id}/sync/latest/analysis-input` | `{scope, target, files: [{path, language, content}]}` | LD-63.13 – LD-63.14 |
+| POST | `/api/repositories/{id}/sync` | `SyncResultResponse` (metadata snapshot, không `content`) | FR-BE—01.1 – FR-BE—01.12 |
+| GET | `/api/repositories/{id}/sync/latest` | Metadata snapshot gần nhất | FR-BE—01.12 – FR-BE—01.13 |
+| GET | `/api/repositories/{id}/sync/latest/analysis-input` | `{scope, target, files: [{path, language, content}]}` | FR-BE—01.13 – FR-BE—01.14 |
 
 Body `POST /sync` không bắt buộc. Ví dụ: `{"branch": "develop", "includeContent": true, "maxFiles": 50}`. `maxFiles` ngoài `1..1000` → `400 INVALID_REQUEST`. Mọi endpoint yêu cầu `X-User-Id` và kiểm tra quyền sở hữu repository.
 
@@ -85,18 +85,18 @@ Body `POST /sync` không bắt buộc. Ví dụ: `{"branch": "develop", "include
 
 ## 7. Tiêu chí chấp nhận
 
-- **AC-LD-63.1:** Snapshot thành công có repo, branch, HEAD commit, file, language stats, recent commits.
-- **AC-LD-63.2:** Nhánh tùy chỉnh được dùng đúng; không truyền `branch` → dùng nhánh default.
-- **AC-LD-63.3:** `includeContent=false` không tải nội dung.
-- **AC-LD-63.4:** `maxFiles` và file-size limit được áp dụng; file vượt giới hạn có `skipReason=TOO_LARGE`.
-- **AC-LD-63.5:** File sắp xếp theo `path`; BOM được xử lý.
-- **AC-LD-63.6:** Bỏ qua thư mục/file không hợp lệ, binary, file quá lớn và unsafe path.
-- **AC-LD-63.7:** Warning archived/renamed/tree truncated/no source/file unavailable/language unavailable xuất hiện đúng.
-- **AC-LD-63.8:** Xử lý 401, 403, 404, empty repo, branch missing, 429, timeout, 5xx, dữ liệu GitHub sai → đúng mã lỗi/HTTP.
-- **AC-LD-63.9:** Endpoint kiểm tra quyền sở hữu; người khác nhận `403`.
-- **AC-LD-63.10:** `POST sync` cập nhật `SYNCING` → `CONNECTED`; lỗi tương ứng cập nhật status.
-- **AC-LD-63.11:** `/sync/latest` trả 404 khi chưa có snapshot.
-- **AC-LD-63.12:** `/analysis-input` chỉ chứa file có nội dung, đúng `scope`, `target`, `files`.
+- **AC-BE-01.1:** Snapshot thành công có repo, branch, HEAD commit, file, language stats, recent commits.
+- **AC-BE-01.2:** Nhánh tùy chỉnh được dùng đúng; không truyền `branch` → dùng nhánh default.
+- **AC-BE-01.3:** `includeContent=false` không tải nội dung.
+- **AC-BE-01.4:** `maxFiles` và file-size limit được áp dụng; file vượt giới hạn có `skipReason=TOO_LARGE`.
+- **AC-BE-01.5:** File sắp xếp theo `path`; BOM được xử lý.
+- **AC-BE-01.6:** Bỏ qua thư mục/file không hợp lệ, binary, file quá lớn và unsafe path.
+- **AC-BE-01.7:** Warning archived/renamed/tree truncated/no source/file unavailable/language unavailable xuất hiện đúng.
+- **AC-BE-01.8:** Xử lý 401, 403, 404, empty repo, branch missing, 429, timeout, 5xx, dữ liệu GitHub sai → đúng mã lỗi/HTTP.
+- **AC-BE-01.9:** Endpoint kiểm tra quyền sở hữu; người khác nhận `403`.
+- **AC-BE-01.10:** `POST sync` cập nhật `SYNCING` → `CONNECTED`; lỗi tương ứng cập nhật status.
+- **AC-BE-01.11:** `/sync/latest` trả 404 khi chưa có snapshot.
+- **AC-BE-01.12:** `/analysis-input` chỉ chứa file có nội dung, đúng `scope`, `target`, `files`.
 
 ## 8. Kiểm thử
 
