@@ -33,7 +33,14 @@ public class DocumentationGenerationService {
     private final RestClient analyzerClient;
     private final RestClient aiServiceClient;
     private final DocumentationCodeRelationshipService relationshipService;
+    /** Cache of job owners; the durable record is the documentation artifact written when the job starts. */
     private final ConcurrentMap<String, String> jobOwners = new ConcurrentHashMap<>();
+    private com.livingdocs.github.repository.DocumentationArtifactRepository artifacts;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setArtifacts(com.livingdocs.github.repository.DocumentationArtifactRepository artifacts) {
+        this.artifacts = artifacts;
+    }
 
     public DocumentationGenerationService(
             RepositorySyncService repositorySyncService,
@@ -656,8 +663,17 @@ public class DocumentationGenerationService {
 
     private void requireJobOwner(String userId, String jobId) {
         String owner = jobOwners.get(jobId);
+        if (owner == null && artifacts != null) {
+            // After a restart the owner comes from the artifact stored in this service's database when the job was
+            // started for the authenticated user. A job without such a record (it predates it, or its start was never
+            // recorded) is not claimed by anyone.
+            owner = artifacts.findByGenerationJobId(jobId)
+                    .map(com.livingdocs.github.entity.DocumentationArtifact::getOwnerUserId)
+                    .filter(value -> value != null && !value.isBlank()).orElse(null);
+            if (owner != null) jobOwners.putIfAbsent(jobId, owner);
+        }
         if (owner == null) {
-            throw ApiException.notFound("Documentation job not found or the service was restarted.");
+            throw ApiException.notFound("Documentation job not found.");
         }
         if (!Objects.equals(owner, userId)) {
             throw ApiException.forbidden("This documentation job belongs to another user.");

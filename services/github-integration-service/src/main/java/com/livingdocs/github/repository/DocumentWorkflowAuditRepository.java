@@ -14,4 +14,6 @@ public interface DocumentWorkflowAuditRepository extends JpaRepository<DocumentW
 
     boolean existsByWorkflowIdAndActionAndDocumentVersion(UUID workflowId, String action, Integer documentVersion);
     boolean existsByWorkflowIdAndDocumentVersionAndAction(UUID workflowId, Integer documentVersion, String action);
+    boolean existsByWorkflowIdAndActionAndDocumentVersionAndActorUserId(UUID workflowId, String action,
+            Integer documentVersion, String actorUserId);
 }

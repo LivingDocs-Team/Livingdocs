@@ -13,4 +13,9 @@ public interface DocumentationArtifactRepository extends JpaRepository<Documenta
     Optional<DocumentationArtifact> findByIdAndOwnerUserId(UUID id, String ownerUserId);
     List<DocumentationArtifact> findByIdInAndOwnerUserId(Collection<UUID> ids, String ownerUserId);
     List<DocumentationArtifact> findByRepositoryIdAndOwnerUserIdOrderByCreatedAtDesc(UUID repositoryId, String ownerUserId);
+
+    org.springframework.data.domain.Page<DocumentationArtifact> findByRepositoryIdIn(Collection<UUID> repositoryIds,
+            org.springframework.data.domain.Pageable pageable);
+
+    long countByRepositoryIdIn(Collection<UUID> repositoryIds);
 }

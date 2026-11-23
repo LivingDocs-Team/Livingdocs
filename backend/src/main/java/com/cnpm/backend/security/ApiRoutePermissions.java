@@ -152,7 +152,7 @@ public final class ApiRoutePermissions {
         // "/versions" and "/comparison" (LD-183): compare two versions of the workflow's document. They are read
         // views like "/history"; GitHub Integration still checks that the user may read this workflow.
         for (String view : new String[] {"", "/document", "/evidence", "/review-evidence", "/review-comparison",
-                "/history", "/comments", "/change-requests", "/versions", "/comparison"}) {
+                "/history", "/comments", "/change-requests", "/versions", "/comparison", "/publications"}) {
             rule("GET", "/api/document-workflows/{}" + view, need("workflowSubmission", 'R'),
                     need("staffReview", 'R'), need("managerApproval", 'R'), need("approvalAudit", 'R'));
         }

@@ -303,12 +303,12 @@ class DocumentWorkflowAuditRepositoryTest {
 
         Page<DocumentWorkflow> developerResults = workflows.findHistoryAccessible("developer-1",
                 true, false, false, false, DocumentWorkflowStatus.PENDING_STAFF_REVIEW,
-                DocumentWorkflowStatus.STAFF_REVIEWING, managerStatuses, PageRequest.of(0, 20, stableSort));
+                DocumentWorkflowStatus.STAFF_REVIEWING, managerStatuses, true, java.util.List.of("-"), PageRequest.of(0, 20, stableSort));
         assertThat(developerResults).extracting(w -> w.getDocumentId()).containsExactly("owned-draft");
 
         Page<DocumentWorkflow> staffResults = workflows.findHistoryAccessible("staff-1",
                 false, true, true, false, DocumentWorkflowStatus.PENDING_STAFF_REVIEW,
-                DocumentWorkflowStatus.STAFF_REVIEWING, managerStatuses, PageRequest.of(0, 20, stableSort));
+                DocumentWorkflowStatus.STAFF_REVIEWING, managerStatuses, true, java.util.List.of("-"), PageRequest.of(0, 20, stableSort));
         assertThat(staffResults).extracting(w -> w.getDocumentId()).containsExactlyInAnyOrder(
                 "pending-staff", "pending-current-reviewer", "assigned-review",
                 "assigned-completed", "assigned-approved");
@@ -316,12 +316,12 @@ class DocumentWorkflowAuditRepositoryTest {
 
         Page<DocumentWorkflow> managerResults = workflows.findHistoryAccessible("manager-1",
                 false, false, false, true, DocumentWorkflowStatus.PENDING_STAFF_REVIEW,
-                DocumentWorkflowStatus.STAFF_REVIEWING, managerStatuses, PageRequest.of(0, 20, stableSort));
+                DocumentWorkflowStatus.STAFF_REVIEWING, managerStatuses, true, java.util.List.of("-"), PageRequest.of(0, 20, stableSort));
         assertThat(managerResults).extracting(w -> w.getDocumentId()).containsExactlyInAnyOrder(
                 "manager-pending", "assigned-approved", "approved", "rejected");
         Page<DocumentWorkflow> firstManagerPage = workflows.findHistoryAccessible("manager-1",
                 false, false, false, true, DocumentWorkflowStatus.PENDING_STAFF_REVIEW,
-                DocumentWorkflowStatus.STAFF_REVIEWING, managerStatuses, PageRequest.of(0, 1, stableSort));
+                DocumentWorkflowStatus.STAFF_REVIEWING, managerStatuses, true, java.util.List.of("-"), PageRequest.of(0, 1, stableSort));
         assertThat(firstManagerPage.getContent()).hasSize(1);
         assertThat(firstManagerPage.getTotalElements()).isEqualTo(4);
         assertThat(firstManagerPage.getTotalPages()).isEqualTo(4);

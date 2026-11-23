@@ -548,3 +548,38 @@ def test_full_ld310_submit_to_staff_to_manager_approval_history(page: Page):
     expect(page.get_by_label("Approval audit history")).to_contain_text("PASSED")
     expect(page.get_by_label("Approval audit history")).to_contain_text("APPROVED")
     assert [entry["action"] for entry in api.events] == ["CLAIMED", "PASSED", "APPROVED"]
+
+
+def test_published_receipt_comes_from_the_publication_record_and_hides_the_commit_button(page: Page):
+    commit = f"/api/document-workflows/{WORKFLOW_ID}/versions/3/github-commit"
+    publications = f"/api/document-workflows/{WORKFLOW_ID}/publications"
+
+    class PublishingApi(FakeApi):
+        published = False
+
+        def handle(self, route):
+            request = route.request
+            if request.method == "POST" and request.url.endswith(commit):
+                self.published = True
+                return route.fulfill(status=200, json={"path": ".livingdocs/shop-v3.md",
+                                                      "observedHeadSha": "a" * 40, "alreadyPresent": False})
+            if request.method == "GET" and request.url.split("?")[0].endswith(publications):
+                body = [{"id": "p1", "workflowId": WORKFLOW_ID, "documentId": "doc", "version": 3,
+                         "repositoryId": "r1", "branch": "main", "path": ".livingdocs/shop-v3.md",
+                         "commitSha": "b" * 40, "publishedAt": "2026-11-24T08:00:00Z",
+                         "publishedBy": "manager-1"}] if self.published else []
+                return route.fulfill(status=200, json=body)
+            return super().handle(route)
+
+    api = PublishingApi(workflow(status="APPROVED"))
+    api.events.append(event("REVISION_DRAFT_SUBMITTED", "APPROVED", "PENDING_STAFF_REVIEW",
+                            actor="AI", role="AI", comment="Version 3 from fixture repository"))
+    open_manager_approval(page, api)
+    expect(page.get_by_text("Published to GitHub")).to_have_count(0)
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.get_by_role("button", name="Commit to GitHub").click()
+    receipt = page.get_by_text("Published to GitHub")
+    expect(receipt).to_be_visible()
+    expect(receipt).to_contain_text(".livingdocs/shop-v3.md on main")
+    expect(receipt).to_contain_text("commit bbbbbbb")
+    expect(page.get_by_role("button", name="Commit to GitHub")).to_have_count(0)

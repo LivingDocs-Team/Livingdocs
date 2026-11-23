@@ -77,9 +77,12 @@
       dockerfile: Dockerfile
     image: livingdocs-ai:local
     environment:
+      # Opt-in: analyse every pull request head for documentation drift as soon as GitHub reports it
+      DRIFT_AUTO_ANALYSIS_ENABLED: ${DRIFT_AUTO_ANALYSIS_ENABLED:-false}
       # custom templates and versioned documents survive restarts (named volume below)
       TEMPLATES_FILE: /app/data/templates.json
       DOCUMENTS_FILE: /app/data/documents.json
+      JOBS_DIR: /app/data/jobs
       DRIFT_REPORTS_FILE: /app/data/drift-reports.json
       INTERNAL_API_SECRET: ${GITHUB_INTEGRATION_INTERNAL_SECRET:?GITHUB_INTEGRATION_INTERNAL_SECRET must be set in .env}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -173,6 +176,8 @@
       context: ./frontend
       dockerfile: Dockerfile
     image: livingdocs-frontend:local
+    # nginx exits if it starts before the backend is resolvable (e.g. after Docker restarts); retry instead of staying down
+    restart: unless-stopped
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-3000}:80"
     depends_on:

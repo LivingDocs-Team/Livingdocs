@@ -41,7 +41,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ApprovalGovernanceAndOversightApiTest {
     private static final String MANAGER = "ROLE_MANAGER,DOCUMENT_APPROVAL_QUEUE_VIEW,DOCUMENT_APPROVE";
     private static final String DEVELOPER = "ROLE_DEVELOPER,DOCUMENT_VIEW,DOCUMENT_CREATE";
-    private static final String TECHNICAL_LEAD = "ROLE_TECHNICAL_LEAD,DOCUMENT_TECHNICAL_REVIEW";
+    private static final String TECHNICAL_LEAD = "ROLE_TECHNICAL_LEAD,DOCUMENT_TECHNICAL_REVIEW,WORKSPACE:ws-owner-1";
 
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper objectMapper;
@@ -167,7 +167,7 @@ class ApprovalGovernanceAndOversightApiTest {
     @Test
     void aManagerDelegatesAndRevokesAndTheDelegateSeesIt() throws Exception {
         String ends = Instant.now().plusSeconds(3 * 86400).toString();
-        String created = mvc.perform(post("/api/approval/delegations").header("X-User-Id", "m1")
+        String created = mvc.perform(post("/api/approval/delegations").header("X-Verified-Delegate-Id", "m2").header("X-User-Id", "m1")
                         .header("X-User-Authorities", MANAGER).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"delegateUserId\":\"m2\",\"reason\":\"On leave\",\"endsAt\":\"" + ends + "\"}"))
                 .andExpect(status().isCreated())
@@ -190,6 +190,58 @@ class ApprovalGovernanceAndOversightApiTest {
     }
 
     @Test
+    void aManagerWhoDelegatedTheirApprovalsCannotDecideUntilTheyRevoke() throws Exception {
+        DocumentWorkflow ready = new DocumentWorkflow("doc-ready", "Ready", "owner-1");
+        ready.submit(1);
+        ready.claim("staff-1");
+        ready.review(com.livingdocs.github.entity.StaffReviewResult.PASSED, "ok");
+        UUID readyId = workflows.saveAndFlush(ready).getId();
+        String approver = MANAGER + ",DOCUMENT_REJECT";
+
+        String endsAt = java.time.Instant.now().plus(java.time.Duration.ofDays(2)).toString();
+        String created = mvc.perform(post("/api/approval/delegations").header("X-Verified-Delegate-Id", "m2").header("X-User-Id", "m1")
+                        .header("X-User-Authorities", MANAGER).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"delegateUserId\":\"m2\",\"endsAt\":\"" + endsAt + "\"}"))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String delegationId = objectMapper.readTree(created).path("id").asText();
+
+        mvc.perform(post("/api/document-workflows/" + readyId + "/approve").header("X-User-Id", "m1")
+                        .header("X-User-Authorities", approver).contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isConflict());
+
+        mvc.perform(delete("/api/approval/delegations/" + delegationId).header("X-User-Id", "m1")
+                        .header("X-User-Authorities", MANAGER))
+                .andExpect(status().is2xxSuccessful());
+        // After the revoke the Manager is no longer blocked by the delegation (the document service is not
+        // reachable here, so the decision itself fails later and differently).
+        int afterRevoke = mvc.perform(post("/api/document-workflows/" + readyId + "/approve").header("X-User-Id", "m1")
+                        .header("X-User-Authorities", approver).contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andReturn().getResponse().getStatus();
+        org.assertj.core.api.Assertions.assertThat(afterRevoke).isNotEqualTo(409);
+    }
+
+    @Test
+    void aDelegateTheBackendDidNotVerifyOrWhoIsAwayThemselvesIsRefused() throws Exception {
+        String body = "{\"delegateUserId\":\"m2\",\"endsAt\":\"" + Instant.now().plusSeconds(86400) + "\"}";
+        // no verification header: a direct call that skipped the Backend
+        mvc.perform(post("/api/approval/delegations").header("X-User-Id", "m1").header("X-User-Authorities", MANAGER)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest());
+        // the verified id names someone else than the request does
+        mvc.perform(post("/api/approval/delegations").header("X-Verified-Delegate-Id", "m3").header("X-User-Id", "m1")
+                        .header("X-User-Authorities", MANAGER).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest());
+        // m2 is away (delegated to m3): m2 cannot be asked to cover m1
+        mvc.perform(post("/api/approval/delegations").header("X-Verified-Delegate-Id", "m3").header("X-User-Id", "m2")
+                        .header("X-User-Authorities", MANAGER).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"delegateUserId\":\"m3\",\"endsAt\":\"" + Instant.now().plusSeconds(86400) + "\"}"))
+                .andExpect(status().isCreated());
+        mvc.perform(post("/api/approval/delegations").header("X-Verified-Delegate-Id", "m2").header("X-User-Id", "m1")
+                        .header("X-User-Authorities", MANAGER).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
     void delegationRejectsSelfPastEndAndTooLongPeriods() throws Exception {
         String future = Instant.now().plusSeconds(86400).toString();
         String tooLong = Instant.now().plusSeconds(200L * 86400).toString();
@@ -199,7 +251,7 @@ class ApprovalGovernanceAndOversightApiTest {
                 "{\"delegateUserId\":\"m2\",\"endsAt\":\"" + past + "\"}",
                 "{\"delegateUserId\":\"m2\",\"endsAt\":\"" + tooLong + "\"}",
                 "{\"endsAt\":\"" + future + "\"}"}) {
-            mvc.perform(post("/api/approval/delegations").header("X-User-Id", "m1").header("X-User-Authorities", MANAGER)
+            mvc.perform(post("/api/approval/delegations").header("X-Verified-Delegate-Id", "m2").header("X-User-Id", "m1").header("X-User-Authorities", MANAGER)
                             .contentType(MediaType.APPLICATION_JSON).content(body))
                     .andExpect(status().isBadRequest());
         }

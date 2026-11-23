@@ -32,64 +32,74 @@ public class OversightController {
                 .collect(Collectors.toSet());
     }
 
-    private static void check(String header) {
-        OversightService.require(authorities(header));
+    private static Set<String> check(String header) {
+        Set<String> parsed = authorities(header);
+        OversightService.require(parsed);
+        return parsed;
     }
 
     @GetMapping("/repositories")
     public List<OversightService.RepositorySummary> repositories(
+            @RequestHeader(DocumentWorkflowController.USER_HEADER) String userId,
             @RequestHeader(DocumentWorkflowController.AUTHORITIES_HEADER) String authorities) {
-        check(authorities);
-        return oversight.repositories();
+        Set<String> scope = check(authorities);
+        return oversight.repositories(userId, scope);
     }
 
     @GetMapping("/repositories/{id}/pull-requests")
-    public Object pullRequests(@RequestHeader(DocumentWorkflowController.AUTHORITIES_HEADER) String authorities,
+    public Object pullRequests(@RequestHeader(DocumentWorkflowController.USER_HEADER) String userId,
+            @RequestHeader(DocumentWorkflowController.AUTHORITIES_HEADER) String authorities,
             @PathVariable UUID id) {
-        check(authorities);
-        return oversight.pullRequests(id);
+        Set<String> scope = check(authorities);
+        return oversight.pullRequests(userId, scope, id);
     }
 
     @GetMapping("/repositories/{id}/commits")
-    public Object commits(@RequestHeader(DocumentWorkflowController.AUTHORITIES_HEADER) String authorities,
+    public Object commits(@RequestHeader(DocumentWorkflowController.USER_HEADER) String userId,
+            @RequestHeader(DocumentWorkflowController.AUTHORITIES_HEADER) String authorities,
             @PathVariable UUID id) {
-        check(authorities);
-        return oversight.commits(id);
+        Set<String> scope = check(authorities);
+        return oversight.commits(userId, scope, id);
     }
 
     @GetMapping("/repositories/{id}/drift-policies")
     public List<AutoUpdatePolicies.Rule> driftPolicies(
+            @RequestHeader(DocumentWorkflowController.USER_HEADER) String userId,
             @RequestHeader(DocumentWorkflowController.AUTHORITIES_HEADER) String authorities, @PathVariable UUID id) {
-        check(authorities);
-        return oversight.driftPolicies(id);
+        Set<String> scope = check(authorities);
+        return oversight.driftPolicies(userId, scope, id);
     }
 
     @PutMapping("/repositories/{id}/drift-policies")
     public List<AutoUpdatePolicies.Rule> replaceDriftPolicies(
+            @RequestHeader(DocumentWorkflowController.USER_HEADER) String userId,
             @RequestHeader(DocumentWorkflowController.AUTHORITIES_HEADER) String authorities, @PathVariable UUID id,
             @RequestBody List<AutoUpdatePolicies.Rule> rules) {
-        check(authorities);
-        return oversight.replaceDriftPolicies(id, rules);
+        Set<String> scope = check(authorities);
+        return oversight.replaceDriftPolicies(userId, scope, id, rules);
     }
 
     @GetMapping("/documentation")
     public List<OversightService.DocumentSummary> documents(
+            @RequestHeader(DocumentWorkflowController.USER_HEADER) String userId,
             @RequestHeader(DocumentWorkflowController.AUTHORITIES_HEADER) String authorities) {
-        check(authorities);
-        return oversight.documents();
+        Set<String> scope = check(authorities);
+        return oversight.documents(userId, scope);
     }
 
     @GetMapping("/documentation/{id}")
     public DocumentationArtifactResponse document(
+            @RequestHeader(DocumentWorkflowController.USER_HEADER) String userId,
             @RequestHeader(DocumentWorkflowController.AUTHORITIES_HEADER) String authorities, @PathVariable UUID id) {
-        check(authorities);
-        return oversight.document(id);
+        Set<String> scope = check(authorities);
+        return oversight.document(userId, scope, id);
     }
 
     @GetMapping("/health")
     public OversightService.Health health(
+            @RequestHeader(DocumentWorkflowController.USER_HEADER) String userId,
             @RequestHeader(DocumentWorkflowController.AUTHORITIES_HEADER) String authorities) {
-        check(authorities);
-        return oversight.health();
+        Set<String> scope = check(authorities);
+        return oversight.health(userId, scope);
     }
 }

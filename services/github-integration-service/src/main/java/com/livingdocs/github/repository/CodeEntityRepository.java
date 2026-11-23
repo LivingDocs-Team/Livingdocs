@@ -20,6 +20,13 @@ public interface CodeEntityRepository extends JpaRepository<CodeEntity, UUID> {
 
     long countByActiveTrue();
 
+    long countByRepositoryIdInAndActiveTrue(java.util.Collection<UUID> repositoryIds);
+
+    @Query("""
+            select count(e) from CodeEntity e where e.active = true and e.repositoryId in :repositoryIds
+              and exists (select 1 from DocumentationCodeRelationship r where r.codeEntityId = e.id)""")
+    long countDocumentedIn(@Param("repositoryIds") java.util.Collection<UUID> repositoryIds);
+
     @Query("""
             select count(e) from CodeEntity e where e.active = true
               and exists (select 1 from DocumentationCodeRelationship r where r.codeEntityId = e.id)""")

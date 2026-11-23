@@ -90,33 +90,48 @@ public class OversightService {
         if (!mayOversee(authorities)) throw ApiException.forbidden("Oversight access is required.");
     }
 
-    @Transactional(readOnly = true)
-    public List<RepositorySummary> repositories() {
-        return repositories.findAllByOrderByFullNameAsc().stream().map(RepositorySummary::from).toList();
+    /** Repositories of the workspaces the caller belongs to (every repository for a global administrator). */
+    private List<ConnectedRepository> visibleRepositories(String actor, Set<String> authorities) {
+        return repositories.findAllByOrderByFullNameAsc().stream()
+                .filter((repo) -> WorkspaceScope.allowsRepository(authorities, actor, repo.getWorkspaceId())).toList();
+    }
+
+    private static List<UUID> ids(List<ConnectedRepository> visible) {
+        // never empty, so it is safe in an "in" clause; this id belongs to no repository
+        return visible.isEmpty() ? List.of(new UUID(0L, 0L)) : visible.stream().map(ConnectedRepository::getId).toList();
     }
 
     @Transactional(readOnly = true)
-    public ConnectedRepository repository(UUID id) {
-        return repositories.findById(id).orElseThrow(() -> ApiException.notFound("Repository not found."));
+    public List<RepositorySummary> repositories(String actor, Set<String> authorities) {
+        return visibleRepositories(actor, authorities).stream().map(RepositorySummary::from).toList();
+    }
+
+    /** A repository outside the caller's workspaces does not exist for the caller. */
+    @Transactional(readOnly = true)
+    public ConnectedRepository repository(String actor, Set<String> authorities, UUID id) {
+        return repositories.findById(id)
+                .filter((repo) -> WorkspaceScope.allowsRepository(authorities, actor, repo.getWorkspaceId()))
+                .orElseThrow(() -> ApiException.notFound("Repository not found."));
     }
 
     @Transactional(readOnly = true)
-    public Object pullRequests(UUID repositoryId) {
-        repository(repositoryId);
+    public Object pullRequests(String actor, Set<String> authorities, UUID repositoryId) {
+        repository(actor, authorities, repositoryId);
         return ingestion.listPullRequests(repositoryId);
     }
 
     @Transactional(readOnly = true)
-    public Object commits(UUID repositoryId) {
-        repository(repositoryId);
+    public Object commits(String actor, Set<String> authorities, UUID repositoryId) {
+        repository(actor, authorities, repositoryId);
         return ingestion.listCommits(repositoryId);
     }
 
     @Transactional(readOnly = true)
-    public List<DocumentSummary> documents() {
+    public List<DocumentSummary> documents(String actor, Set<String> authorities) {
+        List<ConnectedRepository> visible = visibleRepositories(actor, authorities);
         Map<UUID, String> names = new LinkedHashMap<>();
-        repositories.findAll().forEach((repo) -> names.put(repo.getId(), repo.getFullName()));
-        return artifacts.findAll(PageRequest.of(0, DOCUMENT_LIMIT,
+        visible.forEach((repo) -> names.put(repo.getId(), repo.getFullName()));
+        return artifacts.findByRepositoryIdIn(ids(visible), PageRequest.of(0, DOCUMENT_LIMIT,
                         org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "createdAt")))
                 .stream().map((artifact) -> new DocumentSummary(artifact.getId(), artifact.getRepositoryId(),
                         names.get(artifact.getRepositoryId()), title(artifact), artifact.getSourceCommit(),
@@ -124,36 +139,45 @@ public class OversightService {
     }
 
     @Transactional(readOnly = true)
-    public DocumentationArtifactResponse document(UUID id) {
-        return artifacts.findById(id).map(DocumentationArtifactResponse::from)
+    public DocumentationArtifactResponse document(String actor, Set<String> authorities, UUID id) {
+        return artifacts.findById(id).filter((artifact) -> repositories.findById(artifact.getRepositoryId())
+                        .filter((repo) -> WorkspaceScope.allowsRepository(authorities, actor, repo.getWorkspaceId()))
+                        .isPresent())
+                .map(DocumentationArtifactResponse::from)
                 .orElseThrow(() -> ApiException.notFound("Document not found."));
     }
 
     @Transactional(readOnly = true)
-    public List<AutoUpdatePolicies.Rule> driftPolicies(UUID repositoryId) {
-        repository(repositoryId);
+    public List<AutoUpdatePolicies.Rule> driftPolicies(String actor, Set<String> authorities, UUID repositoryId) {
+        repository(actor, authorities, repositoryId);
         return autoUpdatePolicies.rulesFor(repositoryId);
     }
 
     @Transactional
-    public List<AutoUpdatePolicies.Rule> replaceDriftPolicies(UUID repositoryId, List<AutoUpdatePolicies.Rule> rules) {
-        repository(repositoryId);
+    public List<AutoUpdatePolicies.Rule> replaceDriftPolicies(String actor, Set<String> authorities, UUID repositoryId,
+            List<AutoUpdatePolicies.Rule> rules) {
+        repository(actor, authorities, repositoryId);
         return autoUpdatePolicies.replaceUnchecked(repositoryId, rules);
     }
 
     @Transactional(readOnly = true)
-    public Health health() {
-        long total = codeEntities.countByActiveTrue();
-        long documented = codeEntities.countDocumented();
-        Counts counts = new Counts(repositories.count(), artifacts.count(), total, documented,
+    public Health health(String actor, Set<String> authorities) {
+        List<ConnectedRepository> visible = visibleRepositories(actor, authorities);
+        List<UUID> repositoryIds = ids(visible);
+        long total = codeEntities.countByRepositoryIdInAndActiveTrue(repositoryIds);
+        long documented = codeEntities.countDocumentedIn(repositoryIds);
+        Counts counts = new Counts(visible.size(), artifacts.countByRepositoryIdIn(repositoryIds), total, documented,
                 total == 0 ? 0 : (int) Math.round(documented * 100.0 / total));
 
         Map<String, Long> repoStatus = new LinkedHashMap<>();
-        for (RepositoryStatus status : RepositoryStatus.values()) repoStatus.put(status.name(), repositories.countByStatus(status));
+        for (RepositoryStatus status : RepositoryStatus.values()) {
+            repoStatus.put(status.name(), visible.stream().filter((repo) -> repo.getStatus() == status).count());
+        }
         Map<String, Long> workflowStatus = new LinkedHashMap<>();
-        for (DocumentWorkflowStatus status : DocumentWorkflowStatus.values()) workflowStatus.put(status.name(), workflows.countByStatus(status));
+        for (DocumentWorkflowStatus status : DocumentWorkflowStatus.values()) workflowStatus.put(status.name(),
+                workflows.countByStatusInScope(status, WorkspaceScope.all(authorities), WorkspaceScope.workspaces(authorities)));
 
-        List<Object[]> rows = relationships.dependencyEdges(PageRequest.of(0, GRAPH_EDGES + 1));
+        List<Object[]> rows = relationships.dependencyEdgesIn(repositoryIds, PageRequest.of(0, GRAPH_EDGES + 1));
         boolean truncated = rows.size() > GRAPH_EDGES;
         List<Object[]> shown = truncated ? rows.subList(0, GRAPH_EDGES) : rows;
         Map<UUID, DocumentationArtifact> docs = new LinkedHashMap<>();

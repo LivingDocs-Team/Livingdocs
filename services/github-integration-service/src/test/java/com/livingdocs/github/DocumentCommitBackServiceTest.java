@@ -55,12 +55,15 @@ class DocumentCommitBackServiceTest {
     private final DocumentationGenerationService documents = mock(DocumentationGenerationService.class);
     private final GitHubConnectionService connections = mock(GitHubConnectionService.class);
     private final GitHubClient github = mock(GitHubClient.class);
+    private final com.livingdocs.github.repository.DocumentPublicationRepository publications =
+            mock(com.livingdocs.github.repository.DocumentPublicationRepository.class);
     private final DocumentCommitBackService service =
             new DocumentCommitBackService(workflows, repositories, documents, connections, github,
                     mock(DocumentWorkflowAuditRepository.class));
 
     @BeforeEach
     void approvedRevision() {
+        service.setPublications(publications);
         var workflow = new DocumentWorkflow(DOCUMENT_ID, "Invoice", "owner");
         workflow.submit(2);
         workflow.decide(MANAGER, ManagerDecision.APPROVED, null);
@@ -93,6 +96,50 @@ class DocumentCommitBackServiceTest {
                 .thenReturn(NEXT_SHA);
         assertThat(service.commit(MANAGER, PERMISSIONS, WORKFLOW_ID, 2))
                 .isEqualTo(new DocumentCommitBackService.Result(PATH, NEXT_SHA, false));
+    }
+
+    @Test
+    void aConfirmedCommitIsRecordedOnceWithTheRealCommitShaAndTheBranch() {
+        tree(SOURCE_SHA, List.of());
+        when(github.commitFileOnBranch("fixture-token", "fixture-ref", SOURCE_SHA, PATH,
+                CONTENT.getBytes(StandardCharsets.UTF_8), "Publish LivingDocs document " + DOCUMENT_ID + " v2"))
+                .thenReturn(NEXT_SHA);
+        service.commit(MANAGER, PERMISSIONS, WORKFLOW_ID, 2);
+
+        var saved = org.mockito.ArgumentCaptor.forClass(com.livingdocs.github.entity.DocumentPublication.class);
+        org.mockito.Mockito.verify(publications).save(saved.capture());
+        assertThat(saved.getValue().getCommitSha()).isEqualTo(NEXT_SHA);
+        assertThat(saved.getValue().getBranch()).isEqualTo("main");
+        assertThat(saved.getValue().getPath()).isEqualTo(PATH);
+        assertThat(saved.getValue().getVersion()).isEqualTo(2);
+        assertThat(saved.getValue().getRepositoryId()).isEqualTo(REPOSITORY_ID);
+        assertThat(saved.getValue().getDocumentId()).isEqualTo(DOCUMENT_ID);
+        assertThat(saved.getValue().getPublishedBy()).isEqualTo(MANAGER);
+    }
+
+    @Test
+    void aRetryDoesNotRecordTheSamePublicationTwice() {
+        when(publications.existsByWorkflowIdAndVersion(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(2)))
+                .thenReturn(true);
+        tree(NEXT_SHA, List.of(new GitHubTree.Entry(PATH, "100644", "blob", HELLO_BLOB, 6L)));
+        service.commit(MANAGER, PERMISSIONS, WORKFLOW_ID, 2);
+        org.mockito.Mockito.verify(publications, org.mockito.Mockito.never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void nothingIsRecordedWhenGitHubDoesNotConfirmTheCommit() {
+        tree(SOURCE_SHA, List.of());
+        when(github.commitFileOnBranch("fixture-token", "fixture-ref", SOURCE_SHA, PATH,
+                CONTENT.getBytes(StandardCharsets.UTF_8), "Publish LivingDocs document " + DOCUMENT_ID + " v2"))
+                .thenThrow(new GitHubApiException("GitHub did not confirm the operation.", false));
+        assertThatThrownBy(() -> service.commit(MANAGER, PERMISSIONS, WORKFLOW_ID, 2)).isInstanceOf(ApiException.class);
+        org.mockito.Mockito.verify(publications, org.mockito.Mockito.never()).save(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void anApprovedButNotYetCommittedVersionHasNoPublication() {
+        assertThatThrownBy(() -> service.commit(MANAGER, PERMISSIONS, WORKFLOW_ID, 3)).isInstanceOf(ApiException.class);
+        org.mockito.Mockito.verify(publications, org.mockito.Mockito.never()).save(org.mockito.ArgumentMatchers.any());
     }
 
     @Test
