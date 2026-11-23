@@ -1,416 +1,123 @@
-# LivingDocs — Đặc tả chức năng LD-405: Verify Code–Documentation Migration
+# BE9—LD-405 & LD-211 Liên kết Tài liệu – Mã nguồn và Xác minh Migration
 
-## 1. Mục tiêu
-
-LD-405 tập trung xác minh việc tích hợp migration cơ sở dữ liệu cho chức năng liên kết giữa tài liệu và các thực thể mã nguồn (Code–Documentation Relationship), vốn được triển khai trong PR #102.
-
-Mục tiêu chính là bảo đảm migration có thể chạy trên cả database mới và database đã tồn tại, không làm mất dữ liệu hoặc phá vỡ lịch sử migration đã áp dụng. Đồng thời, các ràng buộc dữ liệu của quan hệ tài liệu–code phải được giữ nguyên và API quản lý quan hệ vẫn hoạt động sau khi schema được nâng cấp.
-
-Trong snapshot code được cung cấp, phạm vi LD-405 được thể hiện qua ba nhóm:
-
-1. **Migration và lựa chọn migration lineage:** xử lý sự trùng lặp version migration giữa các nhánh tính năng, nhận diện đúng lịch sử Flyway hiện có và chọn bộ migration tương thích.
-2. **Bảo toàn schema và dữ liệu:** kiểm tra database mới, nâng cấp database cũ, giữ nguyên checksum/lịch sử đã áp dụng, đồng thời xác minh khóa ngoại, unique constraint và cascade delete.
-3. **Xác minh API quan hệ:** kiểm tra API đọc/ghi liên kết tài liệu với code entity, quyền sở hữu repository, xử lý entity bị xóa/khôi phục và tính ổn định của ID khi vị trí dòng code thay đổi.
-
-Đây là chức năng kiểm tra và bảo đảm tính tương thích của migration; không phải một giao diện người dùng độc lập.
-
-## 2. Thành phần và vị trí mã nguồn
-
-### 2.1. Migration và cấu hình Flyway
-
-Các thành phần chính nằm trong `services/github-integration-service`:
-
-- `src/main/resources/db/migration/`: các migration gốc, bao gồm `V5__documentation_code_relationships.sql` và các migration liên quan.
-- `src/main/resources/db/migration-current/`: lineage hiện tại, có migration kết hợp `V5__documentation_code_relationships_and_pull_requests.sql`.
-- `src/main/resources/db/migration-current-documents-v5/`: lineage dành cho database đã áp dụng migration tài liệu ở version 5.
-- `src/main/resources/db/migration-current-pull-requests-v5/`: lineage dành cho database đã áp dụng migration Pull Request ở version 5.
-- `src/main/resources/db/migration-current-documents-v5-source-changes-v6/`: lineage đã có Documentation V5 và Source Changes V6.
-- `src/main/resources/db/migration-current-pull-requests-v5-source-changes-v6/`: lineage đã có Pull Requests V5 và Source Changes V6.
-- `src/main/resources/db/migration-legacy/`: lineage cũ có quan hệ tài liệu–code từ V2.
-- `src/main/resources/db/migration-common/`: các migration dùng chung, gồm V8 affected documents và V9 system analytics indexes.
-- `config/FlywayMigrationLineageSelector.java`: đọc lịch sử Flyway và chọn lineage tương ứng.
-- `config/FlywayMigrationLineageConfig.java`: cấu hình Flyway sử dụng lineage đã chọn cùng `classpath:db/migration-common`.
-
-### 2.2. Các thành phần quản lý quan hệ tài liệu–code
-
-| Thành phần | Vị trí |
+| Mục | Nội dung |
 |---|---|
-| Controller | `controller/DocumentationCodeRelationshipController.java` |
-| Service | `service/DocumentationCodeRelationshipService.java` |
-| Entity quan hệ | `entity/DocumentationCodeRelationship.java` |
-| Repository quan hệ | `repository/DocumentationCodeRelationshipRepository.java` |
-| Entity tài liệu | `entity/DocumentationArtifact.java` |
-| Entity code | `entity/CodeEntity.java` |
-| DTO phản hồi | `dto/DocumentationArtifactResponse.java`, `dto/CodeEntityResponse.java` |
-| DTO cập nhật liên kết | `dto/ReplaceDocumentationCodeLinksRequest.java` |
-| Hợp đồng API | `docs/documentation-code-relationship-contract.md` |
+| Story Jira | LD-405 Verify Code–Documentation Migration (PR#102); LD-211 `[Code & Documentation Relationship] Implement Code & Documentation Relationship` |
+| Task đã làm | LD-212 (Define Documentation-to-Code Relationships), LD-213 (Link Documentation to Source Code), LD-214 (Display Documentation-to-Code Relationships), LD-215 (Implement Document and Source Code Navigation), LD-216 (Test Documentation-to-Code Relationships); LD-405 (Sprint 7 — Migration Verification & Lineage Resolution) |
+| Người thực hiện | Nguyễn Hữu Đăng Khôi (LD-211 / PR#102); tích hợp và xác minh migration trong LD-405 |
+| Nhánh / PR & Trạng thái | Nhánh `LD-405` xác minh tích hợp **PR #102** (`LD-211`) và tương thích migration lineage |
+| Thành phần | **GitHub Integration Service:** `controller/DocumentationCodeRelationshipController`, `service/DocumentationCodeRelationshipService`, `service/DocumentationGenerationService`, `entity/DocumentationArtifact`, `entity/CodeEntity`, `entity/DocumentationCodeRelationship`, `repository/*`, `dto/*`, `config/FlywayMigrationLineageSelector`, `config/FlywayMigrationLineageConfig`, `db/migration*/*.sql`, `docs/documentation-code-relationship-contract.md`<br>**Backend BFF:** `security/ApiRoutePermissions` (phân quyền route `/api/repositories/{id}/code-entities`, `/api/repositories/{id}/documentation`, `/api/documentation/**`) <br>**Frontend:** `frontend/src/DocumentationManagement.jsx`<br>**CI:** `.github/workflows/ci.yml` (`github-integration-test`) |
+| Tác nhân | Người dùng LivingDocs (xem, gắn liên kết và điều hướng giữa tài liệu với mã nguồn), Backend BFF (xác thực và chuyển tiếp `X-User-Id`), GitHub Integration Service, GitHub Actions CI |
 
-### 2.3. Kiểm thử và CI
+## 1. Mô tả
 
-- `src/test/java/com/livingdocs/github/DocumentationCodeRelationshipMigrationTest.java`: kiểm tra migration database mới và nâng cấp database cũ.
-- `src/test/java/com/livingdocs/github/config/FlywayMigrationLineageSelectorTest.java`: kiểm tra lựa chọn lineage theo lịch sử Flyway, checksum và các trường hợp lịch sử không hợp lệ.
-- `src/test/java/com/livingdocs/github/DocumentationCodeRelationshipApiTest.java`: kiểm tra API quan hệ trên Spring Boot test context.
-- `.github/workflows/ci.yml`: job `github-integration-test` chạy Maven verify, kiểm tra API quan hệ với PostgreSQL và chạy các kiểm thử GitHub Integration khác.
+Tài liệu đặc tả chức năng quản lý **Quan hệ Tài liệu – Mã nguồn (Code–Documentation Relationship)** được xây dựng trong **LD-211 (PR#102)** cùng cơ chế **Xác minh và Tích hợp Migration Cơ sở dữ liệu** trong **LD-405**.
 
-## 3. Tổng quan dữ liệu và kiến trúc
+Phạm vi chức năng bao gồm hai phần bổ trợ chặt chẽ:
+1. **Chức năng nghiệp vụ liên kết tài liệu – mã nguồn (LD-211: LD-212 – LD-216):** Định nghĩa mô hình dữ liệu lưu trữ tài liệu sinh ra (`documentation_artifacts`), thực thể mã nguồn trích xuất từ phân tích AST (`code_entities` gồm `class`, `method`, `function`, `endpoint`) và bảng liên kết hai chiều (`documentation_code_relationships`). Hệ thống cung cấp API và giao diện trên `DocumentationManagement.jsx` cho phép gắn/cập nhật liên kết giữa tài liệu với code entity, hiển thị danh sách thực thể liên quan và điều hướng hai chiều từ tài liệu tới đúng tệp/dòng mã nguồn trên GitHub (`#L<start>-L<end>`) cũng như tra cứu ngược từ code entity về các tài liệu liên kết.
+2. **Xác minh migration và giải quyết xung đột lineage (LD-405):** Giải quyết xung đột trùng phiên bản migration `V5` giữa nhánh PR#102 (`V5__documentation_code_relationships.sql`) và nhánh Pull Request (`V5__pull_requests_and_commits.sql`) thông qua `FlywayMigrationLineageSelector`. Cơ chế này nhận diện lịch sử `flyway_schema_history` và checksum thực tế của database để chọn đúng lineage tương thích, bảo toàn dữ liệu hiện có, duy trì toàn vẹn khóa ngoại/unique constraint/cascade delete và kiểm chứng tích hợp API trên PostgreSQL trong CI.
 
-Chức năng quan hệ tài liệu–code thuộc GitHub Integration Service, sử dụng PostgreSQL và Flyway. Backend đóng vai trò BFF chuyển tiếp request từ trình duyệt đến GitHub Integration Service; API quan hệ nhận `X-User-Id` đã được Backend chuyển tiếp.
+## 2. Yêu cầu chức năng
 
-### 3.1. Các bảng chính do migration quan hệ tạo ra
-
-| Bảng | Mục đích |
+| ID | Yêu cầu |
 |---|---|
-| `documentation_artifacts` | Lưu bản ghi tài liệu được sinh cho repository, chủ sở hữu, generation job, Markdown và commit nguồn |
-| `code_entities` | Lưu các class, method, function, endpoint được trích xuất từ kết quả phân tích code |
-| `documentation_code_relationships` | Lưu liên kết giữa một tài liệu và một code entity |
+| FR-BE—09.1 | **(LD-212 — Định nghĩa mô hình dữ liệu)** Lưu trữ bản ghi tài liệu sinh ra trong bảng `documentation_artifacts` (`id`, `repository_id`, `owner_user_id`, `generation_job_id`, `markdown`, `source_commit`, `created_at`, `updated_at`), các thực thể mã nguồn trong `code_entities` (`id`, `repository_id`, `stable_key`, `entity_type`, `name`, `path`, `line_start`, `line_end`, `source_url`, `source_commit`, `active`, `last_seen_at`) và liên kết hai chiều trong `documentation_code_relationships` (`id`, `documentation_id`, `code_entity_id`, `created_at`). |
+| FR-BE—09.2 | **(LD-212 — Định danh ổn định & vòng đời thực thể)** Tạo `stable_key` bằng mã băm SHA-256 của bộ `(path, entity_type, qualified_name)` (không phụ thuộc số dòng) để giữ nguyên `code_entities.id` và các liên kết cũ khi vị trí dòng code thay đổi. Khi thực thể biến mất khỏi lần phân tích mới (trên snapshot đầy đủ không bị `treeTruncated` hoặc `fileLimitReached`), đánh dấu `active = false` mà không xóa bản ghi quan hệ; khi thực thể xuất hiện lại với cùng `stable_key`, kích hoạt lại (`active = true`) và khôi phục liên kết cũ. |
+| FR-BE—09.3 | **(LD-213 — Ghi nhận thực thể khi sinh tài liệu)** Khi sinh tài liệu (`DocumentationCodeRelationshipService.recordGeneration` và `saveGeneratedMarkdown`), tự động tạo/cập nhật `DocumentationArtifact` theo `generation_job_id`, trích xuất các `class`, `method` (định danh dạng `ClassName.methodName`), `function` và `endpoint` (`HTTP_METHOD /path`) từ kết quả phân tích hợp lệ (`status` là `ok` hoặc `empty`), đồng thời sinh `source_url` trỏ tới commit SHA và khoảng dòng `#L{lineStart}-L{lineEnd}` trên GitHub. |
+| FR-BE—09.4 | **(LD-213 — Gắn và thay thế liên kết tài liệu – code)** Cung cấp `PUT /api/documentation/{documentId}/code-entities` nhận danh sách `codeEntityIds` (tối đa $500$ phần tử). Hệ thống khử trùng lặp ID theo thứ tự (`LinkedHashSet`), kiểm tra tất cả entity đều đang `active` và thuộc cùng `repository_id` với tài liệu; nếu hợp lệ thì thay thế toàn bộ liên kết cũ bằng danh sách mới (danh sách rỗng `[]` sẽ gỡ toàn bộ liên kết). |
+| FR-BE—09.5 | **(LD-214 — Hiển thị danh sách tài liệu & thực thể liên kết)** Cung cấp các API đọc dữ liệu: `GET /api/repositories/{repositoryId}/code-entities` (liệt kê code entity đang active sắp xếp theo `path`, `lineStart`), `GET /api/repositories/{repositoryId}/documentation` (liệt kê tài liệu của user trong repository), `GET /api/documentation/{documentId}` (chi tiết tài liệu) và `GET /api/documentation/{documentId}/code-entities` (danh sách code entity đang active liên kết với tài liệu). |
+| FR-BE—09.6 | **(LD-215 — Điều hướng hai chiều Tài liệu ↔ Mã nguồn)** Hỗ trợ điều hướng xuôi từ tài liệu sang mã nguồn qua trường `sourceUrl` (URL GitHub kèm commit SHA và anchor `#L<start>-L<end>`) của từng `CodeEntityResponse`, và điều hướng ngược từ một thực thể mã nguồn về các tài liệu liên quan qua `GET /api/documentation/code-entities/{entityId}/documents`. Giao diện `DocumentationManagement.jsx` hiển thị các liên kết này để người dùng mở trực tiếp mã nguồn hoặc chuyển đổi giữa tài liệu và thực thể code. |
+| FR-BE—09.7 | **(Kiểm soát quyền truy cập & BFF)** Mọi endpoint quan hệ yêu cầu header `X-User-Id` đã được Backend BFF xác thực chuyển tiếp; service xác minh quyền sở hữu `repository` và `documentation_artifacts.owner_user_id` trước khi đọc/ghi, đồng thời `ApiRoutePermissions` trên Backend cấu hình quyền truy cập tuyến đường tương ứng. |
+| FR-BE—09.8 | **(LD-405 — Toàn vẹn ràng buộc CSDL)** Áp dụng khóa chính UUID cho cả 3 bảng; khóa ngoại `ON DELETE CASCADE` từ `documentation_artifacts` và `code_entities` tới `repositories(id)`, và từ `documentation_code_relationships` tới `documentation_artifacts(id)` và `code_entities(id)`; ràng buộc `UNIQUE` trên `documentation_artifacts(generation_job_id)`, `code_entities(repository_id, stable_key)` và `documentation_code_relationships(documentation_id, code_entity_id)`. |
+| FR-BE—09.9 | **(LD-405 — Nhận diện Flyway Migration Lineage)** Trước khi Flyway chạy migration, `FlywayMigrationLineageSelector.select(DataSource)` kiểm tra metadata bảng và `flyway_schema_history` (tên script V1, tên script + checksum của V2, và các bản ghi V5/V6 đã áp dụng) để chọn đúng 1 trong 6 lineage được hỗ trợ (`CURRENT`, `LEGACY_RELATIONSHIPS_V2`, `CURRENT_DOCUMENTATION_V5`, `CURRENT_PULL_REQUESTS_V5`, `CURRENT_DOCUMENTATION_V5_SOURCE_CHANGES_V6`, `CURRENT_PULL_REQUESTS_V5_SOURCE_CHANGES_V6`) kết hợp với `classpath:db/migration-common`. |
+| FR-BE—09.10 | **(LD-405 — Bảo toàn dữ liệu & lịch sử khi nâng cấp)** Với database mới, chạy `CURRENT` sử dụng migration hợp nhất `V5__documentation_code_relationships_and_pull_requests.sql`. Với database đã ở V4 hoặc đã áp dụng một nhánh V5/V6 riêng, nâng cấp tiếp phần schema còn thiếu ở version kế tiếp mà không thay đổi checksum, không xóa dữ liệu hiện có và không dùng `Flyway.repair()` để ghi đè lịch sử. |
+| FR-BE—09.11 | **(LD-216 & LD-405 — Kiểm thử tự động & CI)** Đảm bảo đầy đủ test migration fresh/existing DB (`DocumentationCodeRelationshipMigrationTest`), test chọn lineage (`FlywayMigrationLineageSelectorTest`), test API quan hệ (`DocumentationCodeRelationshipApiTest`) và tích hợp vào `.github/workflows/ci.yml` (job `github-integration-test` chạy Maven `verify` và chạy `DocumentationCodeRelationshipApiTest` trên PostgreSQL 16 với `spring.jpa.hibernate.ddl-auto=validate`). |
 
-Migration V5 kết hợp trong lineage hiện tại còn tạo các bảng cho hoạt động GitHub Pull Request/commit:
+## 3. API, Schema và Giao diện
 
-- `github_webhook_deliveries`
-- `github_commits`
-- `github_pull_requests`
+### 3.1. Endpoints API Quan hệ Tài liệu – Mã nguồn
 
-Các bảng này thuộc phần migration Pull Request đi kèm trong cùng lineage; chúng không phải bảng quan hệ tài liệu–code cốt lõi.
+Tất cả endpoint yêu cầu header `X-User-Id` hợp lệ được Backend BFF chuyển tiếp.
 
-### 3.2. Ràng buộc dữ liệu
+| Method | Endpoint | Chức năng | Yêu cầu |
+|---|---|---|---|
+| `GET` | `/api/repositories/{repositoryId}/code-entities` | Liệt kê danh sách `CodeEntityResponse` đang `active = true` của repository (sắp xếp theo `path`, `lineStart`) | FR-BE—09.5, 09.7 |
+| `GET` | `/api/repositories/{repositoryId}/documentation` | Liệt kê danh sách `DocumentationArtifactResponse` thuộc user trong repository (mới nhất trước) | FR-BE—09.5, 09.7 |
+| `GET` | `/api/documentation/{documentId}` | Lấy thông tin chi tiết và nội dung Markdown của một tài liệu | FR-BE—09.5, 09.7 |
+| `GET` | `/api/documentation/{documentId}/code-entities` | Lấy danh sách `CodeEntityResponse` đang active được liên kết với tài liệu (điều hướng Tài liệu → Code) | FR-BE—09.5, 09.6 |
+| `PUT` | `/api/documentation/{documentId}/code-entities` | Thay thế danh sách thực thể mã nguồn liên kết với tài liệu; body `{"codeEntityIds": ["<uuid>", ...]}` | FR-BE—09.4, 09.7 |
+| `GET` | `/api/documentation/code-entities/{entityId}/documents` | Lấy danh sách `DocumentationArtifactResponse` được liên kết với một code entity (điều hướng Code → Tài liệu) | FR-BE—09.6, 09.7 |
 
-Các ràng buộc quan trọng trong schema quan hệ:
+Ví dụ cấu trúc dữ liệu trao đổi:
+- **Request `PUT /api/documentation/{documentId}/code-entities`:** `{"codeEntityIds": ["3fa85f64-5717-4562-b3fc-2c963f66afa6"]}` (cho phép `[]` để xóa hết liên kết; tối đa 500 UUID).
+- **Response `CodeEntityResponse`:** `{"id": "...", "entityType": "method", "name": "OrderService.createOrder", "path": "src/main/java/OrderService.java", "lineStart": 42, "lineEnd": 68, "sourceUrl": "https://github.com/owner/repo/blob/<sha>/src/main/java/OrderService.java#L42-L68", "sourceCommit": "<sha>"}`.
 
-- `documentation_artifacts.id`, `code_entities.id` và `documentation_code_relationships.id` là khóa chính UUID.
-- `documentation_artifacts.repository_id` tham chiếu `repositories(id)` với `ON DELETE CASCADE`.
-- `code_entities.repository_id` tham chiếu `repositories(id)` với `ON DELETE CASCADE`.
-- `documentation_code_relationships.documentation_id` tham chiếu `documentation_artifacts(id)` với `ON DELETE CASCADE`.
-- `documentation_code_relationships.code_entity_id` tham chiếu `code_entities(id)` với `ON DELETE CASCADE`.
-- `documentation_artifacts.generation_job_id` có unique constraint.
-- `code_entities` có unique constraint trên cặp `(repository_id, stable_key)`.
-- `documentation_code_relationships` có unique constraint trên cặp `(documentation_id, code_entity_id)`.
+### 3.2. Cấu trúc Bảng Dữ liệu & Ràng buộc
 
-Các index phục vụ truy vấn gồm index tài liệu theo repository/thời điểm tạo, index code entity theo repository/trạng thái/path và index quan hệ theo `code_entity_id`.
-
-Nhờ các ràng buộc trên, một tài liệu không thể liên kết lặp với cùng một code entity; một stable key không bị nhân đôi trong cùng repository. Khi repository bị xóa, tài liệu, code entity và quan hệ phụ thuộc được xóa theo cascade.
-
-### 3.3. Vòng đời code entity
-
-Code entity được tạo/cập nhật từ kết quả phân tích repository và snapshot nguồn:
-
-- Loại entity được ghi nhận gồm `class`, `method`, `function` và `endpoint`.
-- `stable_key` được tạo bằng SHA-256 từ đường dẫn file, loại entity và tên định danh (qualified name); line number không tham gia khóa định danh.
-- `line_start`, `line_end`, `source_commit` và `source_url` được cập nhật theo snapshot mới.
-- Entity không còn xuất hiện trong kết quả phân tích phù hợp được đánh dấu `active = false`; các liên kết cũ không bị xóa.
-- Khi entity xuất hiện lại với cùng stable key, bản ghi cũ được kích hoạt lại, giúp giữ nguyên ID và các liên kết đã lưu.
-- Entity inactive không xuất hiện trong kết quả API quan hệ.
-
-Việc đánh dấu inactive toàn bộ entity của các file không còn trong snapshot chỉ được thực hiện khi snapshot không bị giới hạn bởi `treeTruncated` hoặc `fileLimitReached`.
-
-## 4. Xử lý xung đột migration và lựa chọn lineage
-
-### 4.1. Bối cảnh xung đột
-
-Đề bài LD-405 yêu cầu xác minh migration code–documentation từ PR #102. Trong repository, nhiều nhánh tính năng đã sử dụng chung version migration V5 cho các nội dung khác nhau, điển hình:
-
-- `V5__documentation_code_relationships.sql`
-- `V5__pull_requests_and_commits.sql`
-
-Nếu Flyway cùng nhìn thấy hai migration có cùng version, service có thể không khởi động được do trùng version. Ngoài ra, một số database đã áp dụng V5 hoặc V6 theo thứ tự khác nhau. Vì vậy, chỉ đổi tên migration trong một thư mục duy nhất hoặc chạy một bộ migration cố định có thể làm checksum/lịch sử database cũ không còn khớp.
-
-Snapshot code giải quyết vấn đề bằng cách giữ các lineage migration riêng và chọn lineage dựa trên lịch sử thực tế của database.
-
-### 4.2. Cơ chế FlywayMigrationLineageSelector
-
-`FlywayMigrationLineageSelector.select(DataSource)` đọc metadata database và bảng `flyway_schema_history` trước khi Flyway thực hiện migration.
-
-Các nguyên tắc kiểm tra:
-
-1. Database trống, chưa có bảng ứng dụng và chưa có Flyway history: chọn lineage `CURRENT`.
-2. Có bảng ứng dụng nhưng không có Flyway history: từ chối chọn lineage.
-3. Flyway history rỗng nhưng đã có bảng ứng dụng: từ chối chọn lineage.
-4. Có migration thất bại: từ chối chọn lineage.
-5. Phải có migration V1 đúng tên `V1__init_github_integration.sql`.
-6. Với V2, selector phân biệt lịch sử legacy và current bằng cả tên script lẫn checksum.
-7. Với các version V5/V6, selector kiểm tra tên script để xác định migration nào đã được áp dụng và chọn bộ migration tiếp nối tương thích.
-8. Nếu script/checksum hoặc chuỗi migration không nằm trong các trường hợp đã hỗ trợ, selector dừng và không bỏ qua validation.
-
-Hai checksum V2 được dùng để nhận diện lineage:
-
-- Legacy: `V2__documentation_code_relationships.sql`.
-- Current: `V2__document_review_workflow.sql`.
-
-Selector không tự ý sửa Flyway history, không xóa migration cũ và không dùng `repair` để ép database khớp với một lineage không xác định.
-
-### 4.3. Các lineage được hỗ trợ
-
-| Lineage | Trường hợp sử dụng |
-|---|---|
-| `CURRENT` | Database mới hoặc database theo lịch sử current, sử dụng V5 kết hợp tài liệu và Pull Request |
-| `LEGACY_RELATIONSHIPS_V2` | Database đã áp dụng migration quan hệ tài liệu–code từ V2 legacy |
-| `CURRENT_DOCUMENTATION_V5` | Database current đã áp dụng Documentation V5 trước |
-| `CURRENT_PULL_REQUESTS_V5` | Database current đã áp dụng Pull Requests V5 trước |
-| `CURRENT_DOCUMENTATION_V5_SOURCE_CHANGES_V6` | Database đã có Documentation V5 và Source Changes V6 |
-| `CURRENT_PULL_REQUESTS_V5_SOURCE_CHANGES_V6` | Database đã có Pull Requests V5 và Source Changes V6 |
-
-Với database mới, `CURRENT` sử dụng migration V5 kết hợp:
-
-`V5__documentation_code_relationships_and_pull_requests.sql`
-
-Với database đã áp dụng một nhánh V5 riêng, các lineage tương ứng giữ nguyên migration đã chạy và đưa phần tính năng còn thiếu vào version tiếp theo (V6 hoặc V7 tùy lịch sử V5/V6). Với database đã có Source Changes V6, selector dùng lineage riêng để thêm phần còn thiếu ở V7 mà không thay đổi checksum V6 đã áp dụng.
-
-### 4.4. Cấu hình migration khi service khởi động
-
-`FlywayMigrationLineageConfig` đăng ký `FlywayConfigurationCustomizer`. Khi Flyway được cấu hình, customizer gọi selector để lấy location phù hợp và bổ sung location dùng chung:
-
-```java
-configuration.locations(
-    selector.select(dataSource).location(),
-    "classpath:db/migration-common"
-);
-```
-
-Do đó, Flyway sử dụng đúng một lineage chính cho database hiện tại, đồng thời vẫn chạy các migration chung.
-
-## 5. Migration schema quan hệ tài liệu–code
-
-### 5.1. Bảng `documentation_artifacts`
-
-Lưu bản ghi tài liệu sinh ra từ một generation job, gắn với repository và user sở hữu. Các trường chính gồm:
-
-- `id`: UUID tài liệu.
-- `repository_id`: repository nguồn.
-- `owner_user_id`: user sở hữu tài liệu.
-- `generation_job_id`: mã job sinh tài liệu, duy nhất.
-- `markdown`: nội dung Markdown.
-- `source_commit`: commit nguồn.
-- `created_at`, `updated_at`: thời điểm tạo/cập nhật.
-
-### 5.2. Bảng `code_entities`
-
-Lưu các thực thể được phân tích từ repository:
-
-- `id`: UUID code entity.
-- `repository_id`: repository chứa entity.
-- `stable_key`: khóa ổn định theo path + type + name.
-- `entity_type`, `name`: loại và tên entity.
-- `path`: đường dẫn file.
-- `line_start`, `line_end`: vị trí trong source file.
-- `source_url`: liên kết GitHub đến source và vùng dòng tương ứng.
-- `source_commit`: commit dùng để tạo liên kết.
-- `active`: trạng thái entity.
-- `last_seen_at`: thời điểm entity được nhìn thấy gần nhất.
-
-### 5.3. Bảng `documentation_code_relationships`
-
-Bảng nối hai chiều giữa tài liệu và code entity:
-
-- `id`: UUID quan hệ.
-- `documentation_id`: tài liệu được liên kết.
-- `code_entity_id`: code entity được liên kết.
-- `created_at`: thời điểm tạo quan hệ.
-
-Unique constraint `(documentation_id, code_entity_id)` ngăn tạo quan hệ trùng lặp. Hai khóa ngoại cascade bảo đảm quan hệ không tồn tại độc lập khi tài liệu hoặc code entity bị xóa.
-
-## 6. Chức năng API liên quan
-
-Tất cả endpoint dưới đây yêu cầu `X-User-Id` được Backend chuyển tiếp sau xác thực. Service kiểm tra quyền sở hữu repository/tài liệu trước khi trả hoặc cập nhật dữ liệu.
-
-| Method | Endpoint | Chức năng |
+| Bảng | Cột chính | Khóa & Ràng buộc toàn vẹn |
 |---|---|---|
-| `GET` | `/api/repositories/{repositoryId}/code-entities` | Liệt kê code entity đang active của repository |
-| `GET` | `/api/repositories/{repositoryId}/documentation` | Liệt kê tài liệu của repository |
-| `GET` | `/api/documentation/{documentId}` | Lấy thông tin tài liệu |
-| `GET` | `/api/documentation/{documentId}/code-entities` | Lấy các code entity được liên kết với tài liệu |
-| `PUT` | `/api/documentation/{documentId}/code-entities` | Thay thế danh sách code entity liên kết với tài liệu |
-| `GET` | `/api/documentation/code-entities/{entityId}/documents` | Lấy các tài liệu liên kết với code entity |
+| `documentation_artifacts` | `id` (UUID), `repository_id` (UUID), `owner_user_id`, `generation_job_id`, `markdown`, `source_commit`, `created_at`, `updated_at` | PK `id`; FK `repository_id` $\rightarrow$ `repositories(id) ON DELETE CASCADE`; `UNIQUE (generation_job_id)` |
+| `code_entities` | `id` (UUID), `repository_id` (UUID), `stable_key` (SHA-256), `entity_type`, `name`, `path`, `line_start`, `line_end`, `source_url`, `source_commit`, `active`, `last_seen_at` | PK `id`; FK `repository_id` $\rightarrow$ `repositories(id) ON DELETE CASCADE`; `UNIQUE (repository_id, stable_key)` |
+| `documentation_code_relationships` | `id` (UUID), `documentation_id` (UUID), `code_entity_id` (UUID), `created_at` | PK `id`; FK `documentation_id` $\rightarrow$ `documentation_artifacts(id) ON DELETE CASCADE`; FK `code_entity_id` $\rightarrow$ `code_entities(id) ON DELETE CASCADE`; `UNIQUE (documentation_id, code_entity_id)` |
 
-### 6.1. Tạo và cập nhật dữ liệu khi sinh tài liệu
+### 3.3. Thành phần Giao diện Frontend (`DocumentationManagement.jsx`)
 
-`DocumentationCodeRelationshipService.recordGeneration(...)`:
+| Thành phần UI | Chức năng hiển thị & tương tác | Yêu cầu |
+|---|---|---|
+| Danh sách liên kết Code Entity trên màn hình Tài liệu | Hiển thị các `class`, `method`, `function`, `endpoint` đang liên kết với tài liệu kèm đường dẫn tệp và khoảng dòng | FR-BE—09.5 (LD-214) |
+| Trình chọn / cập nhật liên kết mã nguồn | Cho phép người dùng chọn từ danh sách code entity của repository hoặc gỡ liên kết và lưu qua API `PUT .../code-entities` | FR-BE—09.4 (LD-213) |
+| Liên kết điều hướng hai chiều | Mở trực tiếp mã nguồn trên GitHub qua `sourceUrl` (`#L<start>-L<end>`) hoặc chọn một code entity để xem danh sách tài liệu liên quan | FR-BE—09.6 (LD-215) |
 
-1. Xác minh user sở hữu repository.
-2. Tạo hoặc cập nhật `DocumentationArtifact` theo generation job ID.
-3. Ghi nhận source commit từ snapshot.
-4. Đọc kết quả phân tích `files`.
-5. Tạo/cập nhật entity class, method, function và endpoint.
-6. Tính stable key để nhận diện entity qua các lần phân tích.
-7. Cập nhật source URL và line range theo snapshot hiện tại.
-8. Đánh dấu entity không còn tồn tại là inactive trong điều kiện snapshot đầy đủ.
+## 4. Luồng chính
 
-`saveGeneratedMarkdown(...)` lưu nội dung Markdown cho tài liệu thuộc đúng user và generation job.
+### 4.1. Luồng khởi động & chọn Migration Lineage (LD-405)
 
-### 6.2. Thay thế danh sách liên kết
+1. Khi GitHub Integration Service khởi động, `FlywayMigrationLineageConfig` kích hoạt `FlywayMigrationLineageSelector.select(dataSource)`.
+2. Selector kiểm tra trạng thái database:
+   - Nếu database trống (chưa có bảng ứng dụng và chưa có `flyway_schema_history`), chọn lineage `CURRENT` (`db/migration-current`) chạy `V5__documentation_code_relationships_and_pull_requests.sql`.
+   - Nếu database đã có `flyway_schema_history`, xác minh `V1__init_github_integration.sql`, đối chiếu tên script và checksum của `V2` (phân biệt `V2__documentation_code_relationships.sql` của legacy với `V2__document_review_workflow.sql` của current), sau đó kiểm tra lịch sử `V5`/`V6` để chọn 1 trong 6 lineage tương thích.
+3. Flyway thực thi các migration còn thiếu của lineage đã chọn cùng thư mục dùng chung `classpath:db/migration-common` (V8, V9) mà không làm thay đổi checksum các phiên bản cũ.
 
-Request `PUT /api/documentation/{documentId}/code-entities` nhận body có trường `codeEntityIds`.
+### 4.2. Luồng trích xuất thực thể, liên kết và điều hướng (LD-211)
 
-Quy tắc xử lý:
+1. Khi người dùng yêu cầu sinh tài liệu cho repository, `DocumentationGenerationService` gọi `DocumentationCodeRelationshipService.recordGeneration(...)` kèm kết quả phân tích AST và `RepositorySnapshot`.
+2. Service tạo/cập nhật `DocumentationArtifact` gắn với `generationJobId`, `repositoryId`, `ownerUserId` và `sourceCommit`.
+3. Service duyệt các tệp phân tích hợp lệ, tính `stable_key = SHA-256(path + \0 + entityType + \0 + qualifiedName)` và thực hiện upsert vào `code_entities` kèm `sourceUrl` trỏ đúng commit và dòng `#L<start>-L<end>`. Các thực thể không còn xuất hiện trong snapshot đầy đủ được chuyển sang `active = false`.
+4. Người dùng mở màn hình quản lý tài liệu (`DocumentationManagement.jsx`) để xem danh sách code entity khả dụng của repository, chọn các thực thể liên quan và lưu qua `PUT /api/documentation/{documentId}/code-entities`.
+5. Khi xem tài liệu, người dùng nhấn vào liên kết thực thể mã nguồn để mở trực tiếp dòng code tương ứng trên GitHub (`sourceUrl`), hoặc tra cứu ngược danh sách tài liệu gắn với một code entity qua `GET /api/documentation/code-entities/{entityId}/documents`.
 
-- Loại bỏ ID trùng lặp bằng tập hợp có thứ tự.
-- Chỉ chấp nhận entity đang active và thuộc cùng repository với tài liệu.
-- Nếu có ID không tồn tại, inactive hoặc thuộc repository khác, trả lỗi `400` và không xóa các liên kết hiện tại.
-- Khi request hợp lệ, xóa danh sách liên kết cũ rồi tạo lại theo danh sách mới.
-- Danh sách rỗng có nghĩa là xóa toàn bộ liên kết của tài liệu.
+## 5. Luồng lỗi
 
-### 6.3. Đọc quan hệ hai chiều
+| Trường hợp | HTTP / Điều kiện | Kết quả |
+|---|---|---|
+| Lịch sử Flyway bất nhất (có bảng ứng dụng nhưng thiếu `flyway_schema_history`, có migration `success = false`, hoặc checksum V2 không nhận diện được) | Khởi động service (`FlywayMigrationLineageSelector`) | Chủ động ném ngoại lệ và dừng khởi động; không tự ý `repair` hay bỏ qua validation |
+| Truyền `codeEntityIds` không tồn tại, đang `active = false`, hoặc thuộc repository khác | `400 Bad Request` (`PUT /api/documentation/{id}/code-entities`) | Từ chối cập nhật và giữ nguyên toàn bộ liên kết hợp lệ hiện có của tài liệu |
+| Truyền `codeEntityIds` rỗng (`null`) hoặc vượt quá $500$ phần tử | `400 Bad Request` (Bean Validation `@NotNull @Size(max = 500)`) | Từ chối request ngay tại controller |
+| Tài liệu hoặc code entity không tồn tại hoặc không thuộc quyền sở hữu của `X-User-Id` | `404 Not Found` / `403 Forbidden` | Từ chối truy cập dữ liệu của người dùng khác |
+| Repository chưa được kết nối hoặc người dùng không sở hữu repository | `403 Forbidden` / `404 Not Found` (`requireOwnedRepository`) | Ngăn đọc/ghi danh sách thực thể và tài liệu của repository |
 
-- Từ tài liệu có thể truy vấn các code entity đang active được liên kết.
-- Từ code entity có thể truy vấn các tài liệu thuộc cùng user và repository.
-- Entity inactive bị ẩn khỏi kết quả, nhưng quan hệ đã lưu vẫn còn để có thể xuất hiện lại nếu entity được khôi phục.
+## 6. Quy tắc nghiệp vụ
 
-## 7. Kiểm tra database mới và database hiện có
+- **Tính bất biến của định danh code entity:** `stable_key` chỉ phụ thuộc đường dẫn tệp, loại thực thể và tên định danh; việc thêm/xóa dòng phía trên làm thay đổi `line_start`/`line_end` và `source_url` nhưng tuyệt đối không tạo bản ghi `code_entities` mới hay làm đứt liên kết tài liệu đã gắn.
+- **Ẩn mềm thay vì xóa cứng thực thể biến mất:** Thực thể biến mất khỏi mã nguồn được đánh dấu `active = false` và bị ẩn khỏi kết quả API, nhưng bản ghi trong `documentation_code_relationships` vẫn được giữ lại để tự động khôi phục nếu thực thể được thêm lại.
+- **Toàn vẹn dây chuyền khi xóa repository:** Khi xóa repository khỏi workspace, toàn bộ `documentation_artifacts`, `code_entities` và `documentation_code_relationships` phụ thuộc tự động bị xóa theo ràng buộc `ON DELETE CASCADE`.
+- **Tính nguyên tử khi cập nhật liên kết:** Thao tác `replaceLinks` kiểm tra hợp lệ toàn bộ tập `codeEntityIds` đã khử trùng lặp trước khi xóa liên kết cũ; nếu có bất kỳ ID nào không hợp lệ, giao dịch rollback và không làm mất liên kết cũ.
+- **Bảo toàn lịch sử migration:** Tuyệt đối không sửa đổi nội dung/checksum của các file migration đã phát hành; mọi biến thể nhánh lịch sử V5/V6 được xử lý thông qua thư mục lineage riêng biệt.
 
-### 7.1. Database mới (Fresh database)
+## 7. Tiêu chí chấp nhận
 
-`DocumentationCodeRelationshipMigrationTest.freshDatabaseMigrationPassesAllVersionsAndValidatesJpaSchema()`:
+- **AC-BE-09.1 (LD-212):** Các bảng `documentation_artifacts`, `code_entities`, `documentation_code_relationships` khởi tạo đầy đủ khóa chính UUID, khóa ngoại `ON DELETE CASCADE` và các ràng buộc `UNIQUE` (`generation_job_id`, `(repository_id, stable_key)`, `(documentation_id, code_entity_id)`).
+- **AC-BE-09.2 (LD-212):** Khi số dòng code thay đổi nhưng `path`, `entity_type`, `name` giữ nguyên, `CodeEntity.id` và liên kết tài liệu giữ nguyên, `sourceUrl` cập nhật đúng số dòng mới; khi entity bị xóa rồi khôi phục, ID và liên kết cũ hoạt động trở lại.
+- **AC-BE-09.3 (LD-213):** Quá trình sinh tài liệu tự động lưu `DocumentationArtifact` và các `CodeEntity`; API `PUT /api/documentation/{documentId}/code-entities` khử trùng lặp ID, cập nhật liên kết thành công và từ chối ID không hợp lệ/khác repository mà không xóa liên kết cũ.
+- **AC-BE-09.4 (LD-214 & LD-215):** API và giao diện `DocumentationManagement.jsx` hiển thị danh sách code entity liên kết với tài liệu, hỗ trợ điều hướng sang đúng commit/dòng code trên GitHub (`sourceUrl`) và tra cứu ngược danh sách tài liệu từ một code entity.
+- **AC-BE-09.5 (Bảo mật):** Người dùng không sở hữu repository hoặc tài liệu không thể đọc hoặc sửa đổi liên kết tài liệu – code của người dùng khác.
+- **AC-BE-09.6 (LD-405 — Fresh & Existing DB Migration):** Database mới migrate qua `CURRENT` khớp hoàn toàn với JPA entity mapping (`hibernate.hbm2ddl.auto=validate`); database cũ ở V4 nâng cấp lên V5+ không mất dữ liệu hiện có.
+- **AC-BE-09.7 (LD-405 — Lineage Compatibility):** `FlywayMigrationLineageSelector` chọn đúng lineage cho cả 6 kịch bản lịch sử (trống, legacy V2, Documentation V5, Pull Requests V5, và các nhánh đã có Source Changes V6), giữ nguyên checksum cũ và từ chối lịch sử lỗi.
+- **AC-BE-09.8 (LD-216 & LD-405 — CI):** Pipeline `.github/workflows/ci.yml` chạy thành công toàn bộ bộ test Maven của `github-integration-service` và chạy `DocumentationCodeRelationshipApiTest` trên PostgreSQL 16 với `ddl-auto=validate`.
 
-1. Tạo H2 database độc lập ở chế độ tương thích PostgreSQL.
-2. Chạy Flyway trên `db/migration-current` và `db/migration-common`.
-3. Xác nhận số migration đã chạy đạt ít nhất 5 và target schema version ít nhất 5.
-4. Khởi tạo JPA EntityManagerFactory với `hibernate.hbm2ddl.auto=validate`.
-5. Xác nhận schema được tạo bởi migration tương thích với mapping entity JPA.
+## 8. Kiểm thử
 
-Bước validate không yêu cầu Hibernate tự tạo schema; Hibernate chỉ đối chiếu mapping với schema đã được Flyway tạo.
-
-### 7.2. Database cũ đang ở V4
-
-`existingDatabaseAtV4UpgradesCleanlyToV5WithoutDataLossAndEnforcesConstraints()`:
-
-1. Tạo database test và chạy migration đến target V4.
-2. Chèn dữ liệu đã tồn tại gồm GitHub connection, repository, document workflow và audit record.
-3. Chạy các migration còn lại để nâng cấp lên V5 trở lên.
-4. Kiểm tra repository và audit record đã chèn vẫn còn.
-5. Kiểm tra unique constraint của `generation_job_id`.
-6. Kiểm tra unique constraint của `(repository_id, stable_key)`.
-7. Kiểm tra unique constraint của `(documentation_id, code_entity_id)`.
-8. Xóa repository và xác nhận các bảng tài liệu, code entity, quan hệ phụ thuộc được xóa theo cascade.
-
-### 7.3. Database có lịch sử V5/V6 khác nhau
-
-`FlywayMigrationLineageSelectorTest` tạo các database H2 mô phỏng những lịch sử migration khác nhau:
-
-- Database trống chọn `CURRENT`.
-- Database legacy có V2 quan hệ và checksum đúng chọn `LEGACY_RELATIONSHIPS_V2`.
-- Database current có V2 workflow và checksum đúng chọn `CURRENT`.
-- Database đã chạy Documentation V5 hoặc Pull Requests V5 được chọn lineage tương ứng.
-- Database đã chạy V5 và Source Changes V6 giữ nguyên checksum V6, sau đó chạy migration còn thiếu ở V7.
-- Database legacy giữ nguyên checksum V2 và dữ liệu quan hệ đã có khi nâng cấp tiếp.
-- Checksum V2 không nhận diện được, thiếu bảng quan hệ legacy, có migration thất bại hoặc có bảng ứng dụng mà không có Flyway history đều bị từ chối.
-
-Các test này nhằm xác nhận selector không chọn nhầm migration và không làm thay đổi lịch sử đã áp dụng.
-
-## 8. Kiểm thử API quan hệ
-
-`DocumentationCodeRelationshipApiTest` chạy Spring Boot test context với MockMvc, H2 và các thành phần GitHub/repository sync được mock phù hợp.
-
-Các tình huống được kiểm tra:
-
-1. Sinh tài liệu từ dữ liệu phân tích và snapshot, sau đó truy vấn code entity của repository.
-2. Xác nhận `sourceUrl` chứa commit và line range tương ứng.
-3. Gửi danh sách entity ID có phần tử trùng lặp; API chỉ tạo liên kết duy nhất.
-4. Đọc quan hệ từ tài liệu sang code entity.
-5. Đọc quan hệ ngược từ code entity sang tài liệu.
-6. Từ chối entity không tồn tại hoặc thuộc repository khác.
-7. Khi request liên kết không hợp lệ, các liên kết hợp lệ đã tồn tại không bị xóa.
-8. User khác không thể đọc tài liệu không thuộc quyền sở hữu.
-9. Khi entity đổi line number nhưng giữ path/type/name, ID quan hệ vẫn được giữ; source URL và line range được cập nhật.
-10. Khi entity biến mất khỏi phân tích, entity chuyển inactive và không còn hiển thị trong kết quả; khi entity xuất hiện lại, ID cũ và liên kết cũ được khôi phục.
-
-## 9. Tích hợp CI
-
-Trong `.github/workflows/ci.yml`, job liên quan là `github-integration-test` (tên hiển thị: **GitHub Integration Service Test**).
-
-Job thực hiện:
-
-### 9.1. Kiểm thử Maven
-
-Chạy:
-
-```bash
-mvn --batch-mode --no-transfer-progress \
-  -f services/github-integration-service/pom.xml verify
-```
-
-Đây là bước build và chạy bộ test của GitHub Integration Service, trong đó có các test migration, lineage selector và API quan hệ.
-
-### 9.2. Kiểm tra API với PostgreSQL
-
-CI khởi tạo PostgreSQL 16 với database `github_integration`, sau đó chạy riêng:
-
-```bash
-mvn --batch-mode --no-transfer-progress \
-  -f services/github-integration-service/pom.xml test \
-  -Dtest=DocumentationCodeRelationshipApiTest \
-  -Dspring.datasource.url="$DB_URL" \
-  -Dspring.datasource.username="$DB_USERNAME" \
-  -Dspring.datasource.password="$DB_PASSWORD" \
-  -Dspring.datasource.driver-class-name=org.postgresql.Driver \
-  -Dspring.jpa.hibernate.ddl-auto=validate
-```
-
-Bước này kiểm tra API quan hệ trên PostgreSQL thực tế của CI và yêu cầu Hibernate validate schema thay vì tự tạo schema.
-
-Các biến môi trường kiểm thử được khai báo trong workflow để khởi tạo service test; đây không phải giá trị secret dùng cho môi trường production.
-
-### 9.3. Các bước CI khác trong cùng job
-
-Sau bước PostgreSQL, job còn chạy `GitHubRepositoryFetcherLiveTest` với GitHub API và upload Surefire test reports. Các bước này thuộc pipeline GitHub Integration chung, không phải riêng logic migration LD-405.
-
-## 10. Cách chạy kiểm thử thủ công
-
-Từ thư mục gốc repository:
-
-### 10.1. Chạy toàn bộ kiểm thử GitHub Integration Service
-
-```bash
-mvn --batch-mode --no-transfer-progress \
-  -f services/github-integration-service/pom.xml verify
-```
-
-### 10.2. Chạy riêng test migration và ràng buộc schema
-
-```bash
-mvn --batch-mode --no-transfer-progress \
-  -f services/github-integration-service/pom.xml test \
-  -Dtest=DocumentationCodeRelationshipMigrationTest
-```
-
-### 10.3. Chạy riêng test lựa chọn migration lineage
-
-```bash
-mvn --batch-mode --no-transfer-progress \
-  -f services/github-integration-service/pom.xml test \
-  -Dtest=FlywayMigrationLineageSelectorTest
-```
-
-### 10.4. Chạy riêng test API quan hệ
-
-```bash
-mvn --batch-mode --no-transfer-progress \
-  -f services/github-integration-service/pom.xml test \
-  -Dtest=DocumentationCodeRelationshipApiTest
-```
-
-Các lệnh trên mô tả cách chạy test được khai báo trong repository. Không kết luận test đã pass chỉ từ việc có test source hoặc workflow; cần thực thi lệnh hoặc xem CI run tương ứng để xác nhận kết quả thực tế.
-
-## 11. Tiêu chí chấp nhận
-
-Đối chiếu với đề bài LD-405, các tiêu chí cần xác minh gồm:
-
-1. **Fresh database migration:** database mới chạy được migration và schema tương thích với entity JPA.
-2. **Existing database migration:** database đã có dữ liệu và migration cũ nâng cấp được mà không mất dữ liệu hiện có.
-3. **Migration lineage compatibility:** database đã áp dụng các nhánh V5/V6 khác nhau được chọn đúng lineage; checksum và lịch sử đã áp dụng được bảo toàn.
-4. **Constraints intact:** khóa ngoại, unique constraint và cascade delete của tài liệu, code entity và quan hệ hoạt động đúng.
-5. **Relationship API integration:** API đọc/ghi liên kết tài liệu–code hoạt động, có kiểm tra quyền sở hữu và từ chối tham chiếu không hợp lệ.
-6. **CI integration:** workflow có bước Maven verify và bước kiểm tra API quan hệ trên PostgreSQL.
-
-## 12. Giới hạn và lưu ý vận hành
-
-- Selector chỉ hỗ trợ các migration lineage và checksum được khai báo trong `FlywayMigrationLineageSelector`. Một lịch sử khác dự kiến phải được phân tích và bổ sung test trước khi được hỗ trợ.
-- Nếu database có migration thất bại, thiếu Flyway history nhưng lại có bảng ứng dụng, hoặc checksum không nhận diện được, selector chủ động dừng. Không tự ý xóa database, chỉnh `flyway_schema_history`, chạy `repair` hay bỏ qua validation để làm service khởi động.
-- Các thư mục migration-current* là những bộ migration thay thế nhau theo lịch sử database; không gộp tất cả location vào cùng một lần chạy nếu không có selector.
-- Migration cũ đã được áp dụng cần giữ nguyên nội dung/checksum. Nếu cần thay đổi schema sau khi migration đã chạy trên môi trường dùng chung, hãy thêm migration mới theo lineage được hỗ trợ thay vì sửa migration cũ.
-- Test H2 chạy ở chế độ PostgreSQL giúp kiểm tra phần lớn hành vi migration trong bộ test; CI bổ sung kiểm tra API quan hệ trên PostgreSQL 16. Không nên suy rộng test H2 thành bằng chứng rằng mọi biến thể PostgreSQL production đã được kiểm tra.
-- API quan hệ yêu cầu danh tính user do Backend chuyển tiếp; không dùng `X-User-Id` do trình duyệt tự khai báo làm bằng chứng xác thực.
-- Các test source có trong snapshot không tự chứng minh CI đã chạy thành công. Cần đối chiếu kết quả thực tế của workflow nếu cần xác nhận trạng thái pass.
-
-## 13. Kết luận
-
-LD-405 củng cố khả năng triển khai an toàn chức năng liên kết tài liệu với code entity trong bối cảnh repository có nhiều nhánh migration dùng chung version V5. Thay vì áp dụng một bộ migration duy nhất cho mọi database, hệ thống kiểm tra Flyway history, script và checksum để chọn lineage tương thích.
-
-Bộ kiểm thử đi kèm xác minh database mới, nâng cấp database từ V4, bảo toàn dữ liệu và checksum của các lịch sử V5/V6, kiểm tra ràng buộc quan hệ và xác minh API trên Spring Boot. CI còn có bước chạy API test với PostgreSQL 16. Các nội dung này đáp ứng đúng trọng tâm đề bài: migration fresh/existing database, bảo toàn constraints/relationships, tích hợp API và CI.
+- **Kiểm thử migration & ràng buộc schema (`DocumentationCodeRelationshipMigrationTest`):** Kiểm tra chạy Flyway từ đầu trên H2 chế độ PostgreSQL kết hợp `hibernate.hbm2ddl.auto=validate`, kiểm tra nâng cấp database từ V4 lên V5+ bảo toàn dữ liệu cũ, kiểm tra lỗi vi phạm unique constraint và hành vi `ON DELETE CASCADE` khi xóa repository.
+- **Kiểm thử lựa chọn lineage (`FlywayMigrationLineageSelectorTest`):** Kiểm thử toàn bộ các tổ hợp lịch sử Flyway (database mới, legacy V2, Documentation V5, Pull Requests V5, Source Changes V6) và các trường hợp từ chối checksum sai hoặc migration thất bại.
+- **Kiểm thử tích hợp API quan hệ (`DocumentationCodeRelationshipApiTest` & `ApiRoutePermissionsTest`):** Kiểm tra trọn vẹn các endpoint đọc/ghi quan hệ, khử trùng lặp ID, kiểm soát quyền sở hữu theo `X-User-Id`, tính ổn định ID khi đổi số dòng và vòng đời `active`/`inactive` của thực thể mã nguồn.
+- **Tích hợp CI (`.github/workflows/ci.yml` — job `github-integration-test`):** Thực thi `mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml verify` và chạy `DocumentationCodeRelationshipApiTest` kết nối trực tiếp tới PostgreSQL 16 với `-Dspring.jpa.hibernate.ddl-auto=validate`.

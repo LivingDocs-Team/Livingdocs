@@ -1,11 +1,12 @@
-# FR-FE-04 Giao diện quản trị hệ thống và bảng điều khiển (Administration & Dashboard)
+# FR-BE7-316 Giao diện quản trị hệ thống và bảng điều khiển (Administration & Dashboard)
 
 | Mục | Nội dung |
 |---|---|
 | Epic Jira | LD-286 Frontend Implementation |
 | Task Jira | LD-316 [Administration & Dashboard Interface] Implement Administration & Dashboard Interface |
-| Task đã làm | LD-317 (User & Role Management UI), LD-318 (Workspace & Repository Administration UI), LD-319 (System Configuration UI), LD-320 (System Monitoring & Health UI), LD-321 (Audit, Analytics & Notification UI) |
-| Người thực hiện | Khôi Nguyễn Hữu Đăng |
+| Task đã làm | LD-317 (Implement User & Role Management UI), LD-318 (Implement Workspace & Repository Administration UI), LD-319 (Implement System Configuration UI), LD-320 (Implement System Monitoring & Health UI), LD-321 (Implement Audit, Analytics & Notification UI) |
+| Người thực hiện | Nguyễn Lê Minh |
+| Nhánh / PR & Trạng thái | Nhánh tính năng `LD-316` (mô tả theo snapshot nhánh tính năng; đối chiếu trạng thái merge trên `main` trước khi nghiệm thu) |
 | Thành phần | Frontend LivingDocs Web (`frontend/src/AdminDashboard.jsx`, `frontend/src/rbac/AppShell.jsx`, `frontend/src/rbac/flows/administrator.flow.js`, `frontend/src/rbac/permissions.js`); Backend BFF (`AdminUserController`, `AdminRoleController`, `AdminWorkspaceController`, `AdminSystemConfigController`, `AdminHealthController`, `AdminSystemAnalyticsController`, `AdminNotificationPolicyController`) |
 | Tác nhân | Quản trị viên hệ thống (`ADMINISTRATOR`), Backend BFF (cổng 8080), GitHub Integration Service & AI Service (truy vấn gián tiếp qua BFF) |
 
@@ -23,11 +24,11 @@ Hệ thống cung cấp giao diện quản trị tập trung (`AdminDashboard`) 
 | FR-FE-04.4 | (LD-317) Cho phép thay đổi vai trò chính của người dùng và khóa (`Disable`, có hộp thoại xác nhận) hoặc mở khóa (`Enable`) tài khoản người dùng khác; vô hiệu hóa nút đổi vai trò và nút khóa tài khoản đối với chính tài khoản quản trị viên đang đăng nhập. |
 | FR-FE-04.5 | (LD-317) Hiển thị danh mục các vai trò hệ thống cùng số lượng và danh sách mã quyền (`permissions`) được gán; cho phép đánh dấu chọn/bỏ chọn từng quyền và lưu cấu hình phân quyền cho vai trò. |
 | FR-FE-04.6 | (LD-318) Hiển thị danh sách toàn bộ workspace được quản lý trên hệ thống (kèm email/username chủ sở hữu và số lượng thành viên) cùng workspace cá nhân (`ws-<userId>`), hỗ trợ lọc nhanh theo tên workspace hoặc thông tin chủ sở hữu. |
-| FR-FE-04.7 | (LD-318) Cho phép chỉnh sửa tên (`name`) và mô tả (`description`) của workspace được quản lý. |
+| FR-FE-04.7 | (LD-318) Cho phép chỉnh sửa tên (`name`, 1–100 ký tự) và mô tả (`description`, tối đa 1.000 ký tự) của workspace được quản lý. |
 | FR-FE-04.8 | (LD-318) Hiển thị danh sách repository đã kết nối của workspace đang chọn (tên repository, nhánh mặc định, chế độ hiển thị `Public`/`Private`, trạng thái, thời điểm đồng bộ gần nhất) và cho phép kích hoạt đồng bộ thủ công (`Sync`) hoặc gỡ repository khỏi workspace (`Remove`, có hộp thoại xác nhận). |
-| FR-FE-04.9 | (LD-318) Hiển thị danh sách thành viên hiện tại của workspace được quản lý; cho phép chọn người dùng đang hoạt động (`active=true`) chưa thuộc workspace để thêm vào và gỡ thành viên khỏi workspace. |
+| FR-FE-04.9 | (LD-318) Hiển thị danh sách thành viên hiện tại của workspace được quản lý; cho phép chọn người dùng đang hoạt động (`active=true`) chưa thuộc workspace (và không phải chủ sở hữu workspace) để thêm vào hoặc gỡ thành viên khỏi workspace. |
 | FR-FE-04.10 | (LD-319) Hiển thị và cho phép cập nhật thời gian lưu trữ nhật ký kiểm toán (`auditRetentionDays`, số nguyên từ `0` đến `3650`, trong đó `0` là lưu vĩnh viễn) cùng lịch dọn dẹp tự động (`0 0 0 * * * UTC`). |
-| FR-FE-04.11 | (LD-319) Hiển thị thông tin cấu hình bảo mật và tích hợp runtime ở chế độ chỉ đọc: `Frontend URL`, `Session cookie SameSite`, `Session cookie Secure`, trạng thái cấu hình `GitHub OAuth2 client`, `GitHub Integration URL`, trạng thái `Internal BFF secret`, và thời gian chờ kết nối/đọc (`connectTimeoutSeconds`, `readTimeoutSeconds`). |
+| FR-FE-04.11 | (LD-319) Hiển thị thông tin cấu hình bảo mật và tích hợp runtime ở chế độ chỉ đọc: `Frontend URL`, `Session cookie SameSite`, `Session cookie Secure`, trạng thái cấu hình `GitHub OAuth2 client`, `GitHub Integration URL`, trạng thái `Internal BFF secret`, thời gian chờ kết nối/đọc (`connectTimeoutSeconds`, `readTimeoutSeconds`) và `API base URL`. |
 | FR-FE-04.12 | (LD-319) Hiển thị bảng quy tắc mức độ nghiêm trọng của sai lệch tài liệu (`Documentation drift severity rules`: cấp độ, dải điểm, ý nghĩa, hành động khuyến nghị) và cho phép mở rộng xem cấu trúc JSON gốc. |
 | FR-FE-04.13 | (LD-320) Kiểm tra và hiển thị tình trạng sức khỏe (`Up`, `Down`, `Auth error`) của các thành phần dịch vụ qua Backend BFF (`Backend API`, `Backend Database`, `GitHub Integration Service`, cùng các thành phần con `AI Service`, `Code Analyzer` nếu có), kèm mã HTTP, thời gian phản hồi (ms), chi tiết trạng thái và thời điểm kiểm tra gần nhất. |
 | FR-FE-04.14 | (LD-320) Cho phép kiểm tra lại sức khỏe hệ thống thủ công (`Check again`) và phân biệt rõ lỗi xác thực/phân quyền (`401`/`403`) với lỗi dịch vụ ngừng hoạt động hoặc mất kết nối. |
@@ -92,8 +93,8 @@ Hệ thống cung cấp giao diện quản trị tập trung (`AdminDashboard`) 
 - Mọi request từ trình duyệt chỉ đi qua Backend BFF (`/api/...`), không gọi trực tiếp sang GitHub Integration Service (`:8082`), AI Service (`:8001`) hay Code Analyzer (`:8000`).
 - Tất cả các phương thức thay đổi dữ liệu (`POST`, `PUT`, `PATCH`, `DELETE`) bắt buộc gửi kèm header `X-XSRF-TOKEN` và cookie phiên.
 - Phân quyền hiển thị trên giao diện (`administrator.flow.js`, `permissions.js`) chỉ phục vụ trải nghiệm người dùng; quyền thực thi thực tế được Backend kiểm soát qua `@PreAuthorize` và `SystemAdminAccess`.
-- Quản trị viên không thể tự thay đổi vai trò chính hoặc tự khóa tài khoản của chính mình, và không thể gỡ bỏ các quyền cốt lõi của vai trò `ADMINISTRATOR`.
-- Chính sách thông báo yêu cầu ít nhất 1 địa chỉ email hợp lệ khi lưu; danh sách email được tách tự động qua dấu phẩy, chấm phẩy hoặc khoảng trắng.
+- Quản trị viên không thể tự thay đổi vai trò chính hoặc tự khóa tài khoản của chính mình, và không thể gỡ bỏ các quyền cốt lõi của vai trò `ADMINISTRATOR` (`USER_VIEW`, `USER_UPDATE`, `USER_DISABLE`, `USER_ASSIGN_ROLE`, `USER_AUDIT_VIEW`, `ROLE_VIEW`, `PERMISSION_VIEW`, `ROLE_ASSIGN_PERMISSION`, `DOCUMENT_REASSIGN`).
+- Chính sách thông báo yêu cầu từ 1 đến 50 địa chỉ email hợp lệ khi lưu (backend tự động loại bỏ email trùng lặp); danh sách email được tách tự động qua dấu phẩy, chấm phẩy hoặc khoảng trắng, và mọi thao tác lưu/xóa đều ghi nhận vào `admin_user_audit`.
 
 ## 7. Tiêu chí chấp nhận
 
