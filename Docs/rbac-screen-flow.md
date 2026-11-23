@@ -265,3 +265,11 @@ Giới hạn đã biết (đã được xử lý ở mục 13: ủy quyền nay 
 - **Delegation.** BFF kiểm tra người nhận tồn tại, đang hoạt động, là Manager và có quyền `DOCUMENT_APPROVE`, rồi gửi `X-Verified-Delegate-Id`; GitHub service từ chối nếu thiếu hoặc khác, và từ chối người nhận đang tự ủy quyền (tránh khóa dây chuyền).
 - **Rollback.** Người yêu cầu rollback không được duyệt bản rollback đó (403, vẫn được từ chối). Audit có sẵn `ROLLBACK_REQUESTED` (người yêu cầu), review của Staff và quyết định của Manager.
 - **Drift tự động** mặc định TẮT (`DRIFT_AUTO_ANALYSIS_ENABLED=true` để bật): tối đa 2 phân tích đồng thời, hàng đợi 20, timeout 120 giây, bỏ qua head đã có báo cáo hoặc đã xếp hàng; đầy hàng thì ghi log và bỏ.
+
+## 15. Kết quả nghiệm thu trên stack cô lập và các sửa lỗi kèm theo
+
+- **Mã 403 và 404 theo hai lớp.** Lớp vai trò trả lời như nhau với mọi id: `/evidence` chỉ dành cho Manager, `/claim` chỉ dành cho Staff, `/api/oversight/*` chỉ dành cho Technical Lead; vai trò không được dùng route nhận **403** trước khi tra cứu workspace. Vai trò được dùng route nhưng workflow thuộc workspace khác nhận **404**. 403 ở lớp vai trò không tiết lộ gì về workflow của workspace khác.
+- **Rollback chỉ về phiên bản đã được chấp nhận** (`accepted`). Một phiên bản bị `superseded` (bị bản mới thay trước khi ai duyệt) hay `dismissed` bị AI service từ chối (409). Giao diện (`RollbackAction`) giờ không hiện nút cho các phiên bản đó.
+- **Đăng nhập từ trình duyệt khi `FRONTEND_PORT` khác 3000.** nginx gửi `Host` không có cổng và `X-Forwarded-Proto`, nên Backend coi `Origin: http://localhost:<cổng>` là CORS không hợp lệ. `frontend/nginx.conf` giờ giữ `Host` và `X-Forwarded-Host` kèm cổng cho `/api/`. Origin lạ vẫn bị 403.
+- **Approval Delegation** hiện câu giải thích khi Backend từ chối (400 không có nội dung) thay vì "The request is not valid.".
+- **CI:** `ai-service/tests/test_system_analytics.py` dùng đồng hồ thật và chờ vài mili giây giữa các sự kiện (đồng hồ giả cho job trộn với đồng hồ thật của tài liệu gây lỗi); `tests/revision-e2e/compose.yaml` thử lại tối đa 3 lần chỉ khi Maven Central trả HTTP 429, giống các Dockerfile.

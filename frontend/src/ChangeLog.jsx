@@ -46,7 +46,8 @@ function VersionEntry({ version, workflow, userId, onRolledBack }) {
         <p className="documentation-hint">No section changes were recorded for this version.</p>
       )}
       {warnings.length > 0 && <ul className="documentation-error">{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
-      <RollbackAction userId={userId} workflow={workflow} version={version.number} onDone={onRolledBack} />
+      <RollbackAction userId={userId} workflow={workflow} version={version.number}
+        accepted={String(version.status).toLowerCase() === 'accepted'} onDone={onRolledBack} />
     </li>
   );
 }
