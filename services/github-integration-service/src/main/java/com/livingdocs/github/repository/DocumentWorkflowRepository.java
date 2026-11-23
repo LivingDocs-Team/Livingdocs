@@ -47,6 +47,11 @@ public interface DocumentWorkflowRepository extends JpaRepository<DocumentWorkfl
             @Param("managerStatuses") java.util.Collection<DocumentWorkflowStatus> managerStatuses,
             Pageable pageable);
 
+    /** Read-only oversight (Technical Lead, Administrator): every workflow, newest first. */
+    Page<DocumentWorkflow> findAllBy(Pageable pageable);
+
+    long countByStatus(DocumentWorkflowStatus status);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select w from DocumentWorkflow w where w.id = :id")
     java.util.Optional<DocumentWorkflow> lockById(@Param("id") UUID id);

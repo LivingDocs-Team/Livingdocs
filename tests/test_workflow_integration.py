@@ -120,7 +120,7 @@ class StatefulBackend:
         # Same as the real stack: the Backend forwards a body-less POST as form-urlencoded and the endpoints
         # whose @RequestBody is optional answer HTTP 415 (found on the real stack during LD-403).
         optional_body = (method == "POST" and body is None and (
-            path.endswith("/approve") or path.endswith("/reject")
+            path.endswith("/approve") or path.endswith("/reject") or path.endswith("/submit")
             or (path.startswith("/api/documentation/jobs/") and path.endswith("/document"))))
         if optional_body:
             return send(415, {"status": 415, "code": "UNSUPPORTED_MEDIA_TYPE", "message": "Request failed (HTTP 415)."})
@@ -336,6 +336,9 @@ def test_section_feedback_revision_resubmission_and_final_approval(page: Page):
     open_documentation(page, backend)
     page.get_by_role("button", name="Open Staff Review Queue").click()
     page.get_by_role("button", name="Claim review").click()
+    # Claiming reloads the detail and replaces the content element; wait for the
+    # reloaded, claimed view before selecting a passage in it.
+    expect(page.get_by_text("Select a passage in the document above")).to_be_visible()
     content = page.locator("pre.staff-review-content")
     expect(content).to_contain_text("Reviewed.")
     content.evaluate("""element => {

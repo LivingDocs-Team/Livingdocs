@@ -1,9 +1,8 @@
 // TODO: thay bằng screen flow chính thức của nhóm
 // PROVISIONAL flow for Technical Lead. The team has not provided this flow yet, so it is built only
-// from the matrix rows where Technical Lead has a permission, grouped into modules. A screen is wired
-// to an existing component only when that component offers no action beyond the role's rights;
-// every other screen is a placeholder.
-import { implemented, module, placeholder, profileSettings } from './nodes.js';
+// from the matrix rows where Technical Lead has a permission, grouped into modules. The oversight screens
+// are read only (the matrix gives this role R on them); Drift Policies & Thresholds is the one place it edits.
+import { implemented, module, profileSettings } from './nodes.js';
 
 export default Object.freeze({
   role: 'TECHNICAL_LEAD',
@@ -14,21 +13,21 @@ export default Object.freeze({
       profileSettings(),
     ]),
     module('code-documentation', 'Code & Documentation', [
-      placeholder('pr-commit-data', 'Pull Requests & Commits', '/code/activity', 'pullRequests'), // #7
-      placeholder('documentation-overview', 'Documentation', '/code/documentation', 'documentation'), // #8
-      placeholder('workflow-status', 'Workflow Status', '/code/workflow-status', 'workflowSubmission'), // #9
+      implemented('pr-commit-data', 'Pull Requests & Commits', '/code/activity', 'pullRequests', 'OversightRepositories'), // #7
+      implemented('documentation-overview', 'Documentation', '/code/documentation', 'documentation', 'OversightDocumentation'), // #8
+      implemented('workflow-status', 'Workflow Status', '/code/workflow-status', 'workflowSubmission', 'WorkflowOversight'), // #9
     ]),
     module('review-approval', 'Review & Approval', [
-      placeholder('staff-review-overview', 'Staff Review', '/oversight/staff-review', 'staffReview'), // #10
-      placeholder('manager-approval-overview', 'Manager Approval', '/oversight/manager-approval', 'managerApproval'), // #11
-      placeholder('approval-audit', 'Approval Audit Trail & History', '/oversight/audit', 'approvalAudit'), // #13
+      implemented('staff-review-overview', 'Staff Review', '/oversight/staff-review', 'staffReview', 'WorkflowOversight'), // #10
+      implemented('manager-approval-overview', 'Manager Approval', '/oversight/manager-approval', 'managerApproval', 'WorkflowOversight'), // #11
+      implemented('approval-audit', 'Approval Audit Trail & History', '/oversight/audit', 'approvalAudit', 'ApprovalAudit'), // #13
     ]),
     module('drift', 'Drift', [
-      placeholder('drift-policies', 'Drift Policies & Thresholds', '/drift/policies', 'driftPolicies'), // #17
+      implemented('drift-policies', 'Drift Policies & Thresholds', '/drift/policies', 'driftPolicies', 'OversightRepositories'), // #17
     ]),
     module('versions', 'Versions', [
-      placeholder('version-history', 'Version History & Comparison', '/versions/history', 'versionHistory'), // #18
-      placeholder('document-rollback', 'Document Rollback', '/versions/rollback', 'documentRollback'), // #19
+      implemented('version-history', 'Version History & Comparison', '/versions/history', 'versionHistory', 'VersionExplorer'), // #18
+      implemented('document-rollback', 'Document Rollback', '/versions/rollback', 'documentRollback', 'VersionExplorer'), // #19
     ]),
     module('knowledge', 'Knowledge Base', [
       implemented('documentation-collections', 'Documentation Collections', '/knowledge/collections', 'collections', 'DocumentationCollections'),
@@ -36,7 +35,7 @@ export default Object.freeze({
       implemented('templates', 'Documentation Templates', '/knowledge/templates', 'templates', 'TemplateLibrary'), // #22
     ]),
     module('reports', 'Reports', [
-      placeholder('health-reports', 'Health Metrics, Dependency Graph & Reports', '/reports/health', 'healthReports'), // #23
+      implemented('health-reports', 'Health Metrics, Dependency Graph & Reports', '/reports/health', 'healthReports', 'HealthReports'), // #23
     ]),
   ]),
 });

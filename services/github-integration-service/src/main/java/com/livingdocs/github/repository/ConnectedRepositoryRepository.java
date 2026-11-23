@@ -19,6 +19,10 @@ public interface ConnectedRepositoryRepository extends JpaRepository<ConnectedRe
 
     List<ConnectedRepository> findByWorkspaceIdOrderByFullNameAsc(String workspaceId);
 
+    List<ConnectedRepository> findAllByOrderByFullNameAsc();
+
+    long countByStatus(com.livingdocs.github.entity.RepositoryStatus status);
+
     List<ConnectedRepository> findByWorkspaceIdAndConnectionIdOrderByFullNameAsc(
             String workspaceId, UUID connectionId);
 

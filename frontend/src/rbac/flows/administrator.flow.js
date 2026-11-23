@@ -1,10 +1,10 @@
 // TODO: thay bằng screen flow chính thức của nhóm
 // PROVISIONAL flow for Administrator. The team has not provided this flow yet, so it is built only
 // from the matrix rows where Administrator has a permission, grouped into modules. The Administration and
-// Monitoring screens (#24-#28) open the Administration dashboard (LD-316); every other screen is a
-// placeholder except Profile: the existing Repository Management page also shows pull requests and
-// commits (#7), which Administrator may not read, so it is not wired here.
-import { implemented, module, placeholder, profileSettings } from './nodes.js';
+// Monitoring screens (#24-#28) open the Administration dashboard (LD-316). Repository Management (#6) is the
+// existing repository page without its pull request and commit panel (#7, which Administrator may not read), and
+// Approval Audit Trail & History (#13) is the shared audit page.
+import { implemented, module, profileSettings } from './nodes.js';
 
 export default Object.freeze({
   role: 'ADMINISTRATOR',
@@ -15,7 +15,7 @@ export default Object.freeze({
       profileSettings(),
     ]),
     module('repositories', 'Repositories', [
-      placeholder('repository-management', 'Repository Management & Synchronization', '/admin/repositories', 'repositories'), // #6
+      implemented('repository-management', 'Repository Management & Synchronization', '/admin/repositories', 'repositories', 'RepositoryManagement'), // #6
     ]),
     module('administration', 'Administration', [
       implemented('user-management', 'Users, Roles & Permissions', '/admin/users', 'userManagement', 'AdminDashboard'), // #24
@@ -25,7 +25,7 @@ export default Object.freeze({
     ]),
     module('monitoring', 'Monitoring & Audit', [
       implemented('monitoring', 'Monitoring, Audit Logs & Analytics', '/admin/monitoring', 'monitoring', 'AdminDashboard'), // #27
-      placeholder('approval-audit', 'Approval Audit Trail & History', '/admin/approval-audit', 'approvalAudit'), // #13
+      implemented('approval-audit', 'Approval Audit Trail & History', '/admin/approval-audit', 'approvalAudit', 'ApprovalAudit'), // #13
     ]),
   ]),
 });

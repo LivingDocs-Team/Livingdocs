@@ -50,6 +50,17 @@ public class DocumentWorkflowService {
 
     private final SourceChangeService sourceChanges;
     private final ConnectedRepositoryRepository repositories;
+    // Optional so that unit tests can build the service without it; without it the defaults apply.
+    private ApprovalPolicyService approvalPolicies;
+
+    @Autowired(required = false)
+    void setApprovalPolicies(ApprovalPolicyService approvalPolicies) {
+        this.approvalPolicies = approvalPolicies;
+    }
+
+    private ApprovalPolicyService.ApprovalSettings approvalPolicy() {
+        return approvalPolicies == null ? new ApprovalPolicyService.ApprovalSettings(false, false) : approvalPolicies.approval();
+    }
 
     public DocumentWorkflowService(DocumentWorkflowRepository workflows,
             DocumentWorkflowAuditRepository audit, DocumentationGenerationService documents) {
@@ -161,6 +172,12 @@ public class DocumentWorkflowService {
             int page, int size) {
         // Keep discovery permission-only, matching requireReadable exactly. The current role's
         // permission set is supplied by the authenticated BFF; customized roles remain supported.
+        if (OversightService.mayReadAllWorkflows(authorities)) {
+            // Technical Lead and Administrator oversee every workflow (read-only).
+            PageRequest all = PageRequest.of(page(page, size).getPageNumber(), page(page, size).getPageSize(),
+                    Sort.by(Sort.Order.desc("createdAt"), Sort.Order.asc("id")));
+            return page(workflows.findAllBy(all).map(DocumentWorkflowService::toResponse));
+        }
         boolean includeOwned = authorities.contains("DOCUMENT_VIEW");
         boolean includeStaffQueue = authorities.contains("DOCUMENT_REVIEW_QUEUE_VIEW");
         boolean includeAssignedReviews = authorities.contains("DOCUMENT_REVIEW");
@@ -532,6 +549,9 @@ public class DocumentWorkflowService {
                 && (request.comment() == null || request.comment().isBlank())) {
             throw ApiException.badRequest("A comment is required when requesting changes.");
         }
+        if (approvalPolicy().requireStaffComment() && (request.comment() == null || request.comment().isBlank())) {
+            throw ApiException.badRequest("The approval policy requires a comment with every staff review.");
+        }
         DocumentWorkflowStatus previous = workflow.getStatus();
         EditDocumentRequest edit = request.edit();
         if (edit != null) {
@@ -685,6 +705,10 @@ public class DocumentWorkflowService {
         String actorRole = requireRole(authorities, "MANAGER");
         DocumentWorkflow workflow = lock(workflowId);
         String note = normalizeComment(comment);
+        if (decision == ManagerDecision.APPROVED && approvalPolicy().requireManagerComment()
+                && workflow.getStatus() == DocumentWorkflowStatus.PENDING_MANAGER_APPROVAL && note == null) {
+            throw ApiException.badRequest("The approval policy requires a comment with every approval.");
+        }
         if (workflow.getStatus().name().equals(decision.name())
                 && expectedVersion != null && expectedVersion.equals(workflow.getSubmittedDocumentVersion())
                 && decision == workflow.getManagerDecision() && actor.equals(workflow.getManagerUserId())
@@ -856,6 +880,7 @@ public class DocumentWorkflowService {
     }
 
     private void requireReadable(DocumentWorkflow w, String actor, Set<String> authorities) {
+        if (OversightService.mayReadAllWorkflows(authorities)) return;
         if (w.getOwnerUserId().equals(actor) && authorities.contains("DOCUMENT_VIEW")) return;
         if (authorities.contains("DOCUMENT_REVIEW_QUEUE_VIEW")
                 && (w.getStatus() == DocumentWorkflowStatus.PENDING_STAFF_REVIEW

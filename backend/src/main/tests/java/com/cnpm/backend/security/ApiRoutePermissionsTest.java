@@ -34,6 +34,7 @@ class ApiRoutePermissionsTest {
             Map.entry("DELETE /api/workspaces/" + WS + "/repositories/" + ID, List.of("DEVELOPER", "ADMINISTRATOR")),
             Map.entry("GET /api/repositories/" + ID, List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD", "ADMINISTRATOR")),
             Map.entry("DELETE /api/repositories/" + ID, List.of("DEVELOPER", "ADMINISTRATOR")),
+            Map.entry("GET /api/repositories/" + ID + "/coverage-gaps", List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD")),
             Map.entry("POST /api/repositories/" + ID + "/sync", List.of("DEVELOPER", "ADMINISTRATOR")),
             Map.entry("GET /api/repositories/" + ID + "/sync/latest", List.of("DEVELOPER", "ADMINISTRATOR")),
             // pull requests, commits, source changes (#7)
@@ -112,7 +113,21 @@ class ApiRoutePermissionsTest {
             Map.entry("POST /api/document-workflows/" + ID + "/reject", List.of("MANAGER")),
             Map.entry("POST /api/document-workflows/" + ID + "/rollback",
                     List.of("DEVELOPER", "MANAGER", "TECHNICAL_LEAD")),
-            Map.entry("POST /api/document-workflows/" + ID + "/reassign", List.of("ADMINISTRATOR")));
+            Map.entry("POST /api/document-workflows/" + ID + "/reassign", List.of("ADMINISTRATOR")),
+            // oversight views and drift policies (Technical Lead), policies and delegations (Manager)
+            Map.entry("GET /api/oversight/repositories", List.of("TECHNICAL_LEAD")),
+            Map.entry("GET /api/oversight/repositories/" + ID + "/pull-requests", List.of("DEVELOPER", "TECHNICAL_LEAD")),
+            Map.entry("GET /api/oversight/repositories/" + ID + "/commits", List.of("DEVELOPER", "TECHNICAL_LEAD")),
+            Map.entry("GET /api/oversight/repositories/" + ID + "/drift-policies", List.of("TECHNICAL_LEAD")),
+            Map.entry("PUT /api/oversight/repositories/" + ID + "/drift-policies", List.of("TECHNICAL_LEAD")),
+            Map.entry("GET /api/oversight/documentation", List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD")),
+            Map.entry("GET /api/oversight/documentation/" + ID, List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD")),
+            Map.entry("GET /api/oversight/health", List.of("TECHNICAL_LEAD")),
+            Map.entry("GET /api/approval/policies/approval", List.of("MANAGER")),
+            Map.entry("PUT /api/approval/policies/merge", List.of("MANAGER")),
+            Map.entry("GET /api/approval/delegations", List.of("MANAGER", "TECHNICAL_LEAD")),
+            Map.entry("POST /api/approval/delegations", List.of("MANAGER")),
+            Map.entry("DELETE /api/approval/delegations/" + ID, List.of("MANAGER")));
 
     static Stream<Arguments> routesAndRoles() {
         return ALLOWED.entrySet().stream().flatMap(entry -> ScreenPermissions.ROLES.stream()
