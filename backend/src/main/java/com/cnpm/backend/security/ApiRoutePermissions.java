@@ -67,6 +67,8 @@ public final class ApiRoutePermissions {
         rule("POST", "/api/repositories/{}/sync", need("repositories", 'U'));
         rule("GET", "/api/repositories/{}/sync/latest", need("repositories", 'R'));
         rule("GET", "/api/repositories/{}/sync/latest/analysis-input", need("repositories", 'R'));
+        rule("GET", "/api/repositories/{}/auto-update-policies", need("repositories", 'R'));
+        rule("PUT", "/api/repositories/{}/auto-update-policies", need("repositories", 'U'));
 
         // ---- Pull requests, commits and source changes (#7) ----
         rule("GET", "/api/repositories/{}/pull-requests", need("pullRequests", 'R'));
@@ -79,6 +81,7 @@ public final class ApiRoutePermissions {
         rule("GET", "/api/repositories/{}/documentation/search", need("knowledgeBase", 'R'));
         rule("GET", "/api/repositories/{}/documentation", need("documentation", 'R'), need("knowledgeBase", 'R'));
         rule("GET", "/api/repositories/{}/code-entities", need("documentation", 'R'), need("knowledgeBase", 'R'));
+        rule("GET", "/api/repositories/{}/coverage-gaps", need("documentation", 'R'));
         rule("GET", "/api/documentation/jobs/{}", need("documentation", 'R'));
         rule("GET", "/api/documentation/jobs/{}/result", need("documentation", 'R'));
         rule("GET", "/api/documentation/jobs/{}/report", need("documentation", 'R'));
@@ -111,17 +114,33 @@ public final class ApiRoutePermissions {
 
         // ---- Drift (#16 was removed for every role; thresholds #17 stay for Technical Lead) ----
         rule("GET", "/api/documentation/drift/severity-rules", need("driftPolicies", 'R'));
-        // No screen of the matrix covers drift analysis any more: these routes are refused for every role.
-        rule("POST", "/api/repositories/{}/drift/analyze");
-        rule("GET", "/api/repositories/{}/drift/reports");
-        rule("GET", "/api/repositories/{}/drift/reports/{}");
-        rule("GET", "/api/repositories/{}/drift/reports/{}/markdown");
-        rule("PUT", "/api/repositories/{}/drift/reports/{}/findings/{}/resolution");
+        rule("POST", "/api/repositories/{}/drift/analyze", need("driftAlerts", 'C'));
+        rule("GET", "/api/repositories/{}/drift/reports", need("driftAlerts", 'R'));
+        rule("GET", "/api/repositories/{}/drift/reports/{}", need("driftAlerts", 'R'));
+        rule("GET", "/api/repositories/{}/drift/reports/{}/markdown", need("driftAlerts", 'R'));
+        rule("PUT", "/api/repositories/{}/drift/reports/{}/findings/{}/resolution", need("driftAlerts", 'U'));
 
         // ---- One saved document and its code links (#8, #20) ----
         rule("GET", "/api/documentation/{}", need("documentation", 'R'), need("knowledgeBase", 'R'));
         rule("GET", "/api/documentation/{}/code-entities", need("documentation", 'R'), need("knowledgeBase", 'R'));
         rule("PUT", "/api/documentation/{}/code-entities", need("documentation", 'U'));
+
+        // ---- Oversight views for the Technical Lead (#7, #8, #17, #23); GitHub Integration checks the permission too ----
+        rule("GET", "/api/oversight/repositories", need("driftPolicies", 'R'), need("healthReports", 'R'));
+        rule("GET", "/api/oversight/repositories/{}/pull-requests", need("pullRequests", 'R'));
+        rule("GET", "/api/oversight/repositories/{}/commits", need("pullRequests", 'R'));
+        rule("GET", "/api/oversight/repositories/{}/drift-policies", need("driftPolicies", 'R'));
+        rule("PUT", "/api/oversight/repositories/{}/drift-policies", need("driftPolicies", 'U'));
+        rule("GET", "/api/oversight/documentation", need("documentation", 'R'));
+        rule("GET", "/api/oversight/documentation/{}", need("documentation", 'R'));
+        rule("GET", "/api/oversight/health", need("healthReports", 'R'));
+
+        // ---- Approval and merge policies (#12) and Manager delegation (#11) ----
+        rule("GET", "/api/approval/policies/{}", need("approvalPolicies", 'R'));
+        rule("PUT", "/api/approval/policies/{}", need("approvalPolicies", 'U'));
+        rule("GET", "/api/approval/delegations", need("managerApproval", 'R'));
+        rule("POST", "/api/approval/delegations", need("managerApproval", 'U'));
+        rule("DELETE", "/api/approval/delegations/{}", need("managerApproval", 'U'));
 
         // ---- Review and approval workflow (#9, #10, #11, #13, #19) ----
         rule("POST", "/api/document-workflows", need("workflowSubmission", 'C'));
@@ -144,6 +163,7 @@ public final class ApiRoutePermissions {
         rule("POST", "/api/document-workflows/{}/comments", need("staffReview", 'A'));
         rule("PUT", "/api/document-workflows/{}/document", need("documentation", 'U'));
         rule("POST", "/api/document-workflows/{}/approve", need("managerApproval", 'A'));
+        rule("POST", "/api/document-workflows/{}/versions/{}/github-commit", need("managerApproval", 'A'));
         rule("POST", "/api/document-workflows/{}/reject", need("managerApproval", 'A'));
         rule("POST", "/api/document-workflows/{}/rollback", need("documentRollback", 'U'));
         // Reassigning a review to another Staff member is an administration task (also needs DOCUMENT_REASSIGN).

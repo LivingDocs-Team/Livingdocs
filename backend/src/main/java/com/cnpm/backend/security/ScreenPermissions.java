@@ -32,7 +32,7 @@ public final class ScreenPermissions {
         row(1, "authentication",            "R",    "R",    "R",    "R",    "R");
         row(2, "profile",                   "RU",   "RU",   "RU",   "RU",   "RU");
         row(3, "notifications",             "R",    "",     "",     "",     "");
-        row(5, "githubConnection",          "CRD",  "",     "",     "",     "");
+        row(5, "githubConnection",          "CRD",  "",     "CRD",  "",     "");
         row(6, "repositories",              "CRUD", "",     "",     "",     "CRUD");
         row(7, "pullRequests",              "R",    "",     "",     "R",    "");
         row(8, "documentation",             "CRUE", "RU",   "",     "R",    "");
@@ -41,6 +41,7 @@ public final class ScreenPermissions {
         row(11, "managerApproval",          "",     "",     "RUA",  "R",    "");
         row(12, "approvalPolicies",         "",     "",     "CRU",  "",     "");
         row(13, "approvalAudit",            "",     "R",    "R",    "R",    "R");
+        row(16, "driftAlerts",              "CRU",  "",     "",     "",     "");
         row(17, "driftPolicies",            "",     "",     "",     "CRU",  "");
         row(18, "versionHistory",           "R",    "R",    "",     "R",    "");
         row(19, "documentRollback",         "U",    "",     "U",    "U",    "");

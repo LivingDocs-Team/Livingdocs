@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import pathlib
+import re
 import threading
 import uuid
 from datetime import datetime
@@ -22,17 +23,21 @@ from typing import Dict, List, Optional
 
 from .generator import DocGenerator
 from .jobs import JobOutput
-from .models import JobReport, Scope, now
 from .doc_diff import diff_texts
+from .models import (Evidence, EvidenceKind, FileReport, FileResultStatus, JobReport,
+                     Scope, SourceSnapshot, now)
 from .renderer import render_overview
 from .version_models import (ComparedVersion, Document, DocumentDiff, DocumentVersion, FileSection,
-                             HistoryAction, HistoryEvent, SectionAction, SectionChange, SkippedFile,
-                             VersionOrigin,
+                             HistoryAction, HistoryEvent, InitialGenerationSave, PreparedRevision, RevisionDraftRequest,
+                             RevisionFileChange, SectionAction, SectionChange, SkippedFile,
+                             SourceChangeRef, VersionOrigin,
                              VersionStatus, VersionSummary)
 
 log = logging.getLogger(__name__)
 DEFAULT_FILE = "data/documents.json"
 SEPARATOR = "\n\n---\n\n"
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+_HEADING = re.compile(r"^ {0,3}(#{1,2})[ \t]+(.+?)\s*$")
 
 
 class VersionError(Exception):
@@ -44,11 +49,31 @@ class VersionError(Exception):
         self.message = message
 
 
+class DocumentStoreSyncError(OSError):
+    """The replacement is visible, but the directory could not be synced."""
+
+
 def _not_found(what: str) -> VersionError:
     return VersionError(404, f"{what} not found")
 
 
 # ---------- Text helpers ----------
+
+def _template_headings(markdown: str) -> list[tuple[str, str]]:
+    headings = []
+    fence = None
+    for line in markdown.splitlines():
+        marker = _FENCE.match(line)
+        if fence is not None:
+            if marker and marker[1][0] == fence[0] and len(marker[1]) >= len(fence) and not marker[2].strip():
+                fence = None
+        elif marker:
+            fence = marker[1]
+        else:
+            heading = _HEADING.match(line)
+            if heading:
+                headings.append((heading[1], heading[2]))
+    return headings
 
 def _mean(values: List[Optional[float]]) -> Optional[float]:
     xs = [v for v in values if v is not None]
@@ -82,6 +107,7 @@ def inherit_evidence(version: DocumentVersion, source: Optional[DocumentVersion]
     for f in EVIDENCE_FIELDS:
         value = getattr(source, f)
         setattr(version, f, value.model_copy(deep=True) if value is not None else None)
+    version.revision_files = [item.model_copy(deep=True) for item in source.revision_files]
     version.evidence_from_version = source.evidence_from_version or source.number
 
 
@@ -162,9 +188,26 @@ class DocumentStore:
             "events": {k: [e.model_dump(mode="json") for e in es] for k, es in self._events.items()},
             "plans": {k: {str(n): p for n, p in ps.items()} for k, ps in self._plans.items()},
         }
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(tmp, self.path)  # atomic: a crash never leaves a half-written file
+        tmp = self.path.with_name(f"{self.path.name}.tmp")
+        try:
+            with tmp.open("w", encoding="utf-8") as output:
+                json.dump(data, output, ensure_ascii=False, indent=2)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(tmp, self.path)
+            if os.name == "posix":
+                try:
+                    directory = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)
+                    try:
+                        os.fsync(directory)
+                    finally:
+                        os.close(directory)
+                except OSError as exc:
+                    # The replacement is already visible. Keep memory aligned with the file,
+                    # but surface the durability failure so the caller can retry.
+                    raise DocumentStoreSyncError(str(exc)) from exc
+        finally:
+            tmp.unlink(missing_ok=True)
 
     # ---------- queries (LD-195) ----------
 
@@ -186,6 +229,14 @@ class DocumentStore:
         if doc is None:
             raise _not_found("Document")
         return doc
+
+    def document_snapshot(self, doc_id: str) -> Document:
+        with self._lock:
+            return self.get(doc_id).model_copy(deep=True)
+
+    def version_snapshot(self, doc_id: str, number: int) -> DocumentVersion:
+        with self._lock:
+            return self.version(doc_id, number).model_copy(deep=True)
 
     def get_public(self, doc_id: str) -> Document:
         doc = self.get(doc_id)
@@ -291,7 +342,8 @@ class DocumentStore:
 
     def create_from_job(self, job_id: str, output: JobOutput, title: Optional[str] = None,
                         actor: Optional[str] = None, note: Optional[str] = None,
-                        owner_user_id: Optional[str] = None,report: Optional[JobReport] = None) -> Document:
+                        owner_user_id: Optional[str] = None, report: Optional[JobReport] = None,
+                        *, actor_role: Optional[str] = None) -> Document:
         with self._lock:
             if owner_user_id is not None:
                 for existing in self._docs.values():
@@ -322,13 +374,263 @@ class DocumentStore:
                                 source_snapshot=output.source_snapshot,
                                 decided_by=None if owner_user_id is not None else actor,
                                 decided_at=None if owner_user_id is not None else now())
+            if owner_user_id is not None and actor == owner_user_id:
+                doc.initial_generation_save = InitialGenerationSave(
+                    job_id=job_id, version=v.number, actor_user_id=actor,
+                    actor_role=actor_role, saved_at=v.created_at,
+                )
             self._docs[doc.id] = doc
             self._versions[doc.id] = [v]
             self._events[doc.id] = []
             self._plans[doc.id] = {}
             self._event(doc.id, HistoryAction.created, 1, actor, note or f"From job {job_id}")
-            self._save()
+            try:
+                self._save()
+            except DocumentStoreSyncError:
+                raise
+            except OSError:
+                del self._docs[doc.id], self._versions[doc.id], self._events[doc.id], self._plans[doc.id]
+                raise
             return doc
+
+    def revision_candidates(self, repository_id: str) -> List[Document]:
+        with self._lock:
+            return [
+                doc.model_copy(deep=True)
+                for doc in self._docs.values()
+                if doc.owner_user_id and doc.current_version
+                and (snapshot := self.version(doc.id).source_snapshot)
+                and snapshot.repository_id == repository_id
+            ]
+
+    def _revision_base(self, doc_id: str, owner: str, request: RevisionDraftRequest):
+        """Called under the store lock, before generation and again before persisting."""
+        doc = self.get_owned(doc_id, owner)
+        base = self.version(doc_id, request.base_version)
+        snapshot = request.source_snapshot
+        if (not base.source_snapshot
+                or base.source_snapshot.repository_id != snapshot.repository_id
+                or base.source_snapshot.repository_full_name.casefold() != snapshot.repository_full_name.casefold()):
+            raise VersionError(409, "Document belongs to a different repository")
+        for version in self._versions[doc_id]:
+            if (version.origin == VersionOrigin.source_change
+                    and any(
+                        ref.id == request.source_change_id
+                        and ref.trigger == request.trigger
+                        and ref.commit_sha == snapshot.commit_sha
+                        and ref.pull_request_number == request.pull_request_number
+                        for ref in version.source_changes)):
+                return doc, base, version
+        if doc.current_version != request.base_version or doc.pending_version is not None:
+            raise VersionError(409, "The document changed or already has a pending version")
+        return doc, base, None
+
+    @staticmethod
+    def _revision_operations(doc: Document, base: DocumentVersion, request: RevisionDraftRequest):
+        paths = {section.path for section in base.sections}
+        if not request.file_changes:
+            return [RevisionFileChange(path=file.path, action="updated")
+                    for file in request.files if file.path in paths]
+
+        files = {file.path for file in request.files}
+        targets, sources = set(), set()
+        operations = []
+        module = doc.target.replace(".", "/").rstrip("/") + "/"
+        for change in request.file_changes:
+            path, action, previous = change.path, change.action, change.previous_path
+            if (path in targets or (action == "renamed") != bool(previous)
+                    or (action == "removed") != (change.blob_sha is None)
+                    or (action != "removed" and path not in files)):
+                raise VersionError(409, "Invalid source evidence for the revision")
+            targets.add(path)
+            if action == "added":
+                if path not in paths and (doc.scope == Scope.repository
+                        or doc.scope == Scope.module and path.startswith(module)):
+                    operations.append(change)
+            elif action == "renamed":
+                if previous in paths:
+                    if path in paths or previous in sources:
+                        raise VersionError(409, "The rename overlaps another document section")
+                    operations.append(change)
+                    sources.add(previous)
+            elif path in paths:
+                operations.append(change)
+                sources.add(path)
+        if any(change.previous_path in targets for change in operations if change.previous_path):
+            raise VersionError(409, "The rename source also has a revision operation")
+        return operations
+
+    def prepare_revision(self, doc_id: str, owner: str, request: RevisionDraftRequest, generate):
+        with self._lock:
+            doc, base, existing = self._revision_base(doc_id, owner, request)
+            if existing is not None:
+                return PreparedRevision()
+            if not base.sections_match_content:
+                return None
+            operations = self._revision_operations(doc, base, request)
+            if not operations:
+                return None
+            paths = {change.path for change in operations if change.action != "removed"}
+            files = [file for file in request.files if file.path in paths]
+
+        replacements, report = generate(doc, files)
+        return PreparedRevision(replacements=replacements, report=report)
+
+    def propose_revision(self, doc_id: str, owner: str, request: RevisionDraftRequest, generate):
+        prepared = self.prepare_revision(doc_id, owner, request, generate)
+        if prepared is None:
+            return None
+        return self.commit_revision(doc_id, owner, request, prepared)
+
+    def commit_revision(self, doc_id: str, owner: str, request: RevisionDraftRequest,
+                        prepared: PreparedRevision, lease_expires_at: Optional[datetime] = None):
+        with self._lock:
+            self._require_revision_lease(lease_expires_at)
+            doc, base, existing = self._revision_base(doc_id, owner, request)
+            if existing is not None:
+                return existing
+            replacements, report = prepared.replacements, prepared.report
+            if report is None or not base.sections_match_content:
+                return None
+            operations = self._revision_operations(doc, base, request)
+            expected = {change.path for change in operations if change.action != "removed"}
+            if replacements.keys() != expected or any(path != section.path for path, section in replacements.items()):
+                raise VersionError(409, "Prepared sections do not match the revision")
+            by_source = {change.previous_path or change.path: change for change in operations
+                         if change.action != "added"}
+            sections = []
+            for section in base.sections:
+                change = by_source.get(section.path)
+                if change is None:
+                    sections.append(section)
+                elif change.action != "removed":
+                    sections.append(replacements[change.path])
+            sections.extend(replacements[change.path] for change in operations if change.action == "added")
+            obsolete = set(by_source) | expected
+            skipped = [item for item in base.skipped if item.path not in obsolete]
+            content = assemble(doc, sections, skipped, report.template_name)
+            if content == base.content and all(change.action in ("updated", "dependent") for change in operations):
+                return None
+            number = doc.versions_total + 1
+            version = DocumentVersion(
+                number=number, status=VersionStatus.proposed, origin=VersionOrigin.source_change,
+                base_version=base.number, content=content, sections=sections, skipped=skipped,
+                created_by="AI", source_snapshot=request.source_snapshot,
+                evidence_report=report, review_report=report,
+                source_changes=[SourceChangeRef(
+                    id=request.source_change_id, trigger=request.trigger,
+                    commit_sha=request.source_snapshot.commit_sha,
+                    pull_request_number=request.pull_request_number)],
+                revision_files=operations if request.file_changes else [],
+                changes=[SectionChange(path=change.path, previous_path=change.previous_path,
+                                       action=SectionAction.updated if change.action == "dependent"
+                                       else SectionAction(change.action)) for change in operations],
+            )
+            self._require_revision_lease(lease_expires_at)
+            previous = doc.model_copy(deep=True)
+            self._versions[doc_id].append(version)
+            doc.pending_revision = request.source_snapshot
+            doc.pending_version = doc.versions_total = number
+            doc.updated_at = now()
+            self._event(doc_id, HistoryAction.proposed, number, "AI",
+                        f"Source revision {request.source_snapshot.commit_sha}", related=base.number)
+            try:
+                self._save()
+            except DocumentStoreSyncError:
+                raise
+            except OSError:
+                self._versions[doc_id].pop()
+                self._events[doc_id].pop()
+                self._docs[doc_id] = previous
+                raise
+            return version
+
+    @staticmethod
+    def _require_revision_lease(lease_expires_at: Optional[datetime]) -> None:
+        if lease_expires_at is not None and now() >= lease_expires_at:
+            raise VersionError(409, "The revision job lease expired")
+
+    def propose_drift(self, owner, repository_id, report, finding):
+        target = finding.document
+        pr = report.pull_request
+        if not (target.document_id and target.version and report.repository and pr.head_sha and pr.head_branch):
+            raise VersionError(409, "This finding has no versioned document or source revision")
+        snapshot = SourceSnapshot(repository_id=repository_id, repository_full_name=report.repository,
+                                  branch=pr.head_branch, commit_sha=pr.head_sha,
+                                  pull_request_number=pr.number, pull_request_base_sha=pr.base_head_sha)
+        resolution = finding.resolution
+        key = f"drift:{report.id}:{finding.id}"
+        if resolution.rejected_draft_version is not None:
+            key += f":after:{resolution.rejected_draft_version}"
+        request = RevisionDraftRequest(source_change_id=key, trigger="PULL_REQUEST",
+                                       pull_request_number=pr.number, source_snapshot=snapshot,
+                                       base_version=target.version, files=[])
+        audit = {"report_id": report.id, "finding_id": finding.id, "decision": resolution.decision,
+                 "proposed": resolution.proposed, "evidence": [
+                     item.model_dump(mode="json") for item in finding.evidence]}
+        with self._lock:
+            doc, base, existing = self._revision_base(target.document_id, owner, request)
+            if existing is not None:
+                if existing.drift_finding != audit:
+                    raise VersionError(409, "This finding already has a different draft decision")
+                return existing.number
+            section = next((item for item in base.sections if item.path == target.path), None)
+            if (not base.sections_match_content or section is None or not section.markdown
+                    or base.content.count(section.markdown) != 1):
+                raise VersionError(409, "The affected section cannot be updated safely")
+            template_snapshot = base.review_report or base.evidence_report
+            proposed = resolution.proposed
+            if template_snapshot and template_snapshot.template_sections:
+                title = section.markdown.splitlines()[0]
+                if not proposed.startswith("# "):
+                    passage = next((item.excerpt for item in finding.evidence
+                                    if item.kind == "documentation" and item.path == section.path
+                                    and item.excerpt), None)
+                    if passage is None or section.markdown.count(passage) != 1:
+                        raise VersionError(409, "The drift suggestion cannot be located in the affected section")
+                    replacement = f"{title}\n\n{proposed}" if passage == title else proposed
+                    proposed = section.markdown.replace(passage, replacement, 1)
+                # The renderer omits sections without applicable entities. Preserve the
+                # headings present in this file rather than requiring inapplicable ones.
+                if proposed.splitlines()[0] != title or _template_headings(proposed) != _template_headings(section.markdown):
+                    raise VersionError(409, "The drift draft changes the documentation template headings")
+            sections = [item.model_copy(update={"markdown": proposed, "status": "manual"})
+                        if item.path == target.path else item for item in base.sections]
+            evidence = [Evidence(id=item.id, kind=EvidenceKind.doc if item.kind == "documentation"
+                                 else EvidenceKind.source, path=item.path or finding.file,
+                                 line_start=item.line_start, line_end=item.line_end, excerpt=item.excerpt)
+                        for item in finding.evidence]
+            review = JobReport(job_id=key, template_id=doc.template_id, method="drift",
+                               template_name=template_snapshot.template_name if template_snapshot else None,
+                               template_version=template_snapshot.template_version if template_snapshot else doc.template_version,
+                               template_instructions=template_snapshot.template_instructions if template_snapshot else None,
+                               template_sections=template_snapshot.template_sections if template_snapshot else [],
+                               files=[FileReport(path=finding.file, status=FileResultStatus.generated,
+                                                 context_used=evidence)])
+            number = doc.versions_total + 1
+            version = DocumentVersion(
+                number=number, status=VersionStatus.proposed, origin=VersionOrigin.source_change,
+                base_version=base.number, created_by=owner, manual=True,
+                content=base.content.replace(section.markdown, proposed, 1),
+                sections=sections, skipped=base.skipped, source_snapshot=snapshot,
+                source_changes=[SourceChangeRef(id=key, trigger="PULL_REQUEST", commit_sha=pr.head_sha,
+                                               pull_request_number=pr.number)],
+                changes=[SectionChange(path=target.path, action=SectionAction.edited)],
+                evidence_report=review, review_report=review, drift_finding=audit)
+            previous = doc.model_copy(deep=True)
+            self._versions[doc.id].append(version)
+            doc.pending_version = doc.versions_total = number
+            doc.pending_revision = snapshot
+            doc.updated_at = now()
+            self._event(doc.id, HistoryAction.proposed, number, owner, key, related=base.number)
+            try:
+                self._save()
+            except OSError:
+                self._versions[doc.id].pop()
+                self._events[doc.id].pop()
+                self._docs[doc.id] = previous
+                raise
+            return number
 
     def get_owned(self, doc_id: str, owner_user_id: str) -> Document:
         with self._lock:
@@ -338,7 +640,7 @@ class DocumentStore:
             return doc
 
     def edit_owned(self, doc_id: str, owner_user_id: str, expected_version: int, content: str,
-                   note: Optional[str] = None) -> DocumentVersion:
+                   note: Optional[str] = None, *, actor_role: Optional[str] = None) -> DocumentVersion:
         with self._lock:
             doc = self.get_owned(doc_id, owner_user_id)
             if doc.pending_version is not None:
@@ -349,6 +651,9 @@ class DocumentStore:
                 if doc.current_version != expected_version:
                     raise VersionError(409, "The submitted document version has changed")
                 base = self.version(doc_id, doc.current_version)
+            previous_doc = doc.model_copy(deep=True)
+            previous_base = base.model_copy(deep=True)
+            event_count = len(self._events[doc_id])
             number = len(self._versions[doc_id]) + 1
             if doc.pending_version is not None:
                 base.status = VersionStatus.superseded
@@ -364,9 +669,12 @@ class DocumentStore:
                 sections=list(base.sections),
                 skipped=list(base.skipped),
                 sections_match_content=False,
+                source_changes=[ref.model_copy(deep=True) for ref in base.source_changes],
                 manual=True,
                 note=note,
                 created_by=owner_user_id,
+                owner_edit_from=expected_version,
+                saved_actor_role=actor_role,
             )
             inherit_evidence(version, base)     # LD-402: the resubmission can be reviewed
             self._versions[doc_id].append(version)
@@ -374,8 +682,62 @@ class DocumentStore:
             doc.versions_total = number
             doc.updated_at = now()
             self._event(doc_id, HistoryAction.proposed, number, owner_user_id, note or "Owner edited after changes requested")
-            self._save()
+            try:
+                self._save()
+            except DocumentStoreSyncError:
+                raise
+            except OSError:
+                self._docs[doc_id] = previous_doc
+                self._versions[doc_id].pop()
+                self._versions[doc_id][base.number - 1] = previous_base
+                del self._events[doc_id][event_count:]
+                raise
             return version
+
+    def edit_staff_draft(self, doc_id: str, owner: str, expected: int, actor: str,
+                         content: str, reason: str) -> DocumentVersion:
+        with self._lock:
+            doc = self.get_owned(doc_id, owner)
+            if doc.pending_version is None:
+                raise VersionError(409, "No document version is awaiting review")
+            pending = self.version(doc_id, doc.pending_version)
+            if pending.number != expected:
+                if (pending.evidence_from_version == expected and pending.created_by == actor
+                        and pending.content == content and pending.note == reason):
+                    return pending
+                raise VersionError(409, "The submitted document version has changed")
+            report = pending.review_report or pending.evidence_report
+            if report and report.template_sections:
+                if _template_headings(content) != _template_headings(pending.content):
+                    raise VersionError(409, "The Staff edit changes the documentation template headings")
+            sections = pending.sections
+            matches = doc.scope == Scope.file and len(sections) == 1 and not pending.skipped
+            if matches:
+                sections = [sections[0].model_copy(update={"markdown": content, "status": "manual"})]
+            previous = doc.model_copy(deep=True)
+            edited = pending.model_copy(deep=True, update={
+                "number": doc.versions_total + 1, "content": content, "sections": sections,
+                "sections_match_content": matches,
+                "evidence_from_version": pending.number, "created_by": actor, "created_at": now(),
+                "manual": True, "note": reason,
+            })
+            pending.status = VersionStatus.superseded
+            pending.superseded_by = edited.number
+            self._versions[doc.id].append(edited)
+            doc.pending_version = doc.versions_total = edited.number
+            doc.updated_at = now()
+            self._event(doc.id, HistoryAction.edited, edited.number, actor, reason, related=pending.number)
+            try:
+                self._save()
+            except OSError:
+                self._versions[doc.id].pop()
+                self._events[doc.id].pop()
+                self._docs[doc.id] = previous
+                pending.status = VersionStatus.proposed
+                pending.superseded_by = None
+                raise
+            return edited
+
     def rollback_owned(
         self,
         doc_id: str,
@@ -444,6 +806,7 @@ class DocumentStore:
             )
             inherit_evidence(version, source)   # LD-402: all evidence, not only evidence_report
 
+            previous = doc.model_copy(deep=True)
             self._versions[doc_id].append(version)
             doc.pending_version = number
             doc.versions_total = number
@@ -458,40 +821,75 @@ class DocumentStore:
                 related=source.number,
             )
 
-            self._save()
+            try:
+                self._save()
+            except DocumentStoreSyncError:
+                raise
+            except OSError:
+                self._versions[doc_id].pop()
+                self._events[doc_id].pop()
+                self._docs[doc_id] = previous
+                raise
             return version
+
+    def require_workflow_decision(self, doc_id: str, version_number: int, decision: str,
+                                  actor_user_id: str, note: Optional[str]) -> DocumentVersion:
+        action, status = {
+            "APPROVED": (HistoryAction.accepted, VersionStatus.accepted),
+            "REJECTED": (HistoryAction.dismissed, VersionStatus.dismissed),
+        }[decision]
+        with self._lock:
+            version = self.version(doc_id, version_number)
+            events = [event for event in self._events.get(doc_id, [])
+                      if event.version == version_number and event.action == action]
+            if (version.status != status or version.decided_by != actor_user_id or len(events) != 1
+                    or events[0].actor != actor_user_id or events[0].note != note):
+                raise VersionError(409, "No matching Manager decision for this version, actor and note")
+            return version
+
     def resolve_workflow_version(self, doc_id: str, owner_user_id: str, version_number: int,
                                  decision: str, actor_user_id: str,
-                                 note: Optional[str] = None) -> None:
+                                 note: Optional[str] = None, *, replay: bool = False) -> None:
         with self._lock:
             doc = self.get_owned(doc_id, owner_user_id)
-            if doc.pending_version is None:
-                version = self.version(doc_id, version_number)
-                if decision == "APPROVED" and doc.current_version == version_number \
-                        and version.status == VersionStatus.accepted:
-                    return  # Idempotent retry after the workflow transaction committed remotely first.
-                if decision == "REJECTED" and version.status == VersionStatus.dismissed:
-                    return
-                raise VersionError(409, "No matching proposed version is awaiting a decision")
+            if decision not in ("APPROVED", "REJECTED"):
+                raise VersionError(400, "Unknown review decision")
+            if doc.pending_version is None or (replay and doc.pending_version != version_number):
+                if not replay and decision == "APPROVED" and doc.current_version != version_number:
+                    raise VersionError(409, "The current document version has changed")
+                self.require_workflow_decision(doc_id, version_number, decision, actor_user_id, note)
+                # A visible rename from a previous attempt may not have been synced yet.
+                self._save()
+                return
             if doc.pending_version != version_number:
                 raise VersionError(409, "The pending document version has changed")
             version = self.version(doc_id, version_number)
+            if version.status != VersionStatus.proposed:
+                raise VersionError(409, "The document version is no longer pending")
+            previous_document = doc.model_copy(deep=True)
+            previous_version = version.model_copy(deep=True)
             if decision == "APPROVED":
                 version.status = VersionStatus.accepted
                 doc.current_version = version_number
                 action = HistoryAction.accepted
-            elif decision == "REJECTED":
+            else:
                 version.status = VersionStatus.dismissed
                 action = HistoryAction.dismissed
-            else:
-                raise VersionError(400, "Unknown review decision")
             version.decided_by = actor_user_id
             version.decided_at = now()
             version.note = note or version.note
+            doc.pending_revision = None
             doc.pending_version = None
             doc.updated_at = now()
             self._event(doc_id, action, version_number, actor_user_id, note)
-            self._save()
+            try:
+                self._save()
+            except OSError:
+                self._docs[doc_id] = previous_document
+                versions = self._versions[doc_id]
+                versions[versions.index(version)] = previous_version
+                self._events[doc_id].pop()
+                raise
 
 
 documents = DocumentStore(os.getenv("DOCUMENTS_FILE", DEFAULT_FILE) or None)

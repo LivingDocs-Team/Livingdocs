@@ -5,12 +5,19 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "documentation_code_relationships")
+@Table(
+        name = "documentation_code_relationships",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uq_documentation_code_pair",
+                columnNames = {"documentation_id", "code_entity_id"}
+        )
+)
 public class DocumentationCodeRelationship {
     @Id
     private UUID id;
@@ -25,7 +32,10 @@ public class DocumentationCodeRelationship {
     private Instant createdAt;
 
     @PrePersist
-    void onCreate() { if (id == null) id = UUID.randomUUID(); if (createdAt == null) createdAt = Instant.now(); }
+    void onCreate() {
+        if (id == null) id = UUID.randomUUID();
+        if (createdAt == null) createdAt = Instant.now();
+    }
 
     public UUID getId() { return id; }
     public UUID getDocumentationId() { return documentationId; }

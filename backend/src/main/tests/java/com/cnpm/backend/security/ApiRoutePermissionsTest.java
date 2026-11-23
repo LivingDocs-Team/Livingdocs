@@ -22,10 +22,10 @@ class ApiRoutePermissionsTest {
     /** route -> roles that may use it, written from the matrix (not computed from the rules). */
     private static final Map<String, List<String>> ALLOWED = Map.ofEntries(
             // GitHub connection (#5) and repositories (#6)
-            Map.entry("GET /api/github/authorize-url", List.of("DEVELOPER")),
-            Map.entry("GET /api/github/callback", List.of("DEVELOPER")),
-            Map.entry("GET /api/github/connection", List.of("DEVELOPER", "ADMINISTRATOR")),
-            Map.entry("DELETE /api/github/connection", List.of("DEVELOPER")),
+            Map.entry("GET /api/github/authorize-url", List.of("DEVELOPER", "MANAGER")),
+            Map.entry("GET /api/github/callback", List.of("DEVELOPER", "MANAGER")),
+            Map.entry("GET /api/github/connection", List.of("DEVELOPER", "MANAGER", "ADMINISTRATOR")),
+            Map.entry("DELETE /api/github/connection", List.of("DEVELOPER", "MANAGER")),
             Map.entry("GET /api/github/repos/available", List.of("DEVELOPER", "ADMINISTRATOR")),
             Map.entry("GET /api/workspaces/" + WS + "/repositories",
                     List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD", "ADMINISTRATOR")),
@@ -34,6 +34,7 @@ class ApiRoutePermissionsTest {
             Map.entry("DELETE /api/workspaces/" + WS + "/repositories/" + ID, List.of("DEVELOPER", "ADMINISTRATOR")),
             Map.entry("GET /api/repositories/" + ID, List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD", "ADMINISTRATOR")),
             Map.entry("DELETE /api/repositories/" + ID, List.of("DEVELOPER", "ADMINISTRATOR")),
+            Map.entry("GET /api/repositories/" + ID + "/coverage-gaps", List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD")),
             Map.entry("POST /api/repositories/" + ID + "/sync", List.of("DEVELOPER", "ADMINISTRATOR")),
             Map.entry("GET /api/repositories/" + ID + "/sync/latest", List.of("DEVELOPER", "ADMINISTRATOR")),
             // pull requests, commits, source changes (#7)
@@ -74,10 +75,13 @@ class ApiRoutePermissionsTest {
             Map.entry("GET /api/documentation/templates/abc/versions/2",
                     List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD")),
             Map.entry("POST /api/documentation/templates/abc/versions/1/restore", List.of("TECHNICAL_LEAD")),
-            // drift: analysis was removed for every role, thresholds stay for Technical Lead
+            // Developer reviews alerts. Technical Lead owns threshold settings.
             Map.entry("GET /api/documentation/drift/severity-rules", List.of("TECHNICAL_LEAD")),
-            Map.entry("POST /api/repositories/" + ID + "/drift/analyze", List.of()),
-            Map.entry("GET /api/repositories/" + ID + "/drift/reports", List.of()),
+            Map.entry("POST /api/repositories/" + ID + "/drift/analyze", List.of("DEVELOPER")),
+            Map.entry("GET /api/repositories/" + ID + "/drift/reports", List.of("DEVELOPER")),
+            Map.entry("POST /api/document-workflows/" + ID + "/versions/3/github-commit", List.of("MANAGER")),
+            Map.entry("PUT /api/repositories/" + ID + "/drift/reports/report/findings/F1/resolution",
+                    List.of("DEVELOPER")),
             // workflow (#9, #10, #11, #13, #19)
             Map.entry("POST /api/document-workflows", List.of("DEVELOPER")),
             Map.entry("GET /api/document-workflows/mine", List.of("DEVELOPER", "TECHNICAL_LEAD")),
@@ -109,7 +113,21 @@ class ApiRoutePermissionsTest {
             Map.entry("POST /api/document-workflows/" + ID + "/reject", List.of("MANAGER")),
             Map.entry("POST /api/document-workflows/" + ID + "/rollback",
                     List.of("DEVELOPER", "MANAGER", "TECHNICAL_LEAD")),
-            Map.entry("POST /api/document-workflows/" + ID + "/reassign", List.of("ADMINISTRATOR")));
+            Map.entry("POST /api/document-workflows/" + ID + "/reassign", List.of("ADMINISTRATOR")),
+            // oversight views and drift policies (Technical Lead), policies and delegations (Manager)
+            Map.entry("GET /api/oversight/repositories", List.of("TECHNICAL_LEAD")),
+            Map.entry("GET /api/oversight/repositories/" + ID + "/pull-requests", List.of("DEVELOPER", "TECHNICAL_LEAD")),
+            Map.entry("GET /api/oversight/repositories/" + ID + "/commits", List.of("DEVELOPER", "TECHNICAL_LEAD")),
+            Map.entry("GET /api/oversight/repositories/" + ID + "/drift-policies", List.of("TECHNICAL_LEAD")),
+            Map.entry("PUT /api/oversight/repositories/" + ID + "/drift-policies", List.of("TECHNICAL_LEAD")),
+            Map.entry("GET /api/oversight/documentation", List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD")),
+            Map.entry("GET /api/oversight/documentation/" + ID, List.of("DEVELOPER", "STAFF", "TECHNICAL_LEAD")),
+            Map.entry("GET /api/oversight/health", List.of("TECHNICAL_LEAD")),
+            Map.entry("GET /api/approval/policies/approval", List.of("MANAGER")),
+            Map.entry("PUT /api/approval/policies/merge", List.of("MANAGER")),
+            Map.entry("GET /api/approval/delegations", List.of("MANAGER", "TECHNICAL_LEAD")),
+            Map.entry("POST /api/approval/delegations", List.of("MANAGER")),
+            Map.entry("DELETE /api/approval/delegations/" + ID, List.of("MANAGER")));
 
     static Stream<Arguments> routesAndRoles() {
         return ALLOWED.entrySet().stream().flatMap(entry -> ScreenPermissions.ROLES.stream()
@@ -154,16 +172,11 @@ class ApiRoutePermissionsTest {
     }
 
     @Test
-    void everyRuleNamesRealScreensAndIsUsableByAtLeastOneRoleExceptTheRemovedDriftRoutes() {
+    void everyRuleNamesRealScreensAndIsUsableByAtLeastOneRole() {
         for (String description : ApiRoutePermissions.ruleDescriptions()) {
             String[] parts = description.split(" ", 2);
             String path = parts[1].replace("{}", "x");
             var needs = ApiRoutePermissions.needsFor(parts[0], path);
-            boolean removedDrift = path.contains("/drift/") && !path.contains("severity-rules");
-            if (removedDrift) {
-                assertThat(needs).as(description).isEmpty();
-                continue;
-            }
             assertThat(needs).as(description).isNotEmpty();
             for (var need : needs) {
                 assertThat(ScreenPermissions.screens()).as(description).contains(need.screen());

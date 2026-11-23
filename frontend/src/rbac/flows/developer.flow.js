@@ -1,6 +1,6 @@
-// Developer screen flow (team's official flow; Dashboard, Automatic Update and Drift Review removed 2026-11-17).
+// Developer screen flow.
 // section() sub-screens are parts of their parent's existing page and open that page.
-import { implemented, module, placeholder, profileSettings, section } from './nodes.js';
+import { implemented, module, profileSettings, section } from './nodes.js';
 
 export default Object.freeze({
   role: 'DEVELOPER',
@@ -9,8 +9,8 @@ export default Object.freeze({
   modules: Object.freeze([
     module('account', 'Account Management', [
       profileSettings(),
-      placeholder('notifications', 'Notifications', '/account/notifications', 'notifications', [
-        placeholder('notification-details', 'Notification Details', '/account/notifications/details', 'notifications'),
+      implemented('notifications', 'Notifications', '/account/notifications', 'notifications', 'Notifications', [
+        section('notification-details', 'Notification Details', '/account/notifications/details', 'notifications'),
       ]),
     ]),
     module('github', 'GitHub Integration', [
@@ -22,9 +22,10 @@ export default Object.freeze({
       ]),
       // Pull requests and commits are shown per repository inside Repository Management (RepositoryActivity).
       implemented('pr-commit-list', 'PR & Commit List', '/github/activity', 'pullRequests', 'RepositoryManagement'),
+      implemented('drift-alerts', 'Drift Alerts', '/drift/alerts', 'driftAlerts', 'DeveloperDriftAlerts'),
     ]),
     module('documentation', 'Documentation Generation', [
-      placeholder('coverage-gaps', 'Coverage Gaps', '/documentation/coverage-gaps', 'documentation'),
+      implemented('coverage-gaps', 'Coverage Gaps', '/documentation/coverage-gaps', 'documentation', 'CoverageGaps'),
       implemented('generated-documents', 'Generated Documents', '/documentation/documents', 'documentation', 'DocumentationManagement', [
         section('preview-editor', 'Preview & Editor', '/documentation/documents/editor', 'documentation'),
         section('grounding-evidence', 'Grounding Evidence', '/documentation/documents/evidence', 'documentation'),
@@ -38,7 +39,7 @@ export default Object.freeze({
         section('version-comparison', 'Version Comparison', '/versions/history/compare', 'versionHistory'),
         section('document-rollback', 'Document Rollback', '/versions/history/rollback', 'documentRollback'),
       ]),
-      placeholder('change-log', 'Change Log', '/versions/change-log', 'versionHistory'),
+      implemented('change-log', 'Change Log', '/versions/change-log', 'versionHistory', 'ChangeLog'),
     ]),
     module('knowledge', 'Knowledge Base', [
       implemented('documentation-collections', 'Documentation Collections', '/knowledge/collections', 'collections', 'DocumentationCollections'),
@@ -46,7 +47,7 @@ export default Object.freeze({
         section('search-results', 'Search Results', '/knowledge/search/results', 'knowledgeBase'),
         section('doc-code-relationships', 'Doc-to-Code Relationships', '/knowledge/search/relationships', 'knowledgeBase'),
       ]),
-      placeholder('template-library', 'Template Library', '/knowledge/templates', 'templates'),
+      implemented('template-library', 'Template Library', '/knowledge/templates', 'templates', 'TemplateLibrary'),
     ]),
   ]),
 });

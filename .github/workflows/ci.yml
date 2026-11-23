@@ -8,6 +8,7 @@ on:
   pull_request:
     branches:
       - main
+      - "codex/p0-*"
   workflow_dispatch:
 
 permissions:
@@ -20,7 +21,7 @@ concurrency:
 jobs:
   backend-build-test:
     name: Backend Build and Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     services:
@@ -72,7 +73,7 @@ jobs:
 
   frontend-build:
     name: Frontend Build and Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -149,8 +150,8 @@ jobs:
           done
           echo "Frontend did not start"; cat "$RUNNER_TEMP/frontend.log"; exit 1
 
-      - name: Run documentation preview, editing (LD-105), template (LD-96) and RBAC screen-flow UI tests
-        run: python -m pytest -v tests/test_documentation_preview_editing.py tests/test_frontend_templates.py tests/test_repository_activity.py tests/test_profile_preferences.py tests/test_rbac_screen_flow.py
+      - name: Run documentation, Manager approval and RBAC UI tests
+        run: python -m pytest -v tests/test_documentation_preview_editing.py tests/test_frontend_templates.py tests/test_repository_activity.py tests/test_profile_preferences.py tests/test_rbac_screen_flow.py tests/test_frontend_admin.py tests/test_manager_approval.py
 
       - name: Upload test report
         if: always()
@@ -164,7 +165,7 @@ jobs:
 
   github-integration-test:
     name: GitHub Integration Service Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     # PostgreSQL thật cho các test Documentation Collections (cần khóa hàng FOR UPDATE, H2 không đủ).
@@ -179,6 +180,20 @@ jobs:
           - "5432:5432"
         options: >-
           --health-cmd "pg_isready -U postgres -d collections_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      # PostgreSQL cho kiểm tra migration Flyway và API quan hệ tài liệu–code (LD-405).
+      postgres-relationships:
+        image: postgres:16
+        env:
+          POSTGRES_DB: github_integration
+          POSTGRES_USER: livingdocs
+          POSTGRES_PASSWORD: livingdocs
+        ports:
+          - "5433:5432"
+        options: >-
+          --health-cmd "pg_isready -U livingdocs -d github_integration"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -198,6 +213,10 @@ jobs:
       - name: Build and test (H2 database, mocked GitHub)
         run: mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml verify
 
+      - name: Verify webhook secret, signature and duplicate-delivery handling (LD-275)
+        run: >-
+          mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml test
+          -Dtest=WebhookSignatureVerifierTest,GitHubWebhookControllerTest,GitHubWebhookIngestionTest
       - name: Documentation Collections tests (PostgreSQL)
         env:
           COLLECTIONS_TEST_DB_URL: "jdbc:postgresql://localhost:5432/collections_test"
@@ -219,6 +238,22 @@ jobs:
           path: services/github-integration-service/target/surefire-reports/*DocumentationCollections*PostgresTest*
           if-no-files-found: error
 
+      - name: Verify Flyway V1-V5 migrations and relationship API on PostgreSQL
+        env:
+          DB_URL: "jdbc:postgresql://localhost:5433/github_integration"
+          DB_USERNAME: "livingdocs"
+          DB_PASSWORD: "livingdocs"
+          TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          GITHUB_INTEGRATION_INTERNAL_SECRET: "ci-postgres-verification-secret"
+        run: >-
+          mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml test
+          -Dtest=DocumentationCodeRelationshipApiTest
+          -Dspring.datasource.url="$DB_URL"
+          -Dspring.datasource.username="$DB_USERNAME"
+          -Dspring.datasource.password="$DB_PASSWORD"
+          -Dspring.datasource.driver-class-name=org.postgresql.Driver
+          -Dspring.jpa.hibernate.ddl-auto=validate
+
       - name: Live test against real GitHub API
         env:
           GITHUB_LIVE_TEST: "true"
@@ -227,6 +262,13 @@ jobs:
         run: >-
           mvn --batch-mode --no-transfer-progress -f services/github-integration-service/pom.xml test
           -Dtest=GitHubRepositoryFetcherLiveTest -Dsurefire.failIfNoSpecifiedTests=false
+
+      - name: Revision workflow through FastAPI and PostgreSQL
+        run: docker compose -f tests/revision-e2e/compose.yaml up --build --abort-on-container-exit --exit-code-from test
+
+      - name: Stop revision workflow fixtures
+        if: always()
+        run: docker compose -f tests/revision-e2e/compose.yaml down --volumes
 
       - name: Upload test reports
         if: always()
@@ -345,5 +387,70 @@ jobs:
       - name: Validate Docker Compose configuration
         run: docker compose -f compose.yaml config --quiet
 
-      - name: Build application images
-        run: docker compose -f compose.yaml build backend ai-service code-analyzer github-integration frontend
+      - name: Verify the GitHub webhook secret is passed to the github-integration service (LD-275)
+        run: |
+          docker compose -f compose.yaml config > "$RUNNER_TEMP/compose.rendered.yaml"
+          grep -q GITHUB_WEBHOOK_SECRET "$RUNNER_TEMP/compose.rendered.yaml"
+
+      - name: Verify Maven build retry behavior
+        run: sh scripts/test-docker-maven-retry.sh
+
+  release-smoke-test:
+    name: Release Smoke Test (LD-404)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    needs: [docker-compose-validation]
+    env:
+      TOKEN_ENCRYPTION_KEY: "ci-validation-placeholder-only"
+      GITHUB_INTEGRATION_INTERNAL_SECRET: "ci-validation-placeholder-only"
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_ID: "ci-validation-placeholder-only"
+      SPRING_SECURITY_OAUTH2_CLIENT_REGISTRATION_GITHUB_CLIENT_SECRET: "ci-validation-placeholder-only"
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Build application images for all smoke runs
+        run: docker --context default compose --env-file /dev/null -f compose.yaml build backend ai-service code-analyzer github-integration frontend
+
+      - name: Make scripts executable
+        run: |
+          bash -n scripts/verify-compose.sh
+          chmod +x scripts/verify-compose.sh
+
+      - name: Verify cleanup after failure and two consecutive runs
+        shell: bash
+        run: |
+          assert_clean() {
+            local project resource remaining
+            local -a args
+            project="$(sed -n 's/^Smoke project: //p' "$1/ld-404-smoke-report.log")"
+            [[ "$project" =~ ^livingdocs-smoke-[a-z0-9]+$ ]]
+            for resource in container volume network; do
+              args=()
+              if [[ "$resource" == container ]]; then args+=(--all); fi
+              remaining="$(docker --context default "$resource" ls "${args[@]}" -q --filter "label=com.docker.compose.project=$project")"
+              [[ -z "$remaining" ]]
+            done
+          }
+
+          if SMOKE_REPORT_DIR=artifacts/failure VERIFY_TIMEOUT=0 ./scripts/verify-compose.sh --no-build; then
+            echo "Expected a failure after application startup" >&2
+            exit 1
+          fi
+          grep -F 'backend-db did not become healthy within 0s' artifacts/failure/ld-404-smoke-report.log
+          assert_clean artifacts/failure
+
+          SMOKE_REPORT_DIR=artifacts/first VERIFY_LEGACY_RESTORE=1 ./scripts/verify-compose.sh --no-build
+          assert_clean artifacts/first
+          SMOKE_REPORT_DIR=artifacts/second ./scripts/verify-compose.sh --no-build
+          assert_clean artifacts/second
+
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ld-404-smoke-artifacts
+          path: |
+            artifacts/**/ld-404-smoke-report.log
+            artifacts/**/smoke-*-result.json
+          retention-days: 7

@@ -168,6 +168,10 @@ public class DocumentWorkflow {
                 : DocumentWorkflowStatus.CHANGES_REQUESTED;
     }
 
+    public void updateReviewedVersion(int documentVersion) {
+        submittedDocumentVersion = documentVersion;
+    }
+
     public void decide(String managerUserId, ManagerDecision decision, String comment) {
         this.managerUserId = managerUserId;
         managerDecision = decision;

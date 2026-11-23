@@ -2,12 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import { githubApi } from './githubApi';
 import RepositoryActivity from './RepositoryActivity';
+import AutoUpdatePolicyEditor from './AutoUpdatePolicyEditor';
+import { usePermission } from './rbac/usePermission.js';
 
 export default function RepositoryManagement({ userId }) {
   return <RepositoryManagementForUser key={userId ?? 'anonymous'} userId={userId} />;
 }
 
 function RepositoryManagementForUser({ userId }) {
+  const { can } = usePermission();
   const personalWorkspaceId = userId ? `ws-${userId}` : '';
   const [workspaceId, setWorkspaceId] = useState(personalWorkspaceId);
   const refreshSequence = useRef(0);
@@ -32,6 +35,7 @@ function RepositoryManagementForUser({ userId }) {
   const [isLoading, setIsLoading] = useState(Boolean(userId));
   const [isAdding, setIsAdding] = useState(false);
   const [activityRepoId, setActivityRepoId] = useState(null);
+  const [policyRepoId, setPolicyRepoId] = useState(null);
 
   const isCurrentWorkspace = useCallback((expectedUserId, expectedWorkspaceId) => (
     isMounted.current
@@ -425,10 +429,16 @@ function RepositoryManagementForUser({ userId }) {
                               {syncing ? 'Syncing…' : !isConnected ? 'Reconnect to sync' : syncError ? 'Retry sync' : 'Sync now'}
                             </button>
                           )}
-                          {inWorkspace && (
+                          {inWorkspace && can('pullRequests', 'R') && (
                             <button type="button" className="sync-secondary-button" aria-expanded={activityRepoId === repo.id}
                               onClick={() => setActivityRepoId((current) => (current === repo.id ? null : repo.id))}>
                               {activityRepoId === repo.id ? 'Hide PRs & commits' : 'PRs & commits'}
+                            </button>
+                          )}
+                          {inWorkspace && isWorkspaceOwner && can('repositories', 'U') && (
+                            <button type="button" className="sync-secondary-button" aria-expanded={policyRepoId === repo.id}
+                              onClick={() => setPolicyRepoId((current) => current === repo.id ? null : repo.id)}>
+                              Auto-update policies
                             </button>
                           )}
                           {inWorkspace && isWorkspaceOwner && (
@@ -459,9 +469,12 @@ function RepositoryManagementForUser({ userId }) {
                             </>
                           )}
                         </div>
-                        {inWorkspace && activityRepoId === repo.id && (
+                        {inWorkspace && can('pullRequests', 'R') && activityRepoId === repo.id && (
                           // key: reload after each sync, which also backfills pull requests and commits
                           <RepositoryActivity key={`${repo.id}-${repo.lastSyncedAt}`} repository={repo} userId={userId} />
+                        )}
+                        {inWorkspace && isWorkspaceOwner && can('repositories', 'U') && policyRepoId === repo.id && (
+                          <AutoUpdatePolicyEditor key={`${workspaceId}/${repo.id}`} repository={repo} />
                         )}
                       </div>
                     </li>

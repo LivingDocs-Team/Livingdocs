@@ -24,7 +24,7 @@ class FlywayMigrationLineageSelectorTest {
     private final FlywayMigrationLineageSelector selector = new FlywayMigrationLineageSelector();
 
     @Test
-    void reviewFeedbackUpgradesEverySupportedLineageAndPreservesOldRows() throws Exception {
+    void commonMigrationsUpgradeEverySupportedLineageAndPreserveOldRows() throws Exception {
         for (var lineage : FlywayMigrationLineageSelector.Lineage.values()) {
             DataSource dataSource = dataSource();
             Flyway previous = Flyway.configure().dataSource(dataSource)
@@ -49,9 +49,10 @@ class FlywayMigrationLineageSelectorTest {
                     .locations(selector.select(dataSource).location(), "classpath:db/migration-common").load();
             upgraded.migrate();
             upgraded.validate();
-            assertThat(upgraded.info().current().getVersion().getVersion()).isEqualTo("12");
+            assertThat(upgraded.info().current().getVersion().getVersion()).isEqualTo("18");
             assertThat(tableNames(dataSource)).contains("documentation_collections",
-                    "documentation_collection_documents", "documentation_owner_assignments");
+                    "documentation_collection_documents", "documentation_owner_assignments", "revision_jobs",
+                    "auto_update_policies", "drift_report_owners");
             try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement();
                  ResultSet result = statement.executeQuery(
                          "SELECT comment, document_version, section_quote FROM document_workflow_audit")) {

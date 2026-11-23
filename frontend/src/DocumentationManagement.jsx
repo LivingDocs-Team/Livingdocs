@@ -741,7 +741,7 @@ export default function DocumentationManagement({ userId }) {
 
       step = 'submit the workflow for staff review';
       const submitted = await githubApi(`/api/document-workflows/${encodeURIComponent(workflowId)}/submit`, {
-        method: 'POST', userId,
+        method: 'POST', userId, body: {},
       });
       if (String(submitted?.id) !== workflowId || submitted?.status !== 'PENDING_STAFF_REVIEW') {
         throw new Error('The backend did not confirm the submission. Refresh Approval History to verify the workflow.');
@@ -1187,7 +1187,9 @@ export default function DocumentationManagement({ userId }) {
                         <strong>{event.action || 'Action unavailable'}</strong>
                         <p>Actor user ID: {event.actorUserId || 'Unavailable'}</p>
                         <p>Actor role: {event.actorRole || 'Not recorded'}</p>
+                        <p>Trigger source: {event.triggerSource || 'Not recorded'}</p>
                         <p>Timestamp: {formatAuditTimestamp(event.createdAt)}</p>
+                        {event.documentVersion && <p>Document version: {event.documentVersion}</p>}
                         <p>Previous status: {event.previousStatus || '—'}</p>
                         <p>New status: {event.newStatus || '—'}</p>
                         {event.comment && <p>Comment / reason: {event.comment}</p>}

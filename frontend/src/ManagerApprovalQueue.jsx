@@ -75,8 +75,7 @@ export default function ManagerApprovalQueue({ userId }) {
   const [actionMessage, setActionMessage] = useState(null);
   const [lastOutcome, setLastOutcome] = useState(null);
   const [rejectComment, setRejectComment] = useState('');
-  const [rollbackVersion, setRollbackVersion] = useState('');
-  const [rollbackReason, setRollbackReason] = useState('');
+  const [approveComment, setApproveComment] = useState('');
 
   const queue = queueData.content;
   const managerHistory = historyData.content.filter((item) => ['APPROVED', 'REJECTED'].includes(item.status));
@@ -211,8 +210,13 @@ export default function ManagerApprovalQueue({ userId }) {
   const visibleDetail = detail?.workflow && String(detail.workflow.id) === selectedWorkflowId ? detail : null;
   const workflow = visibleDetail?.workflow;
   const canDecide = workflow?.status === 'PENDING_MANAGER_APPROVAL'
-    && workflow.staffReviewResult === 'PASSED';
-  const canRollback = workflow?.status === 'APPROVED';
+    && workflow.staffReviewResult === 'PASSED'
+    && visibleDetail.document?.version === workflow.submittedDocumentVersion;
+  const canRollback = workflow?.status === 'APPROVED' && workflow.submittedDocumentVersion > 1;
+  const canCommitToGitHub = workflow?.status === 'APPROVED'
+    && String(workflow.managerUserId) === String(userId)
+    && history.some((event) => event.action === 'REVISION_DRAFT_SUBMITTED'
+      && event.comment?.startsWith(`Version ${workflow.submittedDocumentVersion} from `));
   const repository = visibleDetail?.evidence?.source_snapshot?.repository_full_name
     || 'Not included in workflow/evidence response';
 
@@ -222,9 +226,10 @@ export default function ManagerApprovalQueue({ userId }) {
     setActionMessage(null);
     try {
       const response = await githubApi(`/api/document-workflows/${encodeURIComponent(workflow.id)}/${decision === 'APPROVED' ? 'approve' : 'reject'}`, {
-        // Approve also sends a JSON body (an empty one): a POST without Content-Type reaches GitHub Integration as
-        // form-urlencoded through the Backend and is answered with HTTP 415.
-        method: 'POST', userId, body: decision === 'REJECTED' ? { comment: comment.trim() } : {},
+        method: 'POST', userId, body: {
+          documentVersion: workflow.submittedDocumentVersion,
+          ...(comment.trim() ? { comment: comment.trim() } : {}),
+        },
       });
       const expected = decision;
       if (String(response?.id) !== String(workflow.id) || response?.managerDecision !== expected
@@ -233,6 +238,7 @@ export default function ManagerApprovalQueue({ userId }) {
       }
       setLastOutcome(response);
       setRejectComment('');
+      setApproveComment('');
       setActionMessage({ type: 'success', text: `Backend confirmed ${decision}.` });
       try {
         const events = await githubApi(`/api/document-workflows/${encodeURIComponent(workflow.id)}/history`, { userId });
@@ -248,15 +254,25 @@ export default function ManagerApprovalQueue({ userId }) {
     }
   }
 
+  function selectWorkflow(id) {
+    setActionMessage(null);
+    setApproveComment('');
+    setRejectComment('');
+    setSelectedId(String(id));
+  }
+
   async function submitRollback(event) {
     event.preventDefault();
     if (!workflow || !canRollback || action) return;
-    const version = Number(rollbackVersion);
-    if (!Number.isInteger(version) || version < 1 || version === workflow.submittedDocumentVersion) {
-      setActionMessage({ type: 'error', text: 'Choose a positive source version different from the currently approved version.' });
+    const form = event.currentTarget;
+    const fields = new FormData(form);
+    const version = Number(fields.get('sourceVersion'));
+    const reason = String(fields.get('reason') ?? '').trim();
+    if (!Number.isInteger(version) || version < 1 || version >= workflow.submittedDocumentVersion) {
+      setActionMessage({ type: 'error', text: 'Choose a source version earlier than the currently approved version.' });
       return;
     }
-    if (!rollbackReason.trim()) {
+    if (!reason) {
       setActionMessage({ type: 'error', text: 'A rollback reason is required.' });
       return;
     }
@@ -265,15 +281,14 @@ export default function ManagerApprovalQueue({ userId }) {
     setActionMessage(null);
     try {
       const response = await githubApi(`/api/document-workflows/${encodeURIComponent(workflow.id)}/rollback`, {
-        method: 'POST', userId, body: { sourceVersion: version, reason: rollbackReason.trim() },
+        method: 'POST', userId, body: { sourceVersion: version, reason },
       });
       if (String(response?.id) !== String(workflow.id) || response?.status !== 'PENDING_STAFF_REVIEW'
         || response?.submittedDocumentVersion == null) {
         throw new Error('The Backend did not confirm the rollback workflow transition. Refresh and verify the document.');
       }
       setLastOutcome(response);
-      setRollbackVersion('');
-      setRollbackReason('');
+      form.reset();
       setActionMessage({ type: 'success', text: 'Backend confirmed rollback and returned the document to Staff review.' });
       try {
         const events = await githubApi(`/api/document-workflows/${encodeURIComponent(workflow.id)}/history`, { userId });
@@ -284,6 +299,29 @@ export default function ManagerApprovalQueue({ userId }) {
       setRefreshIndex((value) => value + 1);
     } catch (error) {
       setActionMessage({ type: 'error', text: managerError(error, 'request rollback') });
+    } finally {
+      setAction('');
+    }
+  }
+
+  async function commitToGitHub() {
+    if (!canCommitToGitHub || action) return;
+    const version = workflow.submittedDocumentVersion;
+    if (!window.confirm(`Commit approved version ${version} to GitHub?`)) return;
+    setAction('GITHUB_COMMIT');
+    setActionMessage(null);
+    try {
+      const result = await githubApi(
+        `/api/document-workflows/${encodeURIComponent(workflow.id)}/versions/${version}/github-commit`,
+        { method: 'POST', userId },
+      );
+      if (!result?.path || !result?.observedHeadSha) throw new Error('GitHub did not confirm the commit.');
+      setActionMessage({
+        type: 'success',
+        text: `${result.alreadyPresent ? 'Already present' : 'Committed'} on GitHub: ${result.path}`,
+      });
+    } catch (error) {
+      setActionMessage({ type: 'error', text: error?.message || 'GitHub did not confirm the commit.' });
     } finally {
       setAction('');
     }
@@ -341,7 +379,7 @@ export default function ManagerApprovalQueue({ userId }) {
                   <button type="button" key={item.id}
                     className={`suggestion-review-card ${String(item.id) === selectedWorkflowId ? 'active' : ''}`}
                     aria-pressed={String(item.id) === selectedWorkflowId}
-                    onClick={() => { setActionMessage(null); setSelectedId(String(item.id)); }}>
+                    onClick={() => selectWorkflow(item.id)}>
                     <strong>{item.documentTitle || 'Untitled document'}</strong>
                     <span>Repository: Not included in workflow response</span>
                     <span>Staff: {item.reviewerUserId || 'Unavailable'}</span>
@@ -368,7 +406,7 @@ export default function ManagerApprovalQueue({ userId }) {
                     <button type="button" key={`approved-${item.id}`}
                       className={`suggestion-review-card ${String(item.id) === selectedWorkflowId ? 'active' : ''}`}
                       aria-pressed={String(item.id) === selectedWorkflowId}
-                      onClick={() => { setActionMessage(null); setSelectedId(String(item.id)); }}>
+                      onClick={() => selectWorkflow(item.id)}>
                       <strong>{item.documentTitle || 'Untitled document'}</strong>
                       <span>Status: {item.status}</span>
                       <span>Version: {item.submittedDocumentVersion || 'Unavailable'}</span>
@@ -382,7 +420,7 @@ export default function ManagerApprovalQueue({ userId }) {
                     <button type="button" key={`rejected-${item.id}`}
                       className={`suggestion-review-card ${String(item.id) === selectedWorkflowId ? 'active' : ''}`}
                       aria-pressed={String(item.id) === selectedWorkflowId}
-                      onClick={() => { setActionMessage(null); setSelectedId(String(item.id)); }}>
+                      onClick={() => selectWorkflow(item.id)}>
                       <strong>{item.documentTitle || 'Untitled document'}</strong>
                       <span>Status: {item.status}</span>
                       <span>Decision: {item.managerDecision || 'Not included in workflow response'}</span>
@@ -419,6 +457,15 @@ export default function ManagerApprovalQueue({ userId }) {
                       <div><dt>Updated</dt><dd>{formatTimestamp(workflow.updatedAt)}</dd></div>
                       <div><dt>Decision time</dt><dd>{formatTimestamp(workflow.decidedAt)}</dd></div>
                     </dl>
+                    {canCommitToGitHub && (
+                      <div className="documentation-actions">
+                        <button type="button" className="documentation-secondary-button" disabled={Boolean(action)}
+                          onClick={commitToGitHub}>
+                          {action === 'GITHUB_COMMIT' ? 'Committing…' : 'Commit to GitHub'}
+                        </button>
+                        <a href="#/github/connection">GitHub connection</a>
+                      </div>
+                    )}
                     {workflow.status === 'REJECTED' && (
                       <section className="staff-review-comments" aria-label="Manager rejection reason">
                         <h5>Rejection reason</h5>
@@ -454,7 +501,9 @@ export default function ManagerApprovalQueue({ userId }) {
                             <article className="documentation-version-card">
                               <strong>{event.action || 'Action unavailable'}</strong>
                               <p>Actor: {event.actorUserId || 'Unavailable'}{event.actorRole ? ` (${event.actorRole})` : ''}</p>
+                              <p>Trigger source: {event.triggerSource || 'Not recorded'}</p>
                               <p>Time: {formatTimestamp(event.createdAt)}</p>
+                              {event.documentVersion && <p>Document version: {event.documentVersion}</p>}
                               <p>Workflow: {event.previousStatus || '—'} → {event.newStatus || '—'}</p>
                               {event.comment && <p>Comment: {event.comment}</p>}
                             </article>
@@ -465,9 +514,11 @@ export default function ManagerApprovalQueue({ userId }) {
 
                     {canDecide && isApprover && <section className="manager-approval-actions">
                       <h5>Final decision</h5>
-                      <p className="documentation-hint">The Backend requires a rejection reason. Approval has no request body.</p>
+                      <label htmlFor="manager-approval-comment">Approval reason (optional)</label>
+                      <textarea id="manager-approval-comment" value={approveComment} maxLength={2000}
+                        onChange={(event) => setApproveComment(event.target.value)} />
                       <button type="button" className="documentation-primary-button" disabled={Boolean(action)}
-                        onClick={() => submitDecision('APPROVED', '')}>
+                        onClick={() => submitDecision('APPROVED', approveComment)}>
                         {action === 'APPROVED' ? 'Approving...' : 'Approve document'}
                       </button>
                       <form className="staff-review-form" onSubmit={(event) => {
@@ -487,15 +538,14 @@ export default function ManagerApprovalQueue({ userId }) {
                       </form>
                     </section>}
 
-                    {canRollback && can('documentRollback', 'U') && <form className="staff-review-form manager-rollback" onSubmit={submitRollback}>
+                    {canRollback && can('documentRollback', 'U') && <form key={`${workflow.id}:${workflow.submittedDocumentVersion}`} className="staff-review-form manager-rollback" onSubmit={submitRollback}>
                       <h5>Rollback approved document</h5>
                       <p className="documentation-hint">Rollback creates a new version and returns the workflow to Staff review. The Backend validates version availability and current document state.</p>
                       <label htmlFor="rollback-source-version">Previous source version number</label>
-                      <input id="rollback-source-version" type="number" min="1" max={Math.max(1, (workflow.submittedDocumentVersion || 1) - 1)}
-                        value={rollbackVersion} required onChange={(event) => setRollbackVersion(event.target.value)} />
+                      <input id="rollback-source-version" name="sourceVersion" type="number" min="1"
+                        max={workflow.submittedDocumentVersion - 1} required />
                       <label htmlFor="rollback-reason">Rollback reason</label>
-                      <textarea id="rollback-reason" value={rollbackReason} maxLength={1000} required
-                        onChange={(event) => setRollbackReason(event.target.value)} />
+                      <textarea id="rollback-reason" name="reason" maxLength={1000} required />
                       <button type="submit" className="documentation-secondary-button" disabled={Boolean(action)}>
                         {action === 'ROLLBACK' ? 'Requesting rollback...' : 'Request rollback'}
                       </button>
