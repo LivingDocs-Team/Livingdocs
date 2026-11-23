@@ -53,7 +53,8 @@ function VersionList({ workflowId, userId, workflow, onRolledBack }) {
           </h3>
           <p>{words(version.origin)} · {formatTime(version.created_at)}{version.created_by ? ` · by ${version.created_by}` : ''}</p>
           {version.note && <blockquote>{version.note}</blockquote>}
-          <RollbackAction userId={userId} workflow={workflow} version={version.number} onDone={onRolledBack} />
+          <RollbackAction userId={userId} workflow={workflow} version={version.number}
+            accepted={String(version.status).toLowerCase() === 'accepted'} onDone={onRolledBack} />
         </li>
       ))}
     </ol>

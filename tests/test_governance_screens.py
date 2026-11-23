@@ -3,6 +3,7 @@
 The API is mocked with Playwright route interception, like the other browser tests.
 """
 import json
+from urllib.parse import urlsplit
 
 from playwright.sync_api import Page, expect
 
@@ -24,7 +25,7 @@ class GovernanceApi(Api):
 
     def handle(self, route):
         request = route.request
-        path = request.url.split("?", 1)[0].split("localhost:3000", 1)[-1].split("127.0.0.1:3000", 1)[-1]
+        path = urlsplit(request.url).path
         key = (request.method, path)
         if key in self.writes:
             body = json.loads(request.post_data) if request.post_data else None
@@ -393,8 +394,9 @@ def test_manager_and_technical_lead_menus_have_no_placeholder_screens(page: Page
 
 RB_WORKFLOW = "55555555-5555-4555-8555-555555555555"
 RB_VERSIONS = [
-    {"number": 1, "status": "ACCEPTED", "origin": "GENERATED", "created_at": "2026-11-10T08:00:00Z", "created_by": "42"},
-    {"number": 2, "status": "ACCEPTED", "origin": "DRIFT_UPDATE", "created_at": "2026-11-20T08:00:00Z", "created_by": "ai"},
+    {"number": 0, "status": "superseded", "origin": "EDIT", "created_at": "2026-11-09T08:00:00Z", "created_by": "42"},
+    {"number": 1, "status": "accepted", "origin": "GENERATED", "created_at": "2026-11-10T08:00:00Z", "created_by": "42"},
+    {"number": 2, "status": "accepted", "origin": "DRIFT_UPDATE", "created_at": "2026-11-20T08:00:00Z", "created_by": "ai"},
 ]
 
 
@@ -428,6 +430,8 @@ def test_developer_can_roll_back_from_the_change_log_and_it_goes_to_staff_review
     start(page, api)
     open_screen(page, "Change Log")
     expect(page.get_by_role("button", name="Roll back to version 2")).to_have_count(0)  # already approved
+    # a version that was superseded before anyone accepted it cannot be restored: no button is offered for it
+    expect(page.get_by_role("button", name="Roll back to version 0")).to_have_count(0)
     page.get_by_role("button", name="Roll back to version 1").click()
     page.get_by_label("Why roll back to version 1?").fill("Version 2 documented the wrong endpoint")
     page.get_by_role("button", name="Request rollback").click()
@@ -475,7 +479,7 @@ def test_change_log_can_be_filtered_by_source_and_date(page: Page):
     start(page, api)
     open_screen(page, "Change Log")
     entries = page.locator(".changelog-entry h3")
-    expect(entries).to_have_count(2)
+    expect(entries).to_have_count(3)
     page.get_by_label("Source").select_option("GENERATED")
     expect(entries).to_have_count(1)
     expect(entries.first).to_contain_text("Version 1")
@@ -485,3 +489,16 @@ def test_change_log_can_be_filtered_by_source_and_date(page: Page):
     expect(entries.first).to_contain_text("Version 2")
     page.get_by_label("To").fill("2026-11-16")
     expect(page.get_by_text("No version matches these filters.")).to_be_visible()
+
+
+def test_delegation_refusal_explains_what_is_checked(page: Page):
+    def refuse(body):
+        return 400, {"timestamp": "2026-11-24T00:00:00Z", "status": 400, "error": "Bad Request", "path": "/api/approval/delegations"}
+
+    api = manager({"/api/approval/delegations": {"outgoing": [], "incoming": []}},
+                  {("POST", "/api/approval/delegations"): refuse})
+    start(page, api)
+    open_screen(page, "Approval Delegation")
+    page.get_by_label("Manager user ID").fill("4")
+    page.get_by_role("button", name="Delegate approvals").click()
+    expect(page.get_by_role("alert")).to_contain_text("the delegate must be an active Manager")

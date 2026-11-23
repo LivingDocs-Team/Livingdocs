@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { apiErrorMessage } from './errorMessages';
 import { formatTime } from './formatters';
 import { githubApi } from './githubApi';
 import Can from './rbac/Can';
@@ -83,7 +84,10 @@ export default function ApprovalDelegation({ userId }) {
       setMessage('Delegation saved.');
       setReload((value) => value + 1);
     } catch (failure) {
-      setError(failure.message || 'Could not save the delegation.');
+      // The Backend checks the delegate itself and answers 400 without a message, so say what is checked.
+      setError(failure.status === 400 && failure.message === apiErrorMessage(undefined, 400)
+        ? 'The delegation was refused: the delegate must be an active Manager who can approve documents (not you), and the end date must be in the future, at most 90 days from now.'
+        : failure.message || 'Could not save the delegation.');
     } finally {
       setBusy(false);
     }

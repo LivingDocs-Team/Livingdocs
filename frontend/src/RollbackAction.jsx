@@ -5,9 +5,10 @@ import { usePermission } from './rbac/usePermission';
 /**
  * "Roll back to this version" for one version of a document. The Backend turns the restored text into a
  * new proposal that goes through Staff review and Manager approval again, so this never publishes anything
- * by itself. Only an approved document can be rolled back, and not to the version that is already approved.
+ * by itself. Only an approved document can be rolled back, only to a version that was accepted (a superseded or
+ * dismissed version is refused by the Backend), and not to the version that is already approved.
  */
-export default function RollbackAction({ userId, workflow, version, onDone }) {
+export default function RollbackAction({ userId, workflow, version, accepted = true, onDone }) {
   const { can } = usePermission();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('');
@@ -15,7 +16,7 @@ export default function RollbackAction({ userId, workflow, version, onDone }) {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
-  if (!can('documentRollback', 'U') || !workflow || workflow.status !== 'APPROVED'
+  if (!can('documentRollback', 'U') || !workflow || workflow.status !== 'APPROVED' || !accepted
       || workflow.submittedDocumentVersion === version) {
     return message ? <p role="status">{message}</p> : null;
   }
