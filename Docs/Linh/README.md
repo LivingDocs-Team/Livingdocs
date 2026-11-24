@@ -1,6 +1,6 @@
 # Functional Requirements — Tasks của Linh (AI Service, sinh tài liệu)
 
-Các chức năng do Nguyễn Thị Phương Linh thực hiện, mỗi chức năng một file. FR01–FR06 và FR10 là yêu cầu chức năng (số trùng mã FR-AI-xx); FR11–FR15 là báo cáo của các task LD-336 – LD-339 và LD-355:
+Các chức năng do Nguyễn Thị Phương Linh thực hiện, mỗi chức năng một file. FR01–FR07 là yêu cầu chức năng (số file trùng mã FR-AI-01 – FR-AI-07); FR08–FR12 là báo cáo của các task LD-336 – LD-339 và LD-355:
 
 | File | Chức năng | Story / task Jira |
 |---|---|---|
@@ -10,12 +10,12 @@ Các chức năng do Nguyễn Thị Phương Linh thực hiện, mỗi chức n�
 | [FR-AI-04](FR04.md) | Bằng chứng xác thực và điểm độ tin cậy | LD-340 |
 | [FR-AI-05](FR05.md) | Mẫu tài liệu (documentation templates) | LD-96 (LD-97 – LD-100) |
 | [FR-AI-06](FR06.md) | Quản lý phiên bản tài liệu (lưu tài liệu, phiên bản, lịch sử) | LD-195 |
-| [FR-AI-10](FR10.md) | Đề xuất cập nhật tài liệu (code thay đổi, drift) và duyệt, áp dụng đề xuất | LD-353, LD-354, LD-357 |
-| [FR11](FR11.md) | Báo cáo thử nghiệm: embedding retrieval so với TF-IDF | LD-336 |
-| [FR12](FR12.md) | Cải thiện truy xuất: thay đổi và kết quả đo trước/sau | LD-337 |
-| [FR13](FR13.md) | Ngữ cảnh cho thay đổi code (`POST /drift/context`): cách làm, ví dụ, test | LD-338 |
-| [FR14](FR14.md) | Kiểm thử RAG và truy xuất tri thức: test case, kết quả, lỗi đã sửa | LD-339 |
-| [FR15](FR15.md) | Kiểm thử và hoàn thiện grounding evidence của FR-AI-04: test case, kết quả | LD-355 |
+| [FR-AI-07](FR07.md) | Đề xuất cập nhật tài liệu (code thay đổi, drift) và duyệt, áp dụng đề xuất | LD-353, LD-354, LD-357 |
+| [FR08](FR08.md) | Báo cáo thử nghiệm: embedding retrieval so với TF-IDF | LD-336 |
+| [FR09](FR09.md) | Cải thiện truy xuất: thay đổi và kết quả đo trước/sau | LD-337 |
+| [FR10](FR10.md) | Ngữ cảnh cho thay đổi code (`POST /drift/context`): cách làm, ví dụ, test | LD-338 |
+| [FR11](FR11.md) | Kiểm thử RAG và truy xuất tri thức: test case, kết quả, lỗi đã sửa | LD-339 |
+| [FR12](FR12.md) | Kiểm thử và hoàn thiện grounding evidence của FR-AI-04: test case, kết quả | LD-355 |
 
 Mỗi file gồm: mô tả, danh sách yêu cầu (FR-AI-xx.y), API, dữ liệu, luồng chính, luồng lỗi, quy tắc nghiệp vụ, tiêu chí chấp nhận và test liên quan. Các con số (trọng số, giới hạn, ngưỡng) trong file là giá trị đang dùng trong code, để có thể dựng lại đúng hành vi.
 
@@ -41,4 +41,4 @@ Kiểm thử và CI không phải chức năng của sản phẩm nên không c�
 
 - LD-390: kiểm thử tích hợp AI Service (`ai-service/tests/integration/`, job CI `ai-service-integration`), danh sách test case ở `ai-service/tests/integration/README.md`.
 - Job CI `ai-service-test` chạy toàn bộ `pytest` của `ai-service/`.
-- LD-355: kiểm thử và hoàn thiện grounding evidence của FR-AI-04 (`ai-service/tests/test_grounding_evidence.py`), báo cáo ở [FR15.md](FR15.md).
+- LD-355: kiểm thử và hoàn thiện grounding evidence của FR-AI-04 (`ai-service/tests/test_grounding_evidence.py`), báo cáo ở [FR12.md](FR12.md).
