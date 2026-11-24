@@ -1,6 +1,6 @@
 """LD-357: review and apply documentation suggestions.
 
-POST /suggestions/{id}/review, POST /suggestions/apply. Cases RV-xx of Docs/Linh/FR10.md.
+POST /suggestions/{id}/review, POST /suggestions/apply. Cases RV-xx of Docs/Linh/FR07.md.
 """
 import os
 
