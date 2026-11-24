@@ -1,6 +1,6 @@
 """LD-339: tests for RAG (retrieval-augmented generation) and knowledge retrieval, end to end.
 
-Each test is one case of Docs/Linh/LD-339-Kiem-thu-RAG.md (RAG-xx). The AI is a fake client
+Each test is one case of Docs/Linh/FR14.md (RAG-xx). The AI is a fake client
 that records the prompts it receives and answers with fixed JSON, so we can check what
 context reached the model and how its citations come back in the documentation and report.
 """
