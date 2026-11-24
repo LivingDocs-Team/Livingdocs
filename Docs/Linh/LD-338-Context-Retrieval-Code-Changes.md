@@ -1,6 +1,6 @@
 # LD-338 — Ngữ cảnh cho thay đổi code (Context Retrieval for Code Changes)
 
-Khi một commit hoặc Pull Request đổi code, người viết tài liệu (hoặc AI) cần biết: đoạn code nào đã đổi, code nào khác liên quan tới nó, và tài liệu nào đang nói về nó. LD-338 gom đủ các thứ đó cho **từng thực thể bị đổi** qua API `POST /drift/context` của AI Service. Yêu cầu chi tiết: FR-AI-03.13–03.15 trong [FR3.md](FR3.md).
+Khi một commit hoặc Pull Request đổi code, người viết tài liệu (hoặc AI) cần biết: đoạn code nào đã đổi, code nào khác liên quan tới nó, và tài liệu nào đang nói về nó. LD-338 gom đủ các thứ đó cho **từng thực thể bị đổi** qua API `POST /drift/context` của AI Service. Yêu cầu chi tiết: FR-AI-03.13–03.15 trong [FR3.md](FR03.md).
 
 ## Cách làm
 
