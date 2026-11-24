@@ -1,6 +1,6 @@
 """LD-355: tests for AI grounding evidence (FR-AI-04).
 
-Cases GE-xx of Docs/Linh/LD-355-Grounding-Evidence.md. The AI is a fake client that
+Cases GE-xx of Docs/Linh/FR12.md. The AI is a fake client that
 returns fixed JSON, so we control exactly which evidence ids it cites.
 """
 import json

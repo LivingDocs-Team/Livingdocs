@@ -1,6 +1,6 @@
 """LD-354: drift resolution suggestions (POST /drift/reports/{id}/suggestions).
 
-Cases DR-xx of Docs/Linh/FR10.md. A drift report is made for the drift fixture (shop/cart.py
+Cases DR-xx of Docs/Linh/FR07.md. A drift report is made for the drift fixture (shop/cart.py
 before / after a Pull Request) against a saved document and the README, then turned into
 suggestions.
 """
