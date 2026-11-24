@@ -1,6 +1,6 @@
 """LD-338: context retrieval for code changes (POST /drift/context).
 
-Cases CC-xx of Docs/Linh/FR13.md. Input: the drift fixture
+Cases CC-xx of Docs/Linh/FR10.md. Input: the drift fixture
 (shop/cart.py before/after a Pull Request), two more files of the repository and some docs.
 """
 import os
