@@ -4,17 +4,17 @@ Các chức năng do Nguyễn Thị Phương Linh thực hiện, mỗi chức n�
 
 | File | Chức năng | Story / task Jira |
 |---|---|---|
-| [FR-AI-01](FR1.md) | Tạo và theo dõi job sinh tài liệu | LD-90 (LD-91 – LD-95) |
-| [FR-AI-02](FR2.md) | Sinh tài liệu từ kết quả phân tích code | LD-340 |
-| [FR-AI-03](FR3.md) | Truy xuất mã liên quan và tài liệu có sẵn làm ngữ cảnh | LD-340, LD-335, LD-337, LD-338, LD-339 |
+| [FR-AI-01](FR01.md) | Tạo và theo dõi job sinh tài liệu | LD-90 (LD-91 – LD-95) |
+| [FR-AI-02](FR02.md) | Sinh tài liệu từ kết quả phân tích code | LD-340 |
+| [FR-AI-03](FR03.md) | Truy xuất mã liên quan và tài liệu có sẵn làm ngữ cảnh | LD-340, LD-335, LD-337, LD-338, LD-339 |
+| [FR-AI-04](FR04.md) | Bằng chứng xác thực và điểm độ tin cậy | LD-340 |
+| [FR-AI-05](FR05.md) | Mẫu tài liệu (documentation templates) | LD-96 (LD-97 – LD-100) |
+| [FR-AI-06](FR06.md) | Quản lý phiên bản tài liệu (lưu tài liệu, phiên bản, lịch sử) | LD-195 |
+| [FR-AI-10](FR10.md) | Đề xuất cập nhật tài liệu (code thay đổi, drift) và duyệt, áp dụng đề xuất | LD-353, LD-354, LD-357 |
 | [LD-336](LD-336-Embedding-vs-TFIDF.md) | Báo cáo thử nghiệm: embedding retrieval so với TF-IDF | LD-336 |
 | [LD-337](LD-337-Cai-thien-Knowledge-Retrieval.md) | Cải thiện truy xuất: thay đổi và kết quả đo trước/sau | LD-337 |
 | [LD-338](LD-338-Context-Retrieval-Code-Changes.md) | Ngữ cảnh cho thay đổi code (`POST /drift/context`): cách làm, ví dụ, test | LD-338 |
 | [LD-339](LD-339-Kiem-thu-RAG.md) | Kiểm thử RAG và truy xuất tri thức: test case, kết quả, lỗi đã sửa | LD-339 |
-| [FR-AI-10](FR10.md) | Đề xuất cập nhật tài liệu (code thay đổi, drift) và duyệt, áp dụng đề xuất | LD-353, LD-354, LD-357 |
-| [FR-AI-04](FR4.md) | Bằng chứng xác thực và điểm độ tin cậy | LD-340 |
-| [FR-AI-05](FR5.md) | Mẫu tài liệu (documentation templates) | LD-96 (LD-97 – LD-100) |
-| [FR-AI-06](FR6.md) | Quản lý phiên bản tài liệu (lưu tài liệu, phiên bản, lịch sử) | LD-195 |
 
 Mỗi file gồm: mô tả, danh sách yêu cầu (FR-AI-xx.y), API, dữ liệu, luồng chính, luồng lỗi, quy tắc nghiệp vụ, tiêu chí chấp nhận và test liên quan. Các con số (trọng số, giới hạn, ngưỡng) trong file là giá trị đang dùng trong code, để có thể dựng lại đúng hành vi.
 
