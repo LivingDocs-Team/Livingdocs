@@ -1,3 +1,4 @@
+import time
 from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
@@ -5,6 +6,14 @@ from fastapi.testclient import TestClient
 import main
 from app.jobs import JobStore
 from app.versions import DocumentStore
+
+
+def tick():
+    """The window below is built from timestamps of the jobs and the document, and must be strictly ordered. The
+    system clock moves in steps (about 0.5 ms on Windows), so two events that follow each other directly can get
+    the same timestamp, which turns a window into an empty or invalid one. Waiting a few milliseconds between the
+    events keeps every timestamp in the same (real) clock and strictly increasing on any machine."""
+    time.sleep(0.01)
 
 
 def test_internal_analytics_counts_real_outcomes_and_saved_document_history(monkeypatch, tmp_path):
@@ -23,12 +32,14 @@ def test_internal_analytics_counts_real_outcomes_and_saved_document_history(monk
     completed = client.post("/generate", json={
         "scope": "file", "target": "example.py", "files": [sample],
     }, headers=service_auth).json()["id"]
+    tick()
     failed = client.post("/generate", json={
         "scope": "file", "target": "example.py",
         "files": [{**sample, "status": "invalid", "error": "Parser failed"}],
     }, headers=service_auth).json()["id"]
     assert jobs.get(completed).status.value == "completed"
     assert jobs.get(failed).status.value == "failed"
+    tick()
     assert client.post("/documents", json={"job_id": completed}, headers=service_auth).status_code == 201
     end = main.documents.list()[0].created_at + timedelta(seconds=1)
     endpoint = "/internal/system-analytics"
@@ -52,6 +63,7 @@ def test_internal_analytics_counts_real_outcomes_and_saved_document_history(monk
     assert exclusive["aiJobs"]["failed"] == 0
     assert exclusive["documentsCreated"] == 0
 
+    tick()
     monkeypatch.setattr(main, "jobs", JobStore())
     monkeypatch.setattr(main, "documents", DocumentStore(str(documents_file)))
     after_restart = client.get(endpoint, params=window, headers=headers).json()

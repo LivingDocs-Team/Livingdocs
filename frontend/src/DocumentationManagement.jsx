@@ -9,6 +9,7 @@ import StaffReviewQueue from './StaffReviewQueue';
 import ManagerApprovalQueue from './ManagerApprovalQueue';
 import DocumentVersionComparison, { DiffSummary, DiffView } from './DocumentVersionComparison';
 import { diffTexts } from './documentationDiff';
+import { loadDraft, saveDraft } from './draftStore';
 import Can from './rbac/Can';
 
 
@@ -169,6 +170,8 @@ function submitErrorMessage(error, step) {
   return error?.message || `Could not ${step}. Please try again.`;
 }
 
+const RESTORED_NOTICE = 'Restored your saved draft from this browser.';
+
 export default function DocumentationManagement({ userId }) {
 
   const workspaceId = userId ? `ws-${userId}` : '';
@@ -178,6 +181,7 @@ export default function DocumentationManagement({ userId }) {
   const [repositoryId, setRepositoryId] = useState('');
 
   const [template, setTemplate] = useState('default');
+  const [outputLanguage, setOutputLanguage] = useState('vi');
   const [isManagingTemplates, setIsManagingTemplates] = useState(false);
   const templateList = useTemplates(userId);
   const [status, setStatus] = useState('idle');
@@ -217,6 +221,21 @@ export default function DocumentationManagement({ userId }) {
   const [job, setJob] = useState(null);
 
   const [documentId, setDocumentId] = useState('');
+  // A draft belongs to the generation job (or, for an opened document, to the document itself).
+  const draftKey = jobId || documentId;
+  // Puts back what the user saved in this browser for a freshly loaded document.
+  function restoreSaved(key, original) {
+    const stored = loadDraft(userId, key);
+    if (!stored) return false;
+    if (stored.versions.length > 0) setVersions(stored.versions);
+    if (stored.draft && stored.draft !== original) {
+      setMarkdown(stored.draft);
+      setSavedDocument(stored.draft);
+      setNotice(RESTORED_NOTICE);
+      return true;
+    }
+    return false;
+  }
   const [documents, setDocuments] = useState([]);
   const [isLoadingDocuments, setIsLoadingDocuments] = useState(false);
   const [documentsError, setDocumentsError] = useState('');
@@ -337,6 +356,7 @@ export default function DocumentationManagement({ userId }) {
     setSelectedVersionId('');
     setCompareVersionId('');
     setRelatedDocuments([]);
+    restoreSaved(detail.generationJobId || detail.id, detail.markdown || '');
     try {
       await loadRelationshipData(detail.id, detail.repositoryId);
     } catch (requestError) {
@@ -518,6 +538,7 @@ export default function DocumentationManagement({ userId }) {
   }, [userId, workspaceId]);
 
   async function handleGenerate(event) {
+    let restored;
     event.preventDefault();
 
     if (!userId || !repositoryId) {
@@ -574,7 +595,7 @@ export default function DocumentationManagement({ userId }) {
 
         userId,
 
-        body: { templateId: template, outputLanguage: 'vi' },
+        body: { templateId: template, outputLanguage },
 
       });
 
@@ -653,6 +674,8 @@ export default function DocumentationManagement({ userId }) {
 
        setEvidence(evidenceItems);
 
+       restored = restoreSaved(createdJob.id, markdown);
+
       if (createdJob.documentId) {
         setDocuments((current) => [
           {
@@ -682,7 +705,8 @@ export default function DocumentationManagement({ userId }) {
         || templateList.templates.find((item) => item.id === template)?.name;
       setNotice(`Documentation generated from ${repoName || 'the selected repository'}`
         + (templateName ? ` using the "${templateName}" template.` : '.')
-        + (relationshipLoadError ? ` Related source code could not be loaded: ${relationshipLoadError}` : ''));
+        + (relationshipLoadError ? ` Related source code could not be loaded: ${relationshipLoadError}` : '')
+        + (restored ? ` ${RESTORED_NOTICE}` : ''));
     } catch (requestError) {
 
       if (!isCurrent()) return;
@@ -814,7 +838,9 @@ export default function DocumentationManagement({ userId }) {
 
     setError('');
 
-    setNotice('Draft saved in this page session.');
+    setNotice(saveDraft(userId, draftKey, { draft: markdown })
+      ? 'Draft saved in this browser.'
+      : 'Draft kept in this page only: this browser blocked local storage.');
 
   }
 
@@ -843,6 +869,7 @@ export default function DocumentationManagement({ userId }) {
     };
 
     setVersions((current) => [...current, version]);
+    saveDraft(userId, draftKey, { versions: [...versions, version] });
 
     setSelectedVersionId(version.id);
 
@@ -1019,6 +1046,17 @@ export default function DocumentationManagement({ userId }) {
             loadError={templateList.loadError}
             disabled={status === 'generating'}
           />
+
+          <label htmlFor="documentation-language">Output language</label>
+          <select
+            id="documentation-language"
+            value={outputLanguage}
+            onChange={(event) => setOutputLanguage(event.target.value)}
+            disabled={status === 'generating'}
+          >
+            <option value="vi">Tiếng Việt</option>
+            <option value="en">English</option>
+          </select>
 
           <div className="documentation-actions">
             <Can screen="documentation" action="C">

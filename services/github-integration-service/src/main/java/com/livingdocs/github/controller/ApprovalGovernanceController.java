@@ -70,9 +70,10 @@ public class ApprovalGovernanceController {
     public ApprovalDelegationService.Delegation createDelegation(
             @RequestHeader(DocumentWorkflowController.USER_HEADER) String actor,
             @RequestHeader(DocumentWorkflowController.AUTHORITIES_HEADER) String authorities,
+            @RequestHeader(value = "X-Verified-Delegate-Id", required = false) String verifiedDelegate,
             @RequestBody ApprovalDelegationService.CreateRequest request) {
         requireManager(authorities);
-        return delegations.create(actor, request);
+        return delegations.create(actor, request, verifiedDelegate);
     }
 
     @DeleteMapping("/delegations/{id}")

@@ -245,4 +245,31 @@ Quyền đọc dựa trên quyền `DOCUMENT_TECHNICAL_REVIEW` mà vai trò này
 
 Kiểm thử: `tests/test_governance_screens.py` (19 kịch bản), `ApprovalGovernanceAndOversightApiTest` (11, GitHub Integration Service), `ApiRoutePermissionsTest` (route mới theo vai trò), `FlywayMigrationLineageSelectorTest` (V18).
 
-Giới hạn đã biết: ủy quyền chưa đổi quyền quyết định (xem trên); ô nhập Manager dùng ID người dùng vì chưa có API liệt kê Manager cho vai trò Manager; chưa có phân loại severity/threshold riêng cho drift ngoài quy tắc auto-update.
+Giới hạn đã biết (đã được xử lý ở mục 13: ủy quyền nay có hiệu lực); ô nhập Manager dùng ID người dùng vì chưa có API liệt kê Manager cho vai trò Manager; chưa có phân loại severity/threshold riêng cho drift ngoài quy tắc auto-update.
+
+## 13. Cách ly workspace, rollback, ủy quyền, drift tự động, bền job (nhánh `LD-fix-compose-language-drafts`)
+
+- **Cách ly workspace của workflow (V19).** `document_workflows.workspace_id` (hàng cũ được điền `ws-<ownerId>`). Workspace lấy từ repository mà tài liệu được sinh ra, mặc định là workspace cá nhân của chủ tài liệu. BFF thêm vào `X-User-Authorities` các mục `WORKSPACE:<id>` (workspace được quản lý mà người dùng là chủ hoặc thành viên), `WORKSPACE:*` cho Administrator. GitHub service (`WorkspaceScope`) lọc hàng đợi Staff/Manager, `history-accessible`, giám sát của Technical Lead và trả 404 khi mở, quyết định hoặc commit workflow của workspace khác. Workspace cá nhân `ws-<id>` vẫn là hàng chờ review dùng chung (nộp tài liệu chính là chia sẻ nó); chỉ workspace được quản lý (`workspace-<uuid>`) bị cách ly. Số liệu tổng của `/api/oversight/health` vẫn tính toàn hệ thống.
+- **Rollback.** Manager, Technical Lead và Developer chủ tài liệu cùng được yêu cầu rollback tài liệu đã duyệt (nút "Roll back to this version" ở Change Log và Document Rollback). Bản khôi phục là đề xuất mới và phải qua Staff review + Manager approval lại. Chưa có rollback cả collection.
+- **Ủy quyền.** Khi một ủy quyền đang hiệu lực, người ủy quyền không được quyết định (409) cho tới khi thu hồi; quyết định của người nhận ghi "Covering approvals for Manager X" vào audit.
+- **Drift tự động.** Webhook pull request có head mới sẽ tự chạy phân tích drift (`DriftAutoAnalyzer`, chạy sau commit, lỗi chỉ ghi log). Tắt bằng `drift.auto-analysis.enabled=false`.
+- **Generation job bền.** ai-service ghi job vào `JOBS_DIR` (compose: `/app/data/jobs`); khởi động lại giữ kết quả, job đang chạy được đánh dấu failed.
+- **Change Log** lọc theo nguồn (origin) và khoảng ngày. Manager thấy biên nhận "Published to GitHub" khi commit đã được xác nhận.
+
+## 14. Hoàn thiện sau kiểm toán (nhánh `LD-fix-compose-language-drafts`)
+
+- **Oversight theo workspace.** Mọi route `/api/oversight/**` chỉ trả repository, PR, commit, tài liệu và chính sách drift của workspace mà người gọi thuộc về (mục `WORKSPACE:<id>` do BFF thêm; `WORKSPACE:*` chỉ cho Administrator; workspace cá nhân `ws-<id>` chỉ của chủ). Technical Lead **không** mặc định xem mọi workspace. `GET /health` đếm trên đúng phạm vi đó. Repository ngoài phạm vi trả 404, kể cả khi ghi `PUT .../drift-policies`.
+- **Workflow không mở cửa khi thiếu dữ liệu.** Workspace của workflow lấy từ `source_snapshot` của phiên bản đang duyệt, rồi `pending_revision`, rồi artifact của job; thiếu liên kết hoặc repository không có workspace thì từ chối tạo (409 `WORKFLOW_WORKSPACE_UNRESOLVED`, có log). Chỉ khi phiên bản ghi rõ không gắn repository mới dùng `ws-<owner>`. Người tạo phải thuộc workspace được quản lý đó.
+- **Owner của generation job** đọc lại từ artifact trong DB của GitHub service sau khi restart (không giả mạo được: artifact ghi lúc bắt đầu job theo danh tính đã xác thực). Job cũ không có artifact không thuộc về ai (404).
+- **Publication** (`V20__document_publications.sql`, `GET /api/document-workflows/{id}/publications`): bảng riêng, `UNIQUE(workflow_id, version)`, chỉ ghi khi GitHub xác nhận commit; trạng thái workflow vẫn `APPROVED`. Màn Manager đọc từ API này.
+- **Delegation.** BFF kiểm tra người nhận tồn tại, đang hoạt động, là Manager và có quyền `DOCUMENT_APPROVE`, rồi gửi `X-Verified-Delegate-Id`; GitHub service từ chối nếu thiếu hoặc khác, và từ chối người nhận đang tự ủy quyền (tránh khóa dây chuyền).
+- **Rollback.** Người yêu cầu rollback không được duyệt bản rollback đó (403, vẫn được từ chối). Audit có sẵn `ROLLBACK_REQUESTED` (người yêu cầu), review của Staff và quyết định của Manager.
+- **Drift tự động** mặc định TẮT (`DRIFT_AUTO_ANALYSIS_ENABLED=true` để bật): tối đa 2 phân tích đồng thời, hàng đợi 20, timeout 120 giây, bỏ qua head đã có báo cáo hoặc đã xếp hàng; đầy hàng thì ghi log và bỏ.
+
+## 15. Kết quả nghiệm thu trên stack cô lập và các sửa lỗi kèm theo
+
+- **Mã 403 và 404 theo hai lớp.** Lớp vai trò trả lời như nhau với mọi id: `/evidence` chỉ dành cho Manager, `/claim` chỉ dành cho Staff, `/api/oversight/*` chỉ dành cho Technical Lead; vai trò không được dùng route nhận **403** trước khi tra cứu workspace. Vai trò được dùng route nhưng workflow thuộc workspace khác nhận **404**. 403 ở lớp vai trò không tiết lộ gì về workflow của workspace khác.
+- **Rollback chỉ về phiên bản đã được chấp nhận** (`accepted`). Một phiên bản bị `superseded` (bị bản mới thay trước khi ai duyệt) hay `dismissed` bị AI service từ chối (409). Giao diện (`RollbackAction`) giờ không hiện nút cho các phiên bản đó.
+- **Đăng nhập từ trình duyệt khi `FRONTEND_PORT` khác 3000.** nginx gửi `Host` không có cổng và `X-Forwarded-Proto`, nên Backend coi `Origin: http://localhost:<cổng>` là CORS không hợp lệ. `frontend/nginx.conf` giờ giữ `Host` và `X-Forwarded-Host` kèm cổng cho `/api/`. Origin lạ vẫn bị 403.
+- **Approval Delegation** hiện câu giải thích khi Backend từ chối (400 không có nội dung) thay vì "The request is not valid.".
+- **CI:** `ai-service/tests/test_system_analytics.py` dùng đồng hồ thật và chờ vài mili giây giữa các sự kiện (đồng hồ giả cho job trộn với đồng hồ thật của tài liệu gây lỗi); `tests/revision-e2e/compose.yaml` thử lại tối đa 3 lần chỉ khi Maven Central trả HTTP 429, giống các Dockerfile.

@@ -4,6 +4,7 @@ import DocumentVersionComparison from './DocumentVersionComparison';
 import { formatTime, words } from './formatters';
 import { githubApi } from './githubApi';
 import PageFrame from './rbac/PageFrame';
+import RollbackAction from './RollbackAction';
 import useWorkflowList from './useWorkflowList';
 import './InsightScreens.css';
 
@@ -29,7 +30,7 @@ function useVersions(workflowId, userId) {
     retry: () => setReload((value) => value + 1) };
 }
 
-function VersionList({ workflowId, userId }) {
+function VersionList({ workflowId, userId, workflow, onRolledBack }) {
   const { ready, versions, error, retry } = useVersions(workflowId, userId);
   if (!ready) return <p role="status">Loading versions…</p>;
   if (error) {
@@ -52,6 +53,8 @@ function VersionList({ workflowId, userId }) {
           </h3>
           <p>{words(version.origin)} · {formatTime(version.created_at)}{version.created_by ? ` · by ${version.created_by}` : ''}</p>
           {version.note && <blockquote>{version.note}</blockquote>}
+          <RollbackAction userId={userId} workflow={workflow} version={version.number}
+            accepted={String(version.status).toLowerCase() === 'accepted'} onDone={onRolledBack} />
         </li>
       ))}
     </ol>
@@ -60,13 +63,14 @@ function VersionList({ workflowId, userId }) {
 
 /**
  * Version History & Comparison (#18) and Document Rollback (#19) for the Technical Lead, read only.
- * Rolling a document back is a Manager decision, so the rollback screen shows the versions and the rollback
- * requests that were made, not a rollback button.
+ * On the rollback screen a Technical Lead may start a rollback; the restored version is a new proposal that
+ * Staff review and a Manager approve again.
  */
 export default function VersionExplorer({ userId, node }) {
   const rollback = node?.key === 'document-rollback';
   const list = useWorkflowList(userId);
   const { page } = list;
+  const [notice, setNotice] = useState('');
 
   return (
     <PageFrame
@@ -74,7 +78,7 @@ export default function VersionExplorer({ userId, node }) {
       titleId="version-explorer-title"
       className="documentation-page insight-page"
       subtitle={rollback
-        ? 'Versions of a document and the rollbacks requested for it. A Manager performs a rollback.'
+        ? 'Versions of a document and the rollbacks requested for it. A restored version goes back to Staff review.'
         : 'Every version of a document and the difference between any two of them.'}
     >
       {!list.ready && <p role="status">Loading documents…</p>}
@@ -110,8 +114,10 @@ export default function VersionExplorer({ userId, node }) {
           )}
           {rollback ? (
             <>
+              {notice && <p role="status">{notice}</p>}
               <h2>Versions</h2>
-              <VersionList key={`v-${list.selectedId}`} workflowId={list.selectedId} userId={userId} />
+              <VersionList key={`v-${list.selectedId}`} workflowId={list.selectedId} userId={userId}
+                workflow={list.workflows.find((item) => item.id === list.selectedId)} onRolledBack={(text) => { setNotice(text); list.retry(); }} />
               <h2>Rollback requests</h2>
               <AuditTrail key={`a-${list.selectedId}`} workflowId={list.selectedId} userId={userId}
                 only={['ROLLBACK_REQUESTED']} />

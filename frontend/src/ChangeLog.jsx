@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { githubApi } from './githubApi';
 import PageFrame from './rbac/PageFrame';
+import RollbackAction from './RollbackAction';
 import './InsightScreens.css';
 
 const PAGE_SIZE = 20;
@@ -14,7 +15,7 @@ function label(value) {
   return String(value || '').replace(/_/g, ' ').toLowerCase();
 }
 
-function VersionEntry({ version }) {
+function VersionEntry({ version, workflow, userId, onRolledBack }) {
   const changes = Array.isArray(version.changes) ? version.changes : [];
   const warnings = Array.isArray(version.warnings) ? version.warnings : [];
   return (
@@ -45,6 +46,8 @@ function VersionEntry({ version }) {
         <p className="documentation-hint">No section changes were recorded for this version.</p>
       )}
       {warnings.length > 0 && <ul className="documentation-error">{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
+      <RollbackAction userId={userId} workflow={workflow} version={version.number}
+        accepted={String(version.status).toLowerCase() === 'accepted'} onDone={onRolledBack} />
     </li>
   );
 }
@@ -56,6 +59,10 @@ export default function ChangeLog({ userId }) {
   const [listState, setListState] = useState({ key: '', page: null, error: '' });
   const [logState, setLogState] = useState({ key: '', versions: [], error: '' });
   const [reload, setReload] = useState(0);
+  const [source, setSource] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [notice, setNotice] = useState('');
 
   const listKey = `${userId}:${pageIndex}:${reload}`;
   useEffect(() => {
@@ -97,6 +104,14 @@ export default function ChangeLog({ userId }) {
   const listError = listReady ? listState.error : '';
   const logReady = Boolean(workflowId) && logState.key === logKey;
   const selected = documents.find((item) => item.id === workflowId);
+  const sources = [...new Set(logState.versions.map((version) => version.origin).filter(Boolean))];
+  const visibleVersions = logState.versions.filter((version) => {
+    if (source && version.origin !== source) return false;
+    const created = version.created_at ? new Date(version.created_at).getTime() : null;
+    if (from && created !== null && created < new Date(`${from}T00:00:00`).getTime()) return false;
+    if (to && created !== null && created > new Date(`${to}T23:59:59.999`).getTime()) return false;
+    return true;
+  });
 
   return (
     <PageFrame
@@ -137,6 +152,7 @@ export default function ChangeLog({ userId }) {
             </nav>
           )}
 
+          {notice && <p role="status">{notice}</p>}
           {!logReady && <p role="status">Loading versions…</p>}
           {logReady && logState.error && (
             <div role="alert" className="documentation-error">
@@ -151,9 +167,29 @@ export default function ChangeLog({ userId }) {
             </div>
           )}
           {logReady && logState.versions.length > 0 && (
-            <ol className="changelog" aria-label="Version change log">
-              {logState.versions.map((version) => <VersionEntry key={version.number} version={version} />)}
-            </ol>
+            <>
+              <div className="insight-toolbar" role="group" aria-label="Filter versions">
+                <label htmlFor="change-log-source">Source</label>
+                <select id="change-log-source" value={source} onChange={(event) => setSource(event.target.value)}>
+                  <option value="">All sources</option>
+                  {sources.map((item) => <option key={item} value={item}>{label(item)}</option>)}
+                </select>
+                <label htmlFor="change-log-from">From</label>
+                <input id="change-log-from" type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
+                <label htmlFor="change-log-to">To</label>
+                <input id="change-log-to" type="date" value={to} onChange={(event) => setTo(event.target.value)} />
+              </div>
+              {visibleVersions.length === 0 ? (
+                <p className="documentation-hint">No version matches these filters.</p>
+              ) : (
+                <ol className="changelog" aria-label="Version change log">
+                  {visibleVersions.map((version) => (
+                    <VersionEntry key={version.number} version={version} workflow={selected} userId={userId}
+                      onRolledBack={(text) => { setNotice(text); setReload((value) => value + 1); }} />
+                  ))}
+                </ol>
+              )}
+            </>
           )}
         </>
       )}

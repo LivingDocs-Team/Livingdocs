@@ -175,7 +175,8 @@ export default function ManagerApprovalQueue({ userId }) {
       githubApi(`${base}/document`, { userId }),
       githubApi(`${base}/evidence`, { userId }),
       githubApi(`${base}/history`, { userId }),
-    ]).then(([workflowResult, documentResult, evidenceResult, historyResult]) => {
+      githubApi(`${base}/publications`, { userId }),
+    ]).then(([workflowResult, documentResult, evidenceResult, historyResult, publicationResult]) => {
       if (cancelled) return;
       if (workflowResult.status === 'rejected') {
         setDetailErrorState({ key: detailKey, message: managerError(workflowResult.reason, 'view this workflow') });
@@ -189,6 +190,9 @@ export default function ManagerApprovalQueue({ userId }) {
         documentError: documentResult.status === 'rejected'
           ? managerError(documentResult.reason, 'view the document') : '',
         evidence: evidenceResult.status === 'fulfilled' ? evidenceResult.value : null,
+        // GitHub-confirmed commits of this workflow's versions, read from the Backend (never inferred from the history text)
+        publications: publicationResult.status === 'fulfilled' && Array.isArray(publicationResult.value)
+          ? publicationResult.value : [],
       });
       if (evidenceResult.status === 'rejected') {
         setEvidenceErrorState({ key: detailKey, message: managerError(evidenceResult.reason, 'view document evidence') });
@@ -217,6 +221,9 @@ export default function ManagerApprovalQueue({ userId }) {
     && String(workflow.managerUserId) === String(userId)
     && history.some((event) => event.action === 'REVISION_DRAFT_SUBMITTED'
       && event.comment?.startsWith(`Version ${workflow.submittedDocumentVersion} from `));
+  // The confirmation GitHub Integration records once the approved version has been committed to the repository.
+  const published = workflow?.status === 'APPROVED'
+    ? visibleDetail.publications?.find((item) => item.version === workflow.submittedDocumentVersion) : null;
   const repository = visibleDetail?.evidence?.source_snapshot?.repository_full_name
     || 'Not included in workflow/evidence response';
 
@@ -320,6 +327,7 @@ export default function ManagerApprovalQueue({ userId }) {
         type: 'success',
         text: `${result.alreadyPresent ? 'Already present' : 'Committed'} on GitHub: ${result.path}`,
       });
+      setRefreshIndex((value) => value + 1);
     } catch (error) {
       setActionMessage({ type: 'error', text: error?.message || 'GitHub did not confirm the commit.' });
     } finally {
@@ -457,7 +465,13 @@ export default function ManagerApprovalQueue({ userId }) {
                       <div><dt>Updated</dt><dd>{formatTimestamp(workflow.updatedAt)}</dd></div>
                       <div><dt>Decision time</dt><dd>{formatTimestamp(workflow.decidedAt)}</dd></div>
                     </dl>
-                    {canCommitToGitHub && (
+                    {published && (
+                      <p role="status" className="manager-published">
+                        Published to GitHub: {published.path} on {published.branch} (commit {published.commitSha.slice(0, 7)},
+                        by {published.publishedBy}, {formatTimestamp(published.publishedAt)}).
+                      </p>
+                    )}
+                    {canCommitToGitHub && !published && (
                       <div className="documentation-actions">
                         <button type="button" className="documentation-secondary-button" disabled={Boolean(action)}
                           onClick={commitToGitHub}>

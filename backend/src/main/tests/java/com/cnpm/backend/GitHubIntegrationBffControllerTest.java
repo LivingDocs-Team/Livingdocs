@@ -378,6 +378,93 @@ class GitHubIntegrationBffControllerTest {
     }
 
     @Test
+    void workflowRequestsCarryTheManagedWorkspacesOfTheCallerAndAdministratorsGetAll() throws Exception {
+        for (boolean administrator : new boolean[] {false, true}) {
+            RestClient.Builder builder = RestClient.builder();
+            MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+            UserRepository users = mock(UserRepository.class);
+            RoleRepository roles = mock(RoleRepository.class);
+            WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+            User caller = mock(User.class);
+            when(caller.getId()).thenReturn(73L);
+            when(caller.getRole()).thenReturn(administrator ? "ADMIN" : "MANAGER");
+            when(users.findByEmail("verified@example.test")).thenReturn(Optional.of(caller));
+            Workspace shared = mock(Workspace.class);
+            when(shared.getId()).thenReturn("workspace-11111111-1111-1111-1111-111111111111");
+            when(workspaces.findAllAccessibleByUserId(73L)).thenReturn(java.util.List.of(shared));
+
+            String expected = administrator
+                    ? "ROLE_ADMIN,WORKSPACE:*"
+                    : "ROLE_MANAGER,WORKSPACE:workspace-11111111-1111-1111-1111-111111111111";
+            server.expect(requestTo("http://github.test:8082/api/document-workflows/history-accessible"))
+                    .andExpect(header("X-User-Authorities", expected))
+                    .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+            GitHubIntegrationBffController controller = new GitHubIntegrationBffController(builder.build(), users,
+                    roles, "http://github.test:8082", "internal-test-credential");
+            controller.setWorkspaceRepository(workspaces);
+            MockHttpServletRequest incoming = new MockHttpServletRequest(HttpMethod.GET.name(),
+                    "/api/document-workflows/history-accessible");
+            incoming.addHeader("X-User-Authorities", "WORKSPACE:workspace-forged");
+            controller.proxy(incoming, authenticatedEmail("verified@example.test"), null);
+            server.verify();
+        }
+    }
+
+    private void delegation(String delegateJson, String delegateRole, boolean active, boolean exists,
+            Integer expectedStatus) throws Exception {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        UserRepository users = mock(UserRepository.class);
+        RoleRepository roles = mock(RoleRepository.class);
+        User manager = mock(User.class);
+        when(manager.getId()).thenReturn(73L);
+        when(manager.getRole()).thenReturn("MANAGER");
+        when(users.findByEmail("verified@example.test")).thenReturn(Optional.of(manager));
+        User delegate = mock(User.class);
+        when(delegate.getRole()).thenReturn(delegateRole);
+        when(delegate.isActive()).thenReturn(active);
+        when(users.findById(7L)).thenReturn(exists ? Optional.of(delegate) : Optional.empty());
+        Role managerRole = new Role("MANAGER", "Manager");
+        managerRole.getPermissions().add(new Permission("DOCUMENT_APPROVE", "Approve"));
+        when(roles.findWithPermissionsByName("MANAGER")).thenReturn(Optional.of(managerRole));
+
+        if (expectedStatus == null) {
+            server.expect(requestTo("http://github.test:8082/api/approval/delegations"))
+                    .andExpect(header("X-Verified-Delegate-Id", "7"))
+                    .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+        }
+        GitHubIntegrationBffController controller = new GitHubIntegrationBffController(builder.build(), users,
+                roles, "http://github.test:8082", "internal-test-credential");
+        MockHttpServletRequest incoming = new MockHttpServletRequest(HttpMethod.POST.name(),
+                "/api/approval/delegations");
+        incoming.setContentType("application/json");
+        byte[] body = delegateJson.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        if (expectedStatus == null) {
+            controller.proxy(incoming, authenticatedEmail("verified@example.test"), body);
+            server.verify();
+        } else {
+            assertThatThrownBy(() -> controller.proxy(incoming, authenticatedEmail("verified@example.test"), body))
+                    .isInstanceOfSatisfying(ResponseStatusException.class,
+                            exception -> assertThat(exception.getStatusCode().value()).isEqualTo(expectedStatus));
+        }
+    }
+
+    @Test
+    void aDelegationNamesOnlyAnActiveManagerWhoCanApprove() throws Exception {
+        String body = "{\"delegateUserId\":\"7\",\"endsAt\":\"2030-01-01T00:00:00Z\"}";
+        delegation(body, "MANAGER", true, true, null);
+        delegation(body, "ROLE_MANAGER", true, true, null);
+        delegation(body, "STAFF", true, true, 400);
+        delegation(body, "DEVELOPER", true, true, 400);
+        delegation(body, "MANAGER", false, true, 400);
+        delegation(body, "MANAGER", true, false, 400);
+        delegation("{\"delegateUserId\":\"abc\"}", "MANAGER", true, true, 400);
+        delegation("{\"delegateUserId\":\"07\"}", "MANAGER", true, true, 400);
+        delegation("{}", "MANAGER", true, true, 400);
+    }
+
+    @Test
     void administratorReassignSendsOnlyBackendVerifiedActiveStaffTarget() throws Exception {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
@@ -404,7 +491,7 @@ class GitHubIntegrationBffControllerTest {
 
         server.expect(requestTo("http://github.test:8082/api/document-workflows/11111111-1111-1111-1111-111111111111/reassign"))
                 .andExpect(header("X-User-Id", "73"))
-                .andExpect(header("X-User-Authorities", "ROLE_ADMIN,DOCUMENT_REASSIGN"))
+                .andExpect(header("X-User-Authorities", "ROLE_ADMIN,DOCUMENT_REASSIGN,WORKSPACE:*"))
                 .andExpect(header("X-Verified-Staff-User-Id", "81"))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 

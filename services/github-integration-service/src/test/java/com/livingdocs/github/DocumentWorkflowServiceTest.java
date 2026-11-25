@@ -361,7 +361,19 @@ class DocumentWorkflowServiceTest {
                 """));
         when(workflows.saveAndFlush(any(DocumentWorkflow.class))).thenReturn(workflow);
 
-        service.create(OWNER, Set.of("DOCUMENT_CREATE", "ROLE_DEVELOPER"), "doc-1");
+        // the document was generated from a connected repository, so its workspace is resolved from it
+        var repositories = org.mockito.Mockito.mock(com.livingdocs.github.repository.ConnectedRepositoryRepository.class);
+        var artifacts = org.mockito.Mockito.mock(com.livingdocs.github.repository.DocumentationArtifactRepository.class);
+        var repositoryId = java.util.UUID.randomUUID();
+        var artifact = new com.livingdocs.github.entity.DocumentationArtifact();
+        artifact.setRepositoryId(repositoryId);
+        var repository = new com.livingdocs.github.entity.ConnectedRepository();
+        repository.setWorkspaceId("ws-" + OWNER);
+        when(artifacts.findByGenerationJobId("job-1")).thenReturn(Optional.of(artifact));
+        when(repositories.findById(repositoryId)).thenReturn(Optional.of(repository));
+        var wired = new DocumentWorkflowService(workflows, audit, documents, null, repositories);
+        wired.setArtifacts(artifacts);
+        wired.create(OWNER, Set.of("DOCUMENT_CREATE", "ROLE_DEVELOPER"), "doc-1");
         var created = ArgumentCaptor.forClass(DocumentWorkflowAudit.class);
         verify(audit, org.mockito.Mockito.times(2)).save(created.capture());
         var generation = created.getAllValues().getFirst();
@@ -949,8 +961,8 @@ void nonManagerCannotReadGroundingEvidence() {
     void historyAccessibleUsesPermissionAuthoritiesAndStablePagination() {
         when(workflows.findHistoryAccessible(any(), org.mockito.ArgumentMatchers.anyBoolean(),
                 org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.anyBoolean(),
-                org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any(), any(Pageable.class)))
-                .thenAnswer(invocation -> Page.empty(invocation.getArgument(8)));
+                org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), any(Pageable.class)))
+                .thenAnswer(invocation -> Page.empty(invocation.getArgument(10)));
 
         service.historyAccessible(OWNER, Set.of("ROLE_DEVELOPER", "DOCUMENT_VIEW"), 2, 7);
         service.historyAccessible(REVIEWER, Set.of("ROLE_CUSTOM_QUEUE", "DOCUMENT_REVIEW_QUEUE_VIEW"), 0, 20);
@@ -962,20 +974,20 @@ void nonManagerCannotReadGroundingEvidence() {
         verify(workflows).findHistoryAccessible(org.mockito.ArgumentMatchers.eq(OWNER),
                 org.mockito.ArgumentMatchers.eq(true), org.mockito.ArgumentMatchers.eq(false),
                 org.mockito.ArgumentMatchers.eq(false), org.mockito.ArgumentMatchers.eq(false),
-                any(), any(), any(), any(Pageable.class));
+                any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), any(Pageable.class));
         verify(workflows).findHistoryAccessible(org.mockito.ArgumentMatchers.eq(REVIEWER),
                 org.mockito.ArgumentMatchers.eq(false), org.mockito.ArgumentMatchers.eq(true),
                 org.mockito.ArgumentMatchers.eq(false), org.mockito.ArgumentMatchers.eq(false),
-                any(), any(), any(), any(Pageable.class));
+                any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), any(Pageable.class));
         verify(workflows).findHistoryAccessible(org.mockito.ArgumentMatchers.eq("assigned-reviewer"),
                 org.mockito.ArgumentMatchers.eq(false), org.mockito.ArgumentMatchers.eq(false),
                 org.mockito.ArgumentMatchers.eq(true), org.mockito.ArgumentMatchers.eq(false),
-                any(), any(), any(), any(Pageable.class));
+                any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), any(Pageable.class));
         var managerPage = org.mockito.ArgumentCaptor.forClass(Pageable.class);
         verify(workflows).findHistoryAccessible(org.mockito.ArgumentMatchers.eq(MANAGER),
                 org.mockito.ArgumentMatchers.eq(false), org.mockito.ArgumentMatchers.eq(false),
                 org.mockito.ArgumentMatchers.eq(false), org.mockito.ArgumentMatchers.eq(true),
-                any(), any(), any(), managerPage.capture());
+                any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), managerPage.capture());
         assertThat(managerPage.getValue().getPageNumber()).isEqualTo(1);
         assertThat(managerPage.getValue().getPageSize()).isEqualTo(10);
         assertThat(managerPage.getValue().getSort().getOrderFor("createdAt").getDirection())
@@ -985,7 +997,7 @@ void nonManagerCannotReadGroundingEvidence() {
         verify(workflows).findHistoryAccessible(org.mockito.ArgumentMatchers.eq("multi-authority"),
                 org.mockito.ArgumentMatchers.eq(true), org.mockito.ArgumentMatchers.eq(false),
                 org.mockito.ArgumentMatchers.eq(false), org.mockito.ArgumentMatchers.eq(true),
-                any(), any(), any(), any(Pageable.class));
+                any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), any(Pageable.class));
     }
 
     @Test
@@ -1003,31 +1015,31 @@ void nonManagerCannotReadGroundingEvidence() {
                 .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(400));
         verify(workflows, never()).findHistoryAccessible(any(), org.mockito.ArgumentMatchers.anyBoolean(),
                 org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.anyBoolean(),
-                org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any(), any(Pageable.class));
+                org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), any(Pageable.class));
         when(workflows.findHistoryAccessible(any(), org.mockito.ArgumentMatchers.anyBoolean(),
                 org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.anyBoolean(),
-                org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any(), any(Pageable.class)))
-                .thenAnswer(invocation -> Page.empty(invocation.getArgument(8)));
+                org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), any(Pageable.class)))
+                .thenAnswer(invocation -> Page.empty(invocation.getArgument(10)));
         service.historyAccessible(OWNER, Set.of("ROLE_CUSTOM_OWNER", "DOCUMENT_VIEW"), 0, 20);
         verify(workflows).findHistoryAccessible(org.mockito.ArgumentMatchers.eq(OWNER),
                 org.mockito.ArgumentMatchers.eq(true), org.mockito.ArgumentMatchers.eq(false),
                 org.mockito.ArgumentMatchers.eq(false), org.mockito.ArgumentMatchers.eq(false),
-                any(), any(), any(), any(Pageable.class));
+                any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), any(Pageable.class));
     }
 
     @Test
     void administratorDiscoveryUsesTheSamePermissionsAsHistoryReads() {
         when(workflows.findHistoryAccessible(any(), org.mockito.ArgumentMatchers.anyBoolean(),
                 org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.anyBoolean(),
-                org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any(), any(Pageable.class)))
-                .thenAnswer(invocation -> Page.empty(invocation.getArgument(8)));
+                org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), any(Pageable.class)))
+                .thenAnswer(invocation -> Page.empty(invocation.getArgument(10)));
 
         service.historyAccessible("legacy-admin", Set.of("ROLE_ADMIN", "DOCUMENT_APPROVAL_QUEUE_VIEW"), 0, 20);
 
         verify(workflows).findHistoryAccessible(org.mockito.ArgumentMatchers.eq("legacy-admin"),
                 org.mockito.ArgumentMatchers.eq(false), org.mockito.ArgumentMatchers.eq(false),
                 org.mockito.ArgumentMatchers.eq(false), org.mockito.ArgumentMatchers.eq(true),
-                any(), any(), any(), any(Pageable.class));
+                any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), any(Pageable.class));
 
         assertThatThrownBy(() -> service.historyAccessible("admin-no-permission", Set.of("ROLE_ADMIN"), 0, 20))
                 .isInstanceOf(ApiException.class)
@@ -1035,7 +1047,7 @@ void nonManagerCannotReadGroundingEvidence() {
         verify(workflows, never()).findHistoryAccessible(org.mockito.ArgumentMatchers.eq("admin-no-permission"),
                 org.mockito.ArgumentMatchers.anyBoolean(),
                 org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.anyBoolean(),
-                org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any(), any(Pageable.class));
+                org.mockito.ArgumentMatchers.anyBoolean(), any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean(), any(), any(Pageable.class));
     }
      @Test
 void managerCanReadAuditTrailForPendingApprovalWorkflow() {
@@ -1146,6 +1158,50 @@ void managerCanReadAuditTrailForPendingApprovalWorkflow() {
         assertThat(event.getValue().getDocumentVersion()).isEqualTo(3);
         assertThat(event.getValue().getTriggerSource()).isEqualTo("ROLLBACK");
         assertThat(event.getValue().getActorRole()).isEqualTo("MANAGER");
+    }
+
+    private void stubRollback(String actor) throws Exception {
+        DocumentWorkflow workflow = approvedWorkflow();
+        when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
+        when(documents.getDocument(actor, "doc-1")).thenReturn(new ObjectMapper().readTree(
+                "{\"owner_user_id\":\"73\",\"current_version\":2,\"pending_version\":0}"));
+        when(documents.rollbackDocumentVersion(actor, OWNER, "doc-1", 1, "Restore stable version")).thenReturn(
+                new ObjectMapper().readTree(
+                        "{\"number\":3,\"status\":\"proposed\",\"origin\":\"rollback\",\"restored_from\":1}"));
+        when(workflows.saveAndFlush(workflow)).thenReturn(workflow);
+    }
+
+    @Test
+    void theOwningDeveloperAndATechnicalLeadCanStartARollbackWhichStillNeedsStaffReview() throws Exception {
+        stubRollback(OWNER);
+        var byDeveloper = service.rollback(OWNER, Set.of("ROLE_DEVELOPER", "DOCUMENT_UPDATE"), ID, 1,
+                "Restore stable version");
+        assertThat(byDeveloper.status()).isEqualTo(DocumentWorkflowStatus.PENDING_STAFF_REVIEW);
+        var event = ArgumentCaptor.forClass(DocumentWorkflowAudit.class);
+        verify(audit).save(event.capture());
+        assertThat(event.getValue().getActorRole()).isEqualTo("DEVELOPER");
+    }
+
+    @Test
+    void aTechnicalLeadMayStartARollback() throws Exception {
+        stubRollback("lead-1");
+        var byLead = service.rollback("lead-1", Set.of("ROLE_TECHNICAL_LEAD", "DOCUMENT_TECHNICAL_REVIEW"), ID, 1,
+                "Restore stable version");
+        assertThat(byLead.status()).isEqualTo(DocumentWorkflowStatus.PENDING_STAFF_REVIEW);
+    }
+
+    @Test
+    void otherDevelopersAndStaffCannotStartARollback() throws Exception {
+        DocumentWorkflow workflow = approvedWorkflow();
+        when(workflows.lockById(ID)).thenReturn(Optional.of(workflow));
+        assertThatThrownBy(() -> service.rollback("someone-else", Set.of("ROLE_DEVELOPER", "DOCUMENT_UPDATE"), ID,
+                1, "Restore stable version"))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(404));
+        assertThatThrownBy(() -> service.rollback("staff-1", Set.of("ROLE_STAFF", "DOCUMENT_REVIEW"), ID, 1,
+                "Restore stable version"))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> assertThat(((ApiException) error).getStatus().value()).isEqualTo(403));
     }
     @Test
 
