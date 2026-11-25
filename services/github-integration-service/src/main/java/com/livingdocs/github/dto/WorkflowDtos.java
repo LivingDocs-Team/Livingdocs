@@ -69,6 +69,8 @@ public final class WorkflowDtos {
             Instant submittedAt, Instant reviewedAt, Instant decidedAt, long optimisticVersion) { }
 
     public record ContentResponse(String documentId, int version, String content) { }
+    public record PublicationResponse(UUID id, UUID workflowId, String documentId, int version, UUID repositoryId,
+            String branch, String path, String commitSha, Instant publishedAt, String publishedBy) { }
     public record AuditResponse(UUID id, UUID workflowId, String actorUserId, String actorRole, String action, String previousStatus,
             String newStatus, String previousReviewerUserId, String newReviewerUserId,
             String comment, Instant createdAt, String documentId, Integer documentVersion, String triggerSource) { }

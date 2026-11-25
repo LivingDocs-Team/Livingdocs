@@ -131,12 +131,38 @@ class DocumentationGenerationServiceTest {
         assertEquals("failed", job.path("status").asText());
         assertEquals("No documentation generated", job.path("error").asText());
 
+        // A restarted service without any stored record of the job does not claim it for anyone.
         RestClient unusedClient = RestClient.builder().build();
         var restarted = new DocumentationGenerationService(repositorySyncService, unusedClient, unusedClient, relationshipService);
         assertEquals(404, assertThrows(ApiException.class,
                 () -> restarted.getJob(USER_ID, "job-failed")).getStatus().value());
         analyzerServer.verify();
         aiServiceServer.verify();
+    }
+
+    @Test
+    void afterARestartTheOwnerIsReadBackFromTheStoredArtifactAndOthersStayOut() {
+        var artifacts = org.mockito.Mockito.mock(com.livingdocs.github.repository.DocumentationArtifactRepository.class);
+        var artifact = new com.livingdocs.github.entity.DocumentationArtifact();
+        artifact.setOwnerUserId(USER_ID);
+        org.mockito.Mockito.when(artifacts.findByGenerationJobId("job-kept")).thenReturn(java.util.Optional.of(artifact));
+        org.mockito.Mockito.when(artifacts.findByGenerationJobId("job-legacy")).thenReturn(java.util.Optional.empty());
+
+        RestClient.Builder aiBuilder = RestClient.builder();
+        var server = MockRestServiceServer.bindTo(aiBuilder).build();
+        RestClient ai = aiBuilder.baseUrl("http://ai.test").build();
+        server.expect(requestTo("http://ai.test/jobs/job-kept"))
+                .andRespond(withSuccess("{\"id\":\"job-kept\",\"status\":\"completed\"}", MediaType.APPLICATION_JSON));
+        RestClient unusedClient = RestClient.builder().build();
+        var restarted = new DocumentationGenerationService(repositorySyncService, unusedClient, ai, relationshipService);
+        restarted.setArtifacts(artifacts);
+
+        assertEquals(403, assertThrows(ApiException.class,
+                () -> restarted.getJob("another-owner", "job-kept")).getStatus().value());
+        assertEquals("completed", restarted.getJob(USER_ID, "job-kept").path("status").asText());
+        assertEquals(404, assertThrows(ApiException.class,
+                () -> restarted.getJob(USER_ID, "job-legacy")).getStatus().value());
+        server.verify();
     }
 
     @Test

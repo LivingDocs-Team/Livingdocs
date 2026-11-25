@@ -60,6 +60,23 @@ jobs:
       - name: Make Maven Wrapper executable
         run: chmod +x backend/mvnw
 
+      # setup-java caches ~/.m2/repository, not the Maven distribution the wrapper downloads with wget. Cache that
+      # too, and retry the download: a single Maven Central hiccup used to fail the whole job before any test ran.
+      - name: Cache Maven wrapper distribution
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/wrapper
+          key: maven-wrapper-${{ runner.os }}-${{ hashFiles('backend/.mvn/wrapper/maven-wrapper.properties') }}
+
+      - name: Download Maven distribution (retried)
+        run: |
+          for delay in 5 15 30 final; do
+            if ./backend/mvnw --batch-mode --version; then exit 0; fi
+            [ "$delay" = final ] && exit 1
+            echo "Maven distribution download failed, retrying in $delay seconds"
+            sleep "$delay"
+          done
+
       - name: Build and test backend
         env:
           DB_URL: "jdbc:postgresql://localhost:5432/cnpm"

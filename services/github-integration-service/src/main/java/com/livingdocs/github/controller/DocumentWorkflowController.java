@@ -156,6 +156,13 @@ public class DocumentWorkflowController {
         return workflowService.compareVersions(userId, parse(authorities), id, from, to);
     }
 
+    @GetMapping("/document-workflows/{id}/publications")
+    public java.util.List<com.livingdocs.github.dto.WorkflowDtos.PublicationResponse> publications(
+            @RequestHeader(USER_HEADER) String userId,
+            @RequestHeader(AUTHORITIES_HEADER) String authorities, @PathVariable UUID id) {
+        return workflowService.publications(userId, parse(authorities), id);
+    }
+
     @GetMapping("/document-workflows/{id}/history")
     public java.util.List<AuditResponse> history(
             @RequestHeader(USER_HEADER) String userId,

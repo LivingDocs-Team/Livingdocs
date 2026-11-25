@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { apiErrorMessage } from './errorMessages';
 import { formatTime } from './formatters';
 import { githubApi } from './githubApi';
 import Can from './rbac/Can';
@@ -39,8 +40,8 @@ function DelegationList({ title, items, onRevoke, busy }) {
 
 /**
  * Approval Delegation (matrix row #11): a Manager records that another Manager covers their approvals for a
- * period. The record is visible to both Managers and can be revoked. The approval queue is shared by all
- * Managers, so a delegation does not change who may decide a document.
+ * period. The record is visible to both Managers and can be revoked. While it is active the delegator cannot
+ * make final decisions and the delegate's decisions are recorded as covering for them.
  */
 export default function ApprovalDelegation({ userId }) {
   const [state, setState] = useState({ key: '', data: null, error: '' });
@@ -83,7 +84,10 @@ export default function ApprovalDelegation({ userId }) {
       setMessage('Delegation saved.');
       setReload((value) => value + 1);
     } catch (failure) {
-      setError(failure.message || 'Could not save the delegation.');
+      // The Backend checks the delegate itself and answers 400 without a message, so say what is checked.
+      setError(failure.status === 400 && failure.message === apiErrorMessage(undefined, 400)
+        ? 'The delegation was refused: the delegate must be an active Manager who can approve documents (not you), and the end date must be in the future, at most 90 days from now.'
+        : failure.message || 'Could not save the delegation.');
     } finally {
       setBusy(false);
     }
@@ -124,7 +128,7 @@ export default function ApprovalDelegation({ userId }) {
             onChange={(event) => setEndsAt(event.target.value)} />
           <label htmlFor="delegate-reason">Reason (optional)</label>
           <input id="delegate-reason" value={reason} maxLength={500} onChange={(event) => setReason(event.target.value)} />
-          <p className="documentation-hint">A delegation lasts at most 90 days and starts now.</p>
+          <p className="documentation-hint">A delegation lasts at most 90 days and starts now. While it is active you cannot decide documents yourself; revoke it to take over again.</p>
           <button type="submit" disabled={busy || !delegate.trim()}>Delegate approvals</button>
         </form>
       </Can>

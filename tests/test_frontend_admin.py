@@ -196,6 +196,10 @@ def open_admin(page: Page, tab=None, screen="Users, Roles & Permissions"):
 def test_only_administrators_see_the_administration_entry_points(page: Page):
     install_api(page, account=DEVELOPER)
     sign_in(page, DEVELOPER)
+    # Wait for the signed-in shell first: "no such menu entry" is only meaningful once the menu is rendered, and the
+    # route must be requested after sign-in has finished (a hash set while the sign-in is still completing can be
+    # replaced by the post-login navigation, which made this test fail now and then on a slow CI runner).
+    expect(main_menu(page)).to_be_visible()
     for screen, _ in ADMIN_SCREENS:
         expect(menu_link(page, screen)).to_have_count(0)
 

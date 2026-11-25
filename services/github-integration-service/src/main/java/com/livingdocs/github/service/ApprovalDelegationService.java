@@ -14,8 +14,9 @@ import java.util.UUID;
 
 /**
  * A Manager records that another Manager covers their approvals for a period. The record is shown to both
- * Managers and can be revoked; the approval queue itself is shared by all Managers, so a delegation does not
- * change who may decide a document.
+ * Managers and can be revoked. While a delegation is active the delegator is away: they cannot make final
+ * decisions until it ends or is revoked, and the delegate's decisions are recorded as covering for them. The
+ * approval queue itself stays shared by all Managers.
  */
 @Service
 public class ApprovalDelegationService {
@@ -57,12 +58,43 @@ public class ApprovalDelegationService {
                 jdbc.query(columns + "WHERE delegate_user_id = ? ORDER BY created_at DESC LIMIT 50", mapper(now), actor));
     }
 
+    /** The delegation under which the Manager is currently away, or null. */
+    @Transactional(readOnly = true)
+    public Delegation activeOutgoing(String actor) {
+        Instant now = Instant.now();
+        List<Delegation> found = jdbc.query("SELECT id, delegator_user_id, delegate_user_id, reason, starts_at, ends_at,"
+                + " revoked_at, created_at FROM approval_delegations WHERE delegator_user_id = ? AND revoked_at IS NULL"
+                + " AND starts_at <= ? AND ends_at > ? ORDER BY ends_at DESC LIMIT 1", mapper(now), actor,
+                Timestamp.from(now), Timestamp.from(now));
+        return found.isEmpty() ? null : found.get(0);
+    }
+
+    /** The Managers whose approvals this Manager currently covers. */
+    @Transactional(readOnly = true)
+    public List<String> covering(String actor) {
+        Instant now = Instant.now();
+        return jdbc.queryForList("SELECT DISTINCT delegator_user_id FROM approval_delegations WHERE delegate_user_id = ?"
+                + " AND revoked_at IS NULL AND starts_at <= ? AND ends_at > ? ORDER BY delegator_user_id", String.class,
+                actor, Timestamp.from(now), Timestamp.from(now));
+    }
+
+    /**
+     * @param verifiedDelegate the Manager id the Backend confirmed (an active Manager who can approve); a request
+     *        that does not carry it, or names someone else, is refused.
+     */
     @Transactional
-    public Delegation create(String actor, CreateRequest request) {
+    public Delegation create(String actor, CreateRequest request, String verifiedDelegate) {
         if (request == null || request.delegateUserId() == null || request.delegateUserId().isBlank()) {
             throw ApiException.badRequest("Choose the Manager who covers your approvals.");
         }
         String delegate = request.delegateUserId().trim();
+        if (verifiedDelegate == null || !verifiedDelegate.equals(delegate)) {
+            throw ApiException.badRequest("The delegate must be an active Manager.");
+        }
+        if (activeOutgoing(delegate) != null) {
+            throw new ApiException(org.springframework.http.HttpStatus.CONFLICT, "DELEGATE_UNAVAILABLE",
+                    "That Manager has delegated their own approvals and cannot cover yours.");
+        }
         if (delegate.length() > 100 || delegate.equals(actor)) {
             throw ApiException.badRequest("Choose a different Manager than yourself.");
         }

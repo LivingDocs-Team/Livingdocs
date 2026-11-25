@@ -3,10 +3,11 @@
 The API is mocked with Playwright route interception, like the other browser tests.
 """
 import json
+from urllib.parse import urlsplit
 
 from playwright.sync_api import Page, expect
 
-from rbac_nav import menu_link, open_screen
+from rbac_nav import FRONTEND, menu_link, open_screen
 from test_rbac_screen_flow import Api, ends_with, start
 from test_role_screens import REPOSITORY_ID, WORKFLOW_ID, event, page_of, workflow
 
@@ -24,7 +25,7 @@ class GovernanceApi(Api):
 
     def handle(self, route):
         request = route.request
-        path = request.url.split("?", 1)[0].split("localhost:3000", 1)[-1].split("127.0.0.1:3000", 1)[-1]
+        path = urlsplit(request.url).path
         key = (request.method, path)
         if key in self.writes:
             body = json.loads(request.post_data) if request.post_data else None
@@ -387,3 +388,117 @@ def test_manager_and_technical_lead_menus_have_no_placeholder_screens(page: Page
         expect(page.locator("nav[aria-label='Main menu'] a").first).to_be_visible()
         expect(page.locator("nav[aria-label='Main menu'] a[data-status='placeholder']")).to_have_count(0)
         expect(menu_link(page, "Profile & Settings")).to_be_visible()
+
+
+# ---------- Rollback by Developer and Technical Lead, Change Log filters ----------
+
+RB_WORKFLOW = "55555555-5555-4555-8555-555555555555"
+RB_VERSIONS = [
+    {"number": 0, "status": "superseded", "origin": "EDIT", "created_at": "2026-11-09T08:00:00Z", "created_by": "42"},
+    {"number": 1, "status": "accepted", "origin": "GENERATED", "created_at": "2026-11-10T08:00:00Z", "created_by": "42"},
+    {"number": 2, "status": "accepted", "origin": "DRIFT_UPDATE", "created_at": "2026-11-20T08:00:00Z", "created_by": "ai"},
+]
+
+
+def approved_workflow():
+    return {"id": RB_WORKFLOW, "documentId": "doc-rb", "documentTitle": "Shop guide", "ownerUserId": "42",
+            "status": "APPROVED", "submittedDocumentVersion": 2, "reviewerUserId": None, "staffReviewResult": "PASSED",
+            "staffComment": None, "managerUserId": "9", "managerDecision": "APPROVED", "managerComment": None,
+            "createdAt": "2026-11-20T08:00:00Z", "updatedAt": "2026-11-20T08:00:00Z", "submittedAt": None,
+            "reviewedAt": None, "decidedAt": None, "optimisticVersion": 3}
+
+
+def rollback_routes():
+    return {
+        "/api/document-workflows/history-accessible": {"content": [approved_workflow()], "page": 0, "size": 20,
+                                                       "totalElements": 1, "totalPages": 1, "first": True, "last": True},
+        f"/api/document-workflows/{RB_WORKFLOW}/versions": RB_VERSIONS,
+        f"/api/document-workflows/{RB_WORKFLOW}/history": [],
+    }
+
+
+def rollback_write(sent):
+    def post(body):
+        sent.append(body)
+        return 200, {**approved_workflow(), "status": "PENDING_STAFF_REVIEW", "submittedDocumentVersion": 3}
+    return {("POST", f"/api/document-workflows/{RB_WORKFLOW}/rollback"): post}
+
+
+def test_developer_can_roll_back_from_the_change_log_and_it_goes_to_staff_review(page: Page):
+    sent = []
+    api = GovernanceApi("DEVELOPER", {"/api/workspaces/ws-42/repositories": [], **rollback_routes()}, rollback_write(sent))
+    start(page, api)
+    open_screen(page, "Change Log")
+    expect(page.get_by_role("button", name="Roll back to version 2")).to_have_count(0)  # already approved
+    # a version that was superseded before anyone accepted it cannot be restored: no button is offered for it
+    expect(page.get_by_role("button", name="Roll back to version 0")).to_have_count(0)
+    page.get_by_role("button", name="Roll back to version 1").click()
+    page.get_by_label("Why roll back to version 1?").fill("Version 2 documented the wrong endpoint")
+    page.get_by_role("button", name="Request rollback").click()
+    expect(page.get_by_text("Version 1 was restored as a new proposal and sent to Staff review.")).to_be_visible()
+    assert sent == [{"sourceVersion": 1, "reason": "Version 2 documented the wrong endpoint"}]
+
+
+def test_rollback_needs_a_reason_and_shows_a_backend_refusal(page: Page):
+    def refuse(body):
+        return 403, {"message": "The authenticated primary role cannot roll back this document."}
+
+    api = GovernanceApi("DEVELOPER", {"/api/workspaces/ws-42/repositories": [], **rollback_routes()},
+                        {("POST", f"/api/document-workflows/{RB_WORKFLOW}/rollback"): refuse})
+    start(page, api)
+    open_screen(page, "Change Log")
+    page.get_by_role("button", name="Roll back to version 1").click()
+    page.get_by_role("button", name="Request rollback").click()
+    expect(page.get_by_role("alert")).to_have_text("A rollback reason is required.")
+    page.get_by_label("Why roll back to version 1?").fill("Because")
+    page.get_by_role("button", name="Request rollback").click()
+    expect(page.get_by_role("alert")).to_contain_text("cannot roll back this document")
+
+
+def test_technical_lead_can_roll_back_from_the_document_rollback_screen(page: Page):
+    sent = []
+    api = technical_lead(rollback_routes(), rollback_write(sent))
+    start(page, api)
+    open_screen(page, "Document Rollback")
+    page.get_by_role("button", name="Roll back to version 1").click()
+    page.get_by_label("Why roll back to version 1?").fill("Restore the reviewed text")
+    page.get_by_role("button", name="Request rollback").click()
+    expect(page.get_by_text("sent to Staff review")).to_be_visible()
+    assert sent == [{"sourceVersion": 1, "reason": "Restore the reviewed text"}]
+
+
+def test_staff_never_sees_a_rollback_button(page: Page):
+    api = GovernanceApi("STAFF", rollback_routes())
+    start(page, api)
+    page.goto(f"{FRONTEND}/#/review/queue/review-history")
+    expect(page.get_by_role("button", name="Roll back to version 1")).to_have_count(0)
+
+
+def test_change_log_can_be_filtered_by_source_and_date(page: Page):
+    api = GovernanceApi("DEVELOPER", {"/api/workspaces/ws-42/repositories": [], **rollback_routes()})
+    start(page, api)
+    open_screen(page, "Change Log")
+    entries = page.locator(".changelog-entry h3")
+    expect(entries).to_have_count(3)
+    page.get_by_label("Source").select_option("GENERATED")
+    expect(entries).to_have_count(1)
+    expect(entries.first).to_contain_text("Version 1")
+    page.get_by_label("Source").select_option("")
+    page.get_by_label("From").fill("2026-11-15")
+    expect(entries).to_have_count(1)
+    expect(entries.first).to_contain_text("Version 2")
+    page.get_by_label("To").fill("2026-11-16")
+    expect(page.get_by_text("No version matches these filters.")).to_be_visible()
+
+
+def test_delegation_refusal_explains_what_is_checked(page: Page):
+    def refuse(body):
+        return 400, {"timestamp": "2026-11-24T00:00:00Z", "status": 400, "error": "Bad Request", "path": "/api/approval/delegations"}
+
+    api = manager({"/api/approval/delegations": {"outgoing": [], "incoming": []}},
+                  {("POST", "/api/approval/delegations"): refuse})
+    start(page, api)
+    open_screen(page, "Approval Delegation")
+    page.get_by_label("Manager user ID").fill("4")
+    page.get_by_role("button", name="Delegate approvals").click()
+    expect(page.get_by_role("alert")).to_contain_text("the delegate must be an active Manager")

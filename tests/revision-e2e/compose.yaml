@@ -35,7 +35,28 @@ services:
       - maven-cache:/root/.m2
     environment:
       LIVINGDOCS_E2E_AI_URL: http://ai:8001
-    command: ["mvn", "-B", "-Dtest=RevisionWorkflowE2ETest", "-Dsurefire.failIfNoSpecifiedTests=true", "test"]
+    # Same bounded retry as the service Dockerfiles: only an HTTP 429 from Maven Central (dependency download on a
+    # shared CI runner) is retried; a test or compilation failure fails at once.
+    command:
+      - sh
+      - -c
+      - |
+        set -u
+        log="$$(mktemp)"
+        for delay in 5 10 20 final; do
+          if mvn -B -Dtest=RevisionWorkflowE2ETest -Dsurefire.failIfNoSpecifiedTests=true test >"$$log" 2>&1; then
+            cat "$$log"
+            exit 0
+          else
+            status=$$?
+          fi
+          cat "$$log"
+          if [ "$$delay" = final ] || ! grep -Eq 'from/to central \(https://repo\.maven\.apache\.org/maven2/?\).*status code: 429([, ]|$$)' "$$log"; then
+            exit "$$status"
+          fi
+          echo "Maven Central HTTP 429, retrying in $$delay seconds"
+          sleep "$$delay"
+        done
     depends_on:
       postgres:
         condition: service_healthy
